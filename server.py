@@ -6,7 +6,7 @@ import openai  # Библиотека OpenAI
 app = Flask(__name__)
 
 # Настройте API-ключ OpenAI
-openai.api_key = "ВАШ_КЛЮЧ_API"
+openai.api_key = "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"
 
 # Существующие маршруты
 clients = {}
