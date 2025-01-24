@@ -1,68 +1,63 @@
 from flask import Flask, request, jsonify
-import random
-import string
-import os
 import openai
-
-# Настройка API-ключа из переменной окружения
-openai.api_key = os.getenv("OPENAI_API_KEY")
+import os
 
 app = Flask(__name__)
 
-# Словарь для хранения данных клиентов
+# Настройка API-ключа OpenAI из переменной окружения
+openai.api_key = os.getenv("OPENAI_API_KEY")
+
+# Существующие клиенты
 clients = {}
 
+# Функция для генерации уникального кода
 def generate_unique_code():
-    """Генерация уникального кода для клиента."""
+    import random
+    import string
     random_digits = ''.join(random.choices(string.digits, k=7))
     return f"CAEC{random_digits}"
 
 @app.route('/register-client', methods=['POST'])
 def register_client():
-    """Маршрут для регистрации клиента."""
-    try:
-        data = request.json
-        unique_code = generate_unique_code()
-        clients[unique_code] = {
-            'name': data['name'],
-            'phone': data['phone'],
-            'email': data['email']
-        }
-        return jsonify({'uniqueCode': unique_code}), 200
-    except Exception as e:
-        return jsonify({'error': str(e)}), 400
+    data = request.json
+    unique_code = generate_unique_code()
+    clients[unique_code] = {
+        "name": data['name'],
+        "phone": data['phone'],
+        "email": data['email']
+    }
+    return jsonify({"uniqueCode": unique_code})
 
 @app.route('/verify-code', methods=['POST'])
 def verify_code():
-    """Маршрут для проверки уникального кода клиента."""
-    try:
-        data = request.json
-        code = data['code']
-        if code in clients:
-            return jsonify({'status': 'success', 'clientData': clients[code]}), 200
-        else:
-            return jsonify({'status': 'error', 'message': 'Invalid code'}), 404
-    except Exception as e:
-        return jsonify({'error': str(e)}), 400
+    data = request.json
+    code = data['code']
+    if code in clients:
+        return jsonify({"valid": True, "clientData": clients[code]})
+    else:
+        return jsonify({"valid": False})
 
 @app.route('/chat', methods=['POST'])
 def chat():
-    """Маршрут для общения с OpenAI."""
-    try:
-        data = request.json
-        user_message = data.get('message', '')
+    data = request.json
+    user_message = data.get('message', '')
 
-        # Вызов OpenAI API
-        response = openai.Completion.create(
-            engine="text-davinci-003",
-            prompt=user_message,
-            max_tokens=150
+    try:
+        # Вызов модели OpenAI
+        response = openai.ChatCompletion.create(
+            model="gpt-3.5-turbo",  # Используем актуальную модель
+            messages=[
+                {"role": "system", "content": "You are a helpful assistant."},
+                {"role": "user", "content": user_message},
+            ]
         )
 
-        reply = response.choices[0].text.strip()
-        return jsonify({'reply': reply}), 200
+        # Извлечение ответа модели
+        assistant_reply = response['choices'][0]['message']['content']
+        return jsonify({"response": assistant_reply})
+
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        return jsonify({"error": str(e)})
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000)
