@@ -1,64 +1,68 @@
 from flask import Flask, request, jsonify
 import random
 import string
-import openai  # Библиотека OpenAI
+import os
+import openai
+
+# Настройка API-ключа из переменной окружения
+openai.api_key = os.getenv("OPENAI_API_KEY")
 
 app = Flask(__name__)
 
-# Настройте API-ключ OpenAI
-import os
-openai.api_key = os.getenv("")
-
-# Существующие маршруты
+# Словарь для хранения данных клиентов
 clients = {}
 
 def generate_unique_code():
+    """Генерация уникального кода для клиента."""
     random_digits = ''.join(random.choices(string.digits, k=7))
     return f"CAEC{random_digits}"
 
 @app.route('/register-client', methods=['POST'])
 def register_client():
-    data = request.json
-    unique_code = generate_unique_code()
-    clients[unique_code] = {
-        "name": data['name'],
-        "phone": data['phone'],
-        "email": data['email']
-    }
-    return jsonify({"uniqueCode": unique_code})
+    """Маршрут для регистрации клиента."""
+    try:
+        data = request.json
+        unique_code = generate_unique_code()
+        clients[unique_code] = {
+            'name': data['name'],
+            'phone': data['phone'],
+            'email': data['email']
+        }
+        return jsonify({'uniqueCode': unique_code}), 200
+    except Exception as e:
+        return jsonify({'error': str(e)}), 400
 
 @app.route('/verify-code', methods=['POST'])
 def verify_code():
-    data = request.json
-    code = data['code']
-    if code in clients:
-        return jsonify(clients[code])
-    else:
-        return jsonify({"error": "Invalid code"}), 404
-
-# Новый маршрут для чата с AI
-@app.route('/chat', methods=['POST'])
-def chat_with_ai():
-    data = request.json
-    user_message = data.get("message")
-
-    if not user_message:
-        return jsonify({"error": "Message is required"}), 400
-
+    """Маршрут для проверки уникального кода клиента."""
     try:
-        # Запрос к OpenAI
-        response = openai.ChatCompletion.create(
-            model="gpt-3.5-turbo",
-            messages=[
-                {"role": "system", "content": "Вы — помощник, который помогает клиентам."},
-                {"role": "user", "content": user_message}
-            ]
-        )
-        ai_response = response['choices'][0]['message']['content']
-        return jsonify({"response": ai_response})
+        data = request.json
+        code = data['code']
+        if code in clients:
+            return jsonify({'status': 'success', 'clientData': clients[code]}), 200
+        else:
+            return jsonify({'status': 'error', 'message': 'Invalid code'}), 404
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        return jsonify({'error': str(e)}), 400
 
-# Запуск приложения
+@app.route('/chat', methods=['POST'])
+def chat():
+    """Маршрут для общения с OpenAI."""
+    try:
+        data = request.json
+        user_message = data.get('message', '')
+
+        # Вызов OpenAI API
+        response = openai.Completion.create(
+            engine="text-davinci-003",
+            prompt=user_message,
+            max_tokens=150
+        )
+
+        reply = response.choices[0].text.strip()
+        return jsonify({'reply': reply}), 200
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000)
