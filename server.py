@@ -92,7 +92,7 @@ def chat():
         response = openai.ChatCompletion.create(
             model="gpt-3.5-turbo",
             messages=[
-                {"role": "system", "content": "You are a helpful assistant."},
+                {"role": "assistant", "content": "Вы дружелюбный помощник."},
                 {"role": "user", "content": user_message}
             ],
             max_tokens=150
