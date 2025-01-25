@@ -22,13 +22,30 @@ def register_client():
     """Маршрут для регистрации клиента."""
     try:
         data = request.json
+        email = data.get('email')
+        phone = data.get('phone')
+
+        # Проверка, существует ли уже клиент с такими данными
+        for code, client in clients.items():
+            if client['email'] == email or client['phone'] == phone:
+                return jsonify({
+                    'uniqueCode': code,
+                    'message': f"Добро пожаловать обратно, {client['name']}! Ваш код: {code}."
+                }), 200
+
+        # Генерация нового кода
         unique_code = generate_unique_code()
         clients[unique_code] = {
             'name': data['name'],
-            'phone': data['phone'],
-            'email': data['email']
+            'phone': phone,
+            'email': email
         }
-        return jsonify({'uniqueCode': unique_code}), 200
+
+        # Отправка приветственного сообщения
+        return jsonify({
+            'uniqueCode': unique_code,
+            'message': f"Регистрация успешна! Ваш код: {unique_code}. Пожалуйста, сохраните его."
+        }), 200
     except Exception as e:
         return jsonify({'error': str(e)}), 400
 
@@ -37,11 +54,15 @@ def verify_code():
     """Маршрут для проверки уникального кода клиента."""
     try:
         data = request.json
-        code = data['code']
+        code = data.get('code')
         if code in clients:
-            return jsonify({'status': 'success', 'clientData': clients[code]}), 200
+            return jsonify({
+                'status': 'success',
+                'clientData': clients[code],
+                'message': f"Добро пожаловать, {clients[code]['name']}!"
+            }), 200
         else:
-            return jsonify({'status': 'error', 'message': 'Invalid code'}), 404
+            return jsonify({'status': 'error', 'message': 'Неверный код.'}), 404
     except Exception as e:
         return jsonify({'error': str(e)}), 400
 
@@ -52,14 +73,19 @@ def chat():
         data = request.json
         user_message = data.get('message', '')
 
-        # Вызов OpenAI API
-        response = openai.Completion.create(
-            engine="text-davinci-003",
-            prompt=user_message,
-            max_tokens=150
+        if not user_message.strip():
+            return jsonify({'error': 'Сообщение не может быть пустым.'}), 400
+
+        # Вызов OpenAI API с новой моделью
+        response = openai.ChatCompletion.create(
+            model="gpt-3.5-turbo",
+            messages=[
+                {"role": "system", "content": "Вы AI-ассистент, готовый помочь."},
+                {"role": "user", "content": user_message}
+            ]
         )
 
-        reply = response.choices[0].text.strip()
+        reply = response['choices'][0]['message']['content'].strip()
         return jsonify({'reply': reply}), 200
     except Exception as e:
         return jsonify({'error': str(e)}), 500
