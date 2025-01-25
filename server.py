@@ -86,14 +86,17 @@ def chat():
         data = request.json
         user_message = data.get('message', '')
 
-        # Вызов OpenAI API
-        response = openai.Completion.create(
-            engine="gpt-3.5-turbo",
-            prompt=user_message,
+        # Вызов OpenAI API через v1/chat/completions
+        response = openai.ChatCompletion.create(
+            model="gpt-3.5-turbo",
+            messages=[
+                {"role": "system", "content": "You are a helpful assistant."},
+                {"role": "user", "content": user_message}
+            ],
             max_tokens=150
         )
 
-        reply = response.choices[0].text.strip()
+        reply = response['choices'][0]['message']['content'].strip()
         return jsonify({'reply': reply}), 200
     except Exception as e:
         return jsonify({'error': str(e)}), 500
