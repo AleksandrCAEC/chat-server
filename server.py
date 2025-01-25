@@ -30,7 +30,7 @@ def send_email(email, unique_code):
         smtp_password = os.getenv("SMTP_PASSWORD")
 
         msg = MIMEText(f"Ваш код регистрации: {unique_code}. Пожалуйста, сохраните его для дальнейшего использования.")
-        msg['Subject'] = "Ваш код регистрации"
+        msg['Subject'] = "Код регистрации"
         msg['From'] = smtp_user
         msg['To'] = email
 
@@ -52,7 +52,8 @@ def register_client():
         # Проверка, существует ли клиент с таким email или телефоном
         for code, client_data in clients.items():
             if client_data['email'] == email or client_data['phone'] == phone:
-                return jsonify({'uniqueCode': code, 'message': 'Код уже существует. Пожалуйста, используйте его.'}), 200
+                name = client_data['name']
+                return jsonify({'uniqueCode': code, 'message': f'Добро пожаловать обратно, {name}! Ваш код: {code}.'}), 200
 
         unique_code = generate_unique_code()
         clients[unique_code] = {
@@ -62,7 +63,7 @@ def register_client():
         }
 
         send_email(email, unique_code)
-        return jsonify({'uniqueCode': unique_code}), 200
+        return jsonify({'uniqueCode': unique_code, 'message': f'Добро пожаловать, {data["name"]}! Ваш код: {unique_code}.'}), 200
     except Exception as e:
         return jsonify({'error': str(e)}), 400
 
@@ -73,7 +74,8 @@ def verify_code():
         data = request.json
         code = data['code']
         if code in clients:
-            return jsonify({'status': 'success', 'clientData': clients[code]}), 200
+            name = clients[code]['name']
+            return jsonify({'status': 'success', 'clientData': clients[code], 'message': f'Добро пожаловать обратно, {name}!'}), 200
         else:
             return jsonify({'status': 'error', 'message': 'Неверный код'}), 404
     except Exception as e:
@@ -90,7 +92,7 @@ def chat():
         response = openai.ChatCompletion.create(
             model="gpt-3.5-turbo",
             messages=[
-                {"role": "assistant", "content": "Привет! Чем я могу помочь?"},
+                {"role": "system", "content": "You are a helpful assistant."},
                 {"role": "user", "content": user_message}
             ],
             max_tokens=150
