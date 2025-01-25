@@ -21,25 +21,25 @@ def generate_unique_code():
     random_digits = ''.join(random.choices(string.digits, k=7))
     return f"CAEC{random_digits}"
 
-def send_email(email, unique_code):
-    """Отправка email с кодом регистрации."""
+def send_email(recipient, subject, body):
+    """Функция для отправки email."""
     try:
         smtp_server = os.getenv("SMTP_SERVER")
         smtp_port = int(os.getenv("SMTP_PORT", 587))
         smtp_user = os.getenv("SMTP_USER")
         smtp_password = os.getenv("SMTP_PASSWORD")
 
-        msg = MIMEText(f"Ваш код регистрации: {unique_code}. Пожалуйста, сохраните его для дальнейшего использования.")
-        msg['Subject'] = "Код регистрации"
+        msg = MIMEText(body)
+        msg['Subject'] = subject
         msg['From'] = smtp_user
-        msg['To'] = email
+        msg['To'] = recipient
 
         with smtplib.SMTP(smtp_server, smtp_port) as server:
             server.starttls()
             server.login(smtp_user, smtp_password)
-            server.sendmail(smtp_user, email, msg.as_string())
+            server.sendmail(smtp_user, recipient, msg.as_string())
     except Exception as e:
-        print(f"Ошибка при отправке email: {e}")
+        print(f"Ошибка при отправке email на {recipient}: {e}")
 
 @app.route('/register-client', methods=['POST'])
 def register_client():
@@ -55,6 +55,7 @@ def register_client():
                 name = client_data['name']
                 return jsonify({'uniqueCode': code, 'message': f'Добро пожаловать обратно, {name}! Ваш код: {code}.'}), 200
 
+        # Если клиента нет, генерируем новый код
         unique_code = generate_unique_code()
         clients[unique_code] = {
             'name': data['name'],
@@ -62,7 +63,16 @@ def register_client():
             'email': email
         }
 
-        send_email(email, unique_code)
+        # Отправка письма пользователю
+        user_subject = "Добро пожаловать в CAEC"
+        user_body = f"Здравствуйте, {data['name']}!\n\nВаш код регистрации: {unique_code}.\nПожалуйста, сохраните его для дальнейшего использования.\n\nС уважением, команда CAEC."
+        send_email(email, user_subject, user_body)
+
+        # Отправка письма администратору
+        admin_subject = "Новый зарегистрированный пользователь"
+        admin_body = f"Новый пользователь зарегистрирован:\n\nИмя: {data['name']}\nТелефон: {phone}\nEmail: {email}\nКод регистрации: {unique_code}"
+        send_email("office@caec.bz", admin_subject, admin_body)
+
         return jsonify({'uniqueCode': unique_code, 'message': f'Добро пожаловать, {data["name"]}! Ваш код: {unique_code}.'}), 200
     except Exception as e:
         return jsonify({'error': str(e)}), 400
@@ -92,7 +102,7 @@ def chat():
         response = openai.ChatCompletion.create(
             model="gpt-3.5-turbo",
             messages=[
-                {"role": "assistant", "content": "Вы дружелюбный помощник."},
+                {"role": "assistant", "content": "Здравствуйте! Чем могу помочь?"},
                 {"role": "user", "content": user_message}
             ],
             max_tokens=150
