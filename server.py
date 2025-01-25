@@ -4,8 +4,6 @@ import random
 import string
 import os
 import openai
-import smtplib
-from email.mime.text import MIMEText
 import requests
 
 # Создание экземпляра приложения Flask
@@ -36,6 +34,7 @@ def send_telegram_notification(message):
     try:
         response = requests.post(url, json=payload)
         response.raise_for_status()
+        print("Уведомление в Telegram отправлено.")
     except requests.exceptions.RequestException as e:
         print(f"Ошибка при отправке уведомления в Telegram: {e}")
 
@@ -51,7 +50,11 @@ def register_client():
         for code, client_data in clients.items():
             if client_data['email'] == email or client_data['phone'] == phone:
                 name = client_data['name']
-                return jsonify({'uniqueCode': code, 'message': f'Добро пожаловать обратно, {name}! Ваш код: {code}.'}), 200
+                return jsonify({
+                    'uniqueCode': code,
+                    'message': f'Добро пожаловать обратно, {name}! Ваш код: {code}.',
+                    'telegramSuggestion': 'Вы можете продолжить общение в Telegram: @ВашБот'
+                }), 200
 
         # Генерация уникального кода для нового клиента
         unique_code = generate_unique_code()
@@ -66,7 +69,11 @@ def register_client():
             f"Новый пользователь зарегистрирован:\nИмя: {data['name']}\nEmail: {email}\nТелефон: {phone}\nКод: {unique_code}"
         )
 
-        return jsonify({'uniqueCode': unique_code, 'message': f'Добро пожаловать, {data["name"]}! Ваш код: {unique_code}.'}), 200
+        return jsonify({
+            'uniqueCode': unique_code,
+            'message': f'Добро пожаловать, {data["name"]}! Ваш код: {unique_code}.',
+            'telegramSuggestion': 'Вы можете продолжить общение в Telegram: @ВашБот'
+        }), 200
     except Exception as e:
         return jsonify({'error': str(e)}), 400
 
