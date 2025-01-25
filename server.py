@@ -12,6 +12,10 @@ openai.api_key = os.getenv("OPENAI_API_KEY")
 # Telegram Bot Token
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 
+# Инициализация Flask
+app = Flask(__name__)
+CORS(app)
+
 # Хранилище пользователей
 clients = {}
 
@@ -59,7 +63,7 @@ def register_client():
 
         # Отправка инструкции в Telegram
         send_message_to_telegram(
-            chat_id=TELEGRAM_CHAT_ID,
+            chat_id="8074527842",
             message=(
                 f"📢 Новый зарегистрированный пользователь:\n"
                 f"Имя: {data['name']}\nТелефон: {phone}\nEmail: {email}\nКод: {unique_code}\n"
