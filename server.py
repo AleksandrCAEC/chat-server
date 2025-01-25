@@ -30,7 +30,7 @@ def send_email(email, unique_code):
         smtp_password = os.getenv("SMTP_PASSWORD")
 
         msg = MIMEText(f"Ваш код регистрации: {unique_code}. Пожалуйста, сохраните его для дальнейшего использования.")
-        msg['Subject'] = "Код регистрации"
+        msg['Subject'] = "Ваш код регистрации"
         msg['From'] = smtp_user
         msg['To'] = email
 
@@ -90,7 +90,7 @@ def chat():
         response = openai.ChatCompletion.create(
             model="gpt-3.5-turbo",
             messages=[
-                {"role": "system", "content": "You are a helpful assistant."},
+                {"role": "assistant", "content": "Привет! Чем я могу помочь?"},
                 {"role": "user", "content": user_message}
             ],
             max_tokens=150
