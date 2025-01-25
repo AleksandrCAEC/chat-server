@@ -9,48 +9,46 @@ import requests
 # Настройка API-ключа OpenAI
 openai.api_key = os.getenv("OPENAI_API_KEY")
 
-app = Flask(__name__)
-CORS(app)
-
-# Словарь для хранения данных клиентов
-clients = {}
-
-# Telegram Bot Token и Chat ID
+# Telegram Bot Token
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-TELEGRAM_CHAT_ID = "8074527842"
+
+# Хранилище пользователей
+clients = {}
 
 def generate_unique_code():
     """Генерация уникального кода для клиента."""
     random_digits = ''.join(random.choices(string.digits, k=7))
     return f"CAEC{random_digits}"
 
-def send_telegram_notification(message):
-    """Отправка уведомления в Telegram."""
+def send_message_to_telegram(chat_id, message):
+    """Отправка сообщения пользователю через Telegram."""
     try:
         url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
         payload = {
-            "chat_id": TELEGRAM_CHAT_ID,
+            "chat_id": chat_id,
             "text": message
         }
         response = requests.post(url, json=payload)
         if response.status_code != 200:
             print(f"Ошибка отправки в Telegram: {response.text}")
     except Exception as e:
-        print(f"Ошибка при отправке уведомления в Telegram: {e}")
+        print(f"Ошибка при отправке сообщения в Telegram: {e}")
 
 @app.route('/register-client', methods=['POST'])
 def register_client():
-    """Маршрут для регистрации клиента."""
+    """Регистрация клиента через веб-форму."""
     try:
         data = request.json
         email = data['email']
         phone = data['phone']
 
-        # Проверка, существует ли клиент с таким email или телефоном
+        # Проверка, существует ли пользователь
         for code, client_data in clients.items():
             if client_data['email'] == email or client_data['phone'] == phone:
-                name = client_data['name']
-                return jsonify({'uniqueCode': code, 'message': f'Добро пожаловать обратно, {name}! Ваш код: {code}.'}), 200
+                return jsonify({
+                    'uniqueCode': code,
+                    'message': f'Добро пожаловать обратно, {client_data["name"]}! Ваш код: {code}.\nДля общения с ассистентом перейдите: https://t.me/<ваш_бот_username>'
+                }), 200
 
         unique_code = generate_unique_code()
         clients[unique_code] = {
@@ -59,53 +57,62 @@ def register_client():
             'email': email
         }
 
-        # Уведомление в Telegram
-        send_telegram_notification(
-            f"📢 Новый зарегистрированный пользователь:\n"
-            f"Имя: {data['name']}\n"
-            f"Телефон: {phone}\n"
-            f"Email: {email}\n"
-            f"Код: {unique_code}"
+        # Отправка инструкции в Telegram
+        send_message_to_telegram(
+            chat_id=TELEGRAM_CHAT_ID,
+            message=(
+                f"📢 Новый зарегистрированный пользователь:\n"
+                f"Имя: {data['name']}\nТелефон: {phone}\nEmail: {email}\nКод: {unique_code}\n"
+                f"Попросите пользователя перейти к вашему боту: https://t.me/<ваш_бот_username>"
+            )
         )
 
-        return jsonify({'uniqueCode': unique_code, 'message': f'Добро пожаловать, {data["name"]}! Ваш код: {unique_code}.'}), 200
+        return jsonify({
+            'uniqueCode': unique_code,
+            'message': f'Добро пожаловать, {data["name"]}! Ваш код: {unique_code}.\nДля общения с ассистентом перейдите: https://t.me/<ваш_бот_username>'
+        }), 200
     except Exception as e:
         return jsonify({'error': str(e)}), 400
 
-@app.route('/verify-code', methods=['POST'])
-def verify_code():
-    """Маршрут для проверки уникального кода клиента."""
+@app.route('/webhook', methods=['POST'])
+def telegram_webhook():
+    """Обработка сообщений, поступающих от Telegram."""
     try:
         data = request.json
-        code = data['code']
-        if code in clients:
-            name = clients[code]['name']
-            return jsonify({'status': 'success', 'clientData': clients[code], 'message': f'Добро пожаловать обратно, {name}!'}), 200
-        else:
-            return jsonify({'status': 'error', 'message': 'Неверный код'}), 404
-    except Exception as e:
-        return jsonify({'error': str(e)}), 400
+        message = data.get('message', {})
+        chat_id = message.get('chat', {}).get('id')
+        text = message.get('text')
 
-@app.route('/chat', methods=['POST'])
-def chat():
-    """Маршрут для общения с OpenAI."""
-    try:
-        data = request.json
-        user_message = data.get('message', '')
+        if not chat_id or not text:
+            return jsonify({'status': 'ignored'}), 200
 
-        # Вызов OpenAI API через v1/chat/completions
+        # Если пользователь новый, запросить код
+        if chat_id not in clients:
+            send_message_to_telegram(chat_id, "Добро пожаловать! Пожалуйста, отправьте ваш уникальный код для идентификации.")
+            return jsonify({'status': 'ok'}), 200
+
+        # Получение уникального кода
+        if text.startswith("CAEC"):
+            if text in clients:
+                send_message_to_telegram(chat_id, f"Спасибо! Мы вас узнали: {clients[text]['name']}. Чем могу помочь?")
+            else:
+                send_message_to_telegram(chat_id, "Извините, код не найден. Пожалуйста, проверьте его и попробуйте снова.")
+            return jsonify({'status': 'ok'}), 200
+
+        # Общение через OpenAI
         response = openai.ChatCompletion.create(
             model="gpt-3.5-turbo",
             messages=[
                 {"role": "assistant", "content": "Здравствуйте! Чем могу помочь?"},
-                {"role": "user", "content": user_message}
+                {"role": "user", "content": text}
             ],
             max_tokens=150
         )
-
         reply = response['choices'][0]['message']['content'].strip()
-        return jsonify({'reply': reply}), 200
+        send_message_to_telegram(chat_id, reply)
+        return jsonify({'status': 'ok'}), 200
     except Exception as e:
+        print(f"Ошибка обработки вебхука: {e}")
         return jsonify({'error': str(e)}), 500
 
 if __name__ == '__main__':
