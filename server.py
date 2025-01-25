@@ -16,7 +16,7 @@ CORS(app)
 clients = {}
 
 # Telegram Bot Token и Chat ID
-TELEGRAM_BOT_TOKEN = "7516690787:AAEemBmimlmIqp37wr4ct10MlkqRMIjQLEw"
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = "8074527842"
 
 def generate_unique_code():
