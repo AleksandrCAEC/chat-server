@@ -6,22 +6,21 @@ import os
 import openai
 import requests
 
-# Создание экземпляра приложения Flask
-app = Flask(__name__)
-CORS(app)
-
 # Настройка API-ключа OpenAI
 openai.api_key = os.getenv("OPENAI_API_KEY")
+
+app = Flask(__name__)
+CORS(app)
 
 # Словарь для хранения данных клиентов
 clients = {}
 
-# Функция для генерации уникального кода клиента
+# Генерация уникального кода клиента
 def generate_unique_code():
     random_digits = ''.join(random.choices(string.digits, k=7))
     return f"CAEC{random_digits}"
 
-# Функция для отправки уведомлений в Telegram
+# Отправка уведомлений в Telegram
 def send_telegram_notification(message):
     telegram_bot_token = os.getenv("TELEGRAM_BOT_TOKEN")
     telegram_chat_id = os.getenv("TELEGRAM_CHAT_ID")
@@ -34,11 +33,10 @@ def send_telegram_notification(message):
     try:
         response = requests.post(url, json=payload)
         response.raise_for_status()
-        print("Уведомление в Telegram отправлено.")
+        print(f"Telegram уведомление отправлено: {response.json()}")
     except requests.exceptions.RequestException as e:
-        print(f"Ошибка при отправке уведомления в Telegram: {e}")
+        print(f"Ошибка при отправке Telegram уведомления: {e}")
 
-# Маршрут для регистрации клиента
 @app.route('/register-client', methods=['POST'])
 def register_client():
     try:
@@ -46,17 +44,18 @@ def register_client():
         email = data['email']
         phone = data['phone']
 
-        # Проверка, существует ли уже клиент с таким email или телефоном
+        # Проверка на существующего пользователя
         for code, client_data in clients.items():
             if client_data['email'] == email or client_data['phone'] == phone:
                 name = client_data['name']
+                send_telegram_notification(f"Пользователь {name} повторно вошел. Код: {code}.")
                 return jsonify({
                     'uniqueCode': code,
                     'message': f'Добро пожаловать обратно, {name}! Ваш код: {code}.',
                     'telegramSuggestion': 'Вы можете продолжить общение в Telegram: @ВашБот'
                 }), 200
 
-        # Генерация уникального кода для нового клиента
+        # Регистрация нового клиента
         unique_code = generate_unique_code()
         clients[unique_code] = {
             'name': data['name'],
@@ -64,7 +63,7 @@ def register_client():
             'email': email
         }
 
-        # Уведомление в Telegram
+        # Отправка уведомления в Telegram
         send_telegram_notification(
             f"Новый пользователь зарегистрирован:\nИмя: {data['name']}\nEmail: {email}\nТелефон: {phone}\nКод: {unique_code}"
         )
@@ -77,7 +76,6 @@ def register_client():
     except Exception as e:
         return jsonify({'error': str(e)}), 400
 
-# Маршрут для проверки уникального кода клиента
 @app.route('/verify-code', methods=['POST'])
 def verify_code():
     try:
@@ -91,14 +89,13 @@ def verify_code():
     except Exception as e:
         return jsonify({'error': str(e)}), 400
 
-# Маршрут для общения с OpenAI
 @app.route('/chat', methods=['POST'])
 def chat():
     try:
         data = request.json
         user_message = data.get('message', '')
 
-        # Вызов OpenAI ChatCompletion API
+        # Вызов OpenAI API через v1/chat/completions
         response = openai.ChatCompletion.create(
             model="gpt-3.5-turbo",
             messages=[
