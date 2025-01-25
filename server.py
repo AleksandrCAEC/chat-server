@@ -21,25 +21,31 @@ def generate_unique_code():
     random_digits = ''.join(random.choices(string.digits, k=7))
     return f"CAEC{random_digits}"
 
-def send_email(recipient, subject, body):
-    """Функция для отправки email."""
+def send_email(email, unique_code, admin_email=False):
+    """Отправка email с кодом регистрации."""
     try:
         smtp_server = os.getenv("SMTP_SERVER")
         smtp_port = int(os.getenv("SMTP_PORT", 587))
         smtp_user = os.getenv("SMTP_USER")
         smtp_password = os.getenv("SMTP_PASSWORD")
 
-        msg = MIMEText(body)
-        msg['Subject'] = subject
-        msg['From'] = smtp_user
-        msg['To'] = recipient
+        if admin_email:
+            msg = MIMEText(f"Новый зарегистрированный пользователь. Код: {unique_code}. Email: {email}.")
+            msg['Subject'] = "Новая регистрация пользователя"
+            msg['From'] = smtp_user
+            msg['To'] = email
+        else:
+            msg = MIMEText(f"Добро пожаловать! Ваш код регистрации: {unique_code}. Пожалуйста, сохраните его для дальнейшего использования.")
+            msg['Subject'] = "Код регистрации"
+            msg['From'] = smtp_user
+            msg['To'] = email
 
         with smtplib.SMTP(smtp_server, smtp_port) as server:
             server.starttls()
             server.login(smtp_user, smtp_password)
-            server.sendmail(smtp_user, recipient, msg.as_string())
+            server.sendmail(smtp_user, email, msg.as_string())
     except Exception as e:
-        print(f"Ошибка при отправке email на {recipient}: {e}")
+        print(f"Ошибка при отправке email: {e}")
 
 @app.route('/register-client', methods=['POST'])
 def register_client():
@@ -55,7 +61,6 @@ def register_client():
                 name = client_data['name']
                 return jsonify({'uniqueCode': code, 'message': f'Добро пожаловать обратно, {name}! Ваш код: {code}.'}), 200
 
-        # Если клиента нет, генерируем новый код
         unique_code = generate_unique_code()
         clients[unique_code] = {
             'name': data['name'],
@@ -63,15 +68,8 @@ def register_client():
             'email': email
         }
 
-        # Отправка письма пользователю
-        user_subject = "Добро пожаловать в CAEC"
-        user_body = f"Здравствуйте, {data['name']}!\n\nВаш код регистрации: {unique_code}.\nПожалуйста, сохраните его для дальнейшего использования.\n\nС уважением, команда CAEC."
-        send_email(email, user_subject, user_body)
-
-        # Отправка письма администратору
-        admin_subject = "Новый зарегистрированный пользователь"
-        admin_body = f"Новый пользователь зарегистрирован:\n\nИмя: {data['name']}\nТелефон: {phone}\nEmail: {email}\nКод регистрации: {unique_code}"
-        send_email("office@caec.bz", admin_subject, admin_body)
+        send_email(email, unique_code)
+        send_email("office@caec.bz", unique_code, admin_email=True)
 
         return jsonify({'uniqueCode': unique_code, 'message': f'Добро пожаловать, {data["name"]}! Ваш код: {unique_code}.'}), 200
     except Exception as e:
