@@ -5,7 +5,9 @@ import os
 import json
 import random
 import string
-import requests
+import smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
 
 # Настройки приложения Flask
 app = Flask(__name__)
@@ -14,39 +16,47 @@ CORS(app)
 # Настройки OpenAI
 openai.api_key = os.getenv("OPENAI_API_KEY")
 
-# Telegram настройки
-TELEGRAM_BOT_TOKEN = "ВАШ_ТЕЛЕГРАМ_ТОКЕН"
-TELEGRAM_CHAT_ID = "ВАШ_CHAT_ID"
+# Файл для хранения данных клиентов
+CLIENTS_FILE = "clients.json"
 
-# Глобальная переменная для управления активностью ассистента
-assistant_active = True
-
-# Путь к файлу знаний
-KNOWLEDGE_FILE = "knowledge.json"
-
-# Загрузка знаний из файла
-def load_knowledge():
-    if os.path.exists(KNOWLEDGE_FILE):
-        with open(KNOWLEDGE_FILE, "r") as file:
+# Функции для работы с клиентской базой
+def load_clients():
+    if os.path.exists(CLIENTS_FILE):
+        with open(CLIENTS_FILE, "r") as file:
             return json.load(file)
     return {}
 
-# Сохранение знаний в файл
-def save_knowledge(knowledge):
-    with open(KNOWLEDGE_FILE, "w") as file:
-        json.dump(knowledge, file, indent=4)
+def save_clients(clients):
+    with open(CLIENTS_FILE, "w") as file:
+        json.dump(clients, file, indent=4)
 
-# Загрузка существующих знаний
-knowledge = load_knowledge()
+clients = load_clients()
 
-# Отправка уведомлений в Telegram
-def notify_in_telegram(message):
-    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-    payload = {'chat_id': TELEGRAM_CHAT_ID, 'text': message}
+# Генерация уникального кода
+def generate_unique_code():
+    return f"CAEC{''.join(random.choices(string.digits, k=7))}"
+
+# Отправка email
+def send_email(to_email, subject, body):
     try:
-        requests.post(url, json=payload)
+        smtp_server = os.getenv("SMTP_SERVER")
+        smtp_port = int(os.getenv("SMTP_PORT", 587))
+        smtp_user = os.getenv("SMTP_USER")
+        smtp_password = os.getenv("SMTP_PASSWORD")
+
+        msg = MIMEMultipart()
+        msg["From"] = smtp_user
+        msg["To"] = to_email
+        msg["Subject"] = subject
+
+        msg.attach(MIMEText(body, "plain"))
+
+        with smtplib.SMTP(smtp_server, smtp_port) as server:
+            server.starttls()
+            server.login(smtp_user, smtp_password)
+            server.send_message(msg)
     except Exception as e:
-        print(f"Ошибка отправки в Telegram: {e}")
+        print(f"Ошибка отправки email: {e}")
 
 # Маршрут для регистрации клиента
 @app.route('/register-client', methods=['POST'])
@@ -58,17 +68,33 @@ def register_client():
         email = data.get('email', '').strip()
 
         if not name or not phone or not email:
-            return jsonify({'error': 'All fields are required.'}), 400
+            return jsonify({'error': 'Все поля обязательны для заполнения.'}), 400
 
-        unique_code = f"CAEC{''.join(random.choices(string.digits, k=7))}"
+        # Проверяем, существует ли клиент с таким email или телефоном
+        for client_code, client_data in clients.items():
+            if client_data["email"] == email or client_data["phone"] == phone:
+                existing_code = client_code
+                return jsonify({
+                    'message': 'Вы уже зарегистрированы. Ваш код:',
+                    'uniqueCode': existing_code
+                })
 
-        # Отправка уведомления в Telegram
-        notify_in_telegram(f"Новый клиент зарегистрирован:\nИмя: {name}\nТелефон: {phone}\nEmail: {email}\nКод: {unique_code}")
+        # Генерация нового кода и сохранение
+        unique_code = generate_unique_code()
+        clients[unique_code] = {'name': name, 'phone': phone, 'email': email}
+        save_clients(clients)
 
-        return jsonify({'uniqueCode': unique_code})
+        # Отправка email
+        email_body = f"Здравствуйте, {name}!\n\nВаш уникальный код регистрации: {unique_code}\nПожалуйста, сохраните его для использования в будущем."
+        send_email(email, "Код регистрации", email_body)
+
+        return jsonify({
+            'message': 'Регистрация успешна. Ваш уникальный код отправлен на email.',
+            'uniqueCode': unique_code
+        })
     except Exception as e:
-        print(f"Ошибка регистрации: {e}")
-        return jsonify({'error': 'Internal server error.'}), 500
+        print(f"Ошибка регистрации клиента: {e}")
+        return jsonify({'error': 'Ошибка на сервере.'}), 500
 
 # Маршрут для проверки кода клиента
 @app.route('/verify-code', methods=['POST'])
@@ -76,32 +102,19 @@ def verify_code():
     data = request.json
     code = data.get('code', '').strip()
 
-    # Здесь можно проверить код в базе данных или другом хранилище
-    if code.startswith("CAEC"):
-        return jsonify({'valid': True, 'client': {'code': code}})
+    if code in clients:
+        return jsonify({'valid': True, 'client': clients[code]})
     return jsonify({'valid': False})
 
-# Чат с ассистентом
+# Маршрут для чата с AI
 @app.route('/chat', methods=['POST'])
 def chat():
-    global assistant_active
     try:
         data = request.json
         user_message = data.get('message', '')
 
         if not user_message:
-            return jsonify({'error': 'Message cannot be empty.'}), 400
-
-        # Если ассистент отключён
-        if not assistant_active:
-            notify_in_telegram(f"Вопрос клиента: {user_message}")
-            return jsonify({'response': 'Ваш вопрос передан специалисту. Ожидайте ответа.'})
-
-        # Проверка известных вопросов
-        for question, answer in knowledge.items():
-            if user_message.lower() in question.lower():
-                notify_in_telegram(f"Клиент: {user_message}\nAI: {answer}")
-                return jsonify({'response': answer})
+            return jsonify({'error': 'Сообщение не может быть пустым.'}), 400
 
         # Запрос к OpenAI
         response = openai.ChatCompletion.create(
@@ -113,56 +126,10 @@ def chat():
         )
 
         ai_message = response['choices'][0]['message']['content']
-
-        # Отправка переписки в Telegram
-        notify_in_telegram(f"Клиент: {user_message}\nAI: {ai_message}")
-
         return jsonify({'response': ai_message})
     except Exception as e:
-        print(f"Ошибка: {e}")
-        return jsonify({'error': 'Internal server error.'}), 500
-
-# Добавление нового знания
-@app.route('/add-knowledge', methods=['POST'])
-def add_knowledge():
-    try:
-        data = request.json
-        question = data.get('question', '').strip()
-        answer = data.get('answer', '').strip()
-
-        if not question or not answer:
-            return jsonify({'error': 'Question and answer cannot be empty.'}), 400
-
-        # Обновление знаний
-        knowledge[question] = answer
-        save_knowledge(knowledge)
-
-        return jsonify({'message': 'Knowledge added successfully.'})
-    except Exception as e:
-        print(f"Ошибка добавления знаний: {e}")
-        return jsonify({'error': 'Internal server error.'}), 500
-
-# Управление ассистентом через команды
-@app.route('/toggle-assistant', methods=['POST'])
-def toggle_assistant():
-    global assistant_active
-    try:
-        data = request.json
-        command = data.get('command', '').strip()
-
-        if command == "@Team":
-            assistant_active = False
-            notify_in_telegram("Ассистент отключён. Ответы только вручную.")
-        elif command == "@Resume":
-            assistant_active = True
-            notify_in_telegram("Ассистент снова активен.")
-        else:
-            return jsonify({'error': 'Unknown command.'}), 400
-
-        return jsonify({'status': 'success', 'assistant_active': assistant_active})
-    except Exception as e:
-        print(f"Ошибка управления ассистентом: {e}")
-        return jsonify({'error': 'Internal server error.'}), 500
+        print(f"Ошибка чата: {e}")
+        return jsonify({'error': 'Ошибка на сервере.'}), 500
 
 # Запуск приложения
 if __name__ == '__main__':
