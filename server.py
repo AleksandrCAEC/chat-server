@@ -7,59 +7,55 @@ import openai
 import smtplib
 from email.mime.text import MIMEText
 
-# Настройка API-ключа из переменной окружения
 openai.api_key = os.getenv("OPENAI_API_KEY")
 
 app = Flask(__name__)
 CORS(app)
 
-# Словарь для хранения данных клиентов
 clients = {}
 
 def generate_unique_code():
-    """Генерация уникального кода для клиента."""
-    random_digits = ''.join(random.choices(string.digits, k=7))
-    return f"CAEC{random_digits}"
+    """Генерация уникального кода клиента."""
+    return f"CAEC{''.join(random.choices(string.digits, k=7))}"
 
-def send_email(email, unique_code, admin_email=False):
-    """Отправка email с кодом регистрации."""
+def send_email(recipient_email, unique_code, is_admin=False):
+    """Отправка email через SMTP."""
     try:
-        smtp_server = os.getenv("SMTP_SERVER")
-        smtp_port = int(os.getenv("SMTP_PORT", 587))
+        smtp_server = "smtp.gmail.com"
+        smtp_port = 587
         smtp_user = os.getenv("SMTP_USER")
         smtp_password = os.getenv("SMTP_PASSWORD")
 
-        if admin_email:
-            msg = MIMEText(f"Новый зарегистрированный пользователь. Код: {unique_code}. Email: {email}.")
-            msg['Subject'] = "Новая регистрация пользователя"
-            msg['From'] = smtp_user
-            msg['To'] = email
-        else:
-            msg = MIMEText(f"Добро пожаловать! Ваш код регистрации: {unique_code}. Пожалуйста, сохраните его для дальнейшего использования.")
-            msg['Subject'] = "Код регистрации"
-            msg['From'] = smtp_user
-            msg['To'] = email
+        subject = "Новая регистрация пользователя" if is_admin else "Ваш код регистрации"
+        body = (f"Новый зарегистрированный пользователь. Код: {unique_code}."
+                if is_admin else
+                f"Добро пожаловать! Ваш код регистрации: {unique_code}. Пожалуйста, сохраните его.")
+
+        msg = MIMEText(body)
+        msg['Subject'] = subject
+        msg['From'] = smtp_user
+        msg['To'] = recipient_email
 
         with smtplib.SMTP(smtp_server, smtp_port) as server:
             server.starttls()
             server.login(smtp_user, smtp_password)
-            server.sendmail(smtp_user, email, msg.as_string())
+            server.sendmail(smtp_user, recipient_email, msg.as_string())
+
     except Exception as e:
         print(f"Ошибка при отправке email: {e}")
 
 @app.route('/register-client', methods=['POST'])
 def register_client():
-    """Маршрут для регистрации клиента."""
+    """Регистрация клиента."""
     try:
         data = request.json
         email = data['email']
         phone = data['phone']
 
-        # Проверка, существует ли клиент с таким email или телефоном
+        # Проверяем существующего клиента
         for code, client_data in clients.items():
             if client_data['email'] == email or client_data['phone'] == phone:
-                name = client_data['name']
-                return jsonify({'uniqueCode': code, 'message': f'Добро пожаловать обратно, {name}! Ваш код: {code}.'}), 200
+                return jsonify({'uniqueCode': code, 'message': f'Добро пожаловать обратно, {client_data["name"]}! Ваш код: {code}.'}), 200
 
         unique_code = generate_unique_code()
         clients[unique_code] = {
@@ -68,8 +64,9 @@ def register_client():
             'email': email
         }
 
+        # Отправка писем
         send_email(email, unique_code)
-        send_email("office@caec.bz", unique_code, admin_email=True)
+        send_email("office@caec.bz", unique_code, is_admin=True)
 
         return jsonify({'uniqueCode': unique_code, 'message': f'Добро пожаловать, {data["name"]}! Ваш код: {unique_code}.'}), 200
     except Exception as e:
@@ -77,13 +74,12 @@ def register_client():
 
 @app.route('/verify-code', methods=['POST'])
 def verify_code():
-    """Маршрут для проверки уникального кода клиента."""
+    """Проверка кода клиента."""
     try:
         data = request.json
         code = data['code']
         if code in clients:
-            name = clients[code]['name']
-            return jsonify({'status': 'success', 'clientData': clients[code], 'message': f'Добро пожаловать обратно, {name}!'}), 200
+            return jsonify({'status': 'success', 'clientData': clients[code], 'message': f'Добро пожаловать обратно, {clients[code]["name"]}!'}), 200
         else:
             return jsonify({'status': 'error', 'message': 'Неверный код'}), 404
     except Exception as e:
@@ -91,12 +87,11 @@ def verify_code():
 
 @app.route('/chat', methods=['POST'])
 def chat():
-    """Маршрут для общения с OpenAI."""
+    """Обработка общения с AI."""
     try:
         data = request.json
         user_message = data.get('message', '')
 
-        # Вызов OpenAI API через v1/chat/completions
         response = openai.ChatCompletion.create(
             model="gpt-3.5-turbo",
             messages=[
