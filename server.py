@@ -111,4 +111,6 @@ def chat():
         return jsonify({'error': str(e)}), 500
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000)
+    # Получаем порт из переменной окружения (Cloud Run передаёт порт через $PORT)
+    port = int(os.environ.get('PORT', 8080))  # 8080 — стандартный порт по умолчанию
+    app.run(host='0.0.0.0', port=port)
