@@ -125,6 +125,24 @@ def chat():
         print(f"Ошибка в /chat: {e}")
         return jsonify({'error': str(e)}), 500
 
+# Новый маршрут для уведомления о возвращении клиента
+@app.route('/notify-returning-client', methods=['POST'])
+def notify_returning_client():
+    try:
+        data = request.json
+        name = data.get('name')
+        email = data.get('email')
+        phone = data.get('phone')
+        code = data.get('code')
+
+        message = f"Пользователь вернулся в чат:\nИмя: {name}\nEmail: {email}\nТелефон: {phone}\nКод: {code}"
+        send_telegram_notification(message)
+
+        return jsonify({'status': 'success', 'message': 'Уведомление отправлено.'}), 200
+    except Exception as e:
+        print(f"Ошибка в /notify-returning-client: {e}")
+        return jsonify({'error': str(e)}), 500
+
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 8080))  # Порт из переменной окружения
     app.run(host='0.0.0.0', port=port)
