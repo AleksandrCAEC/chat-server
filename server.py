@@ -6,14 +6,14 @@ import os
 import openai
 import requests
 
-# Настройка API-ключа OpenAI из переменной окружения
+# Настройка API-ключа OpenAI
 openai.api_key = os.getenv("OPENAI_API_KEY")
 
 # Инициализация приложения Flask
 app = Flask(__name__)
 CORS(app)
 
-# Словарь для хранения данных клиентов (временное решение для тестов)
+# Словарь для хранения данных клиентов
 clients = {}
 
 # Генерация уникального кода клиента
@@ -47,13 +47,16 @@ def send_telegram_notification(message):
 def register_client():
     try:
         data = request.json
-        email = data['email']
-        phone = data['phone']
+        name = data.get('name', 'Неизвестный пользователь')
+        email = data.get('email', '')
+        phone = data.get('phone', '')
+
+        if not email or not phone:
+            return jsonify({'error': 'Email и телефон обязательны.'}), 400
 
         # Проверка на существующего пользователя
         for code, client_data in clients.items():
             if client_data['email'] == email or client_data['phone'] == phone:
-                name = client_data['name']
                 send_telegram_notification(f"Пользователь {name} повторно вошел. Код: {code}.")
                 return jsonify({
                     'uniqueCode': code,
@@ -64,19 +67,19 @@ def register_client():
         # Регистрация нового клиента
         unique_code = generate_unique_code()
         clients[unique_code] = {
-            'name': data['name'],
+            'name': name,
             'phone': phone,
             'email': email
         }
 
         # Отправка уведомления в Telegram
         send_telegram_notification(
-            f"Новый пользователь зарегистрирован:\nИмя: {data['name']}\nEmail: {email}\nТелефон: {phone}\nКод: {unique_code}"
+            f"Новый пользователь зарегистрирован:\nИмя: {name}\nEmail: {email}\nТелефон: {phone}\nКод: {unique_code}"
         )
 
         return jsonify({
             'uniqueCode': unique_code,
-            'message': f'Добро пожаловать, {data["name"]}! Ваш код: {unique_code}.',
+            'message': f'Добро пожаловать, {name}! Ваш код: {unique_code}.',
             'telegramSuggestion': 'Вы можете продолжить общение в Telegram: @ВашБот'
         }), 200
     except Exception as e:
@@ -87,7 +90,7 @@ def register_client():
 def verify_code():
     try:
         data = request.json
-        code = data['code']
+        code = data.get('code', '')
         if code in clients:
             name = clients[code]['name']
             return jsonify({'status': 'success', 'clientData': clients[code], 'message': f'Добро пожаловать обратно, {name}!'}), 200
@@ -102,6 +105,9 @@ def chat():
     try:
         data = request.json
         user_message = data.get('message', '')
+
+        if not user_message:
+            return jsonify({'error': 'Сообщение не может быть пустым'}), 400
 
         # Вызов OpenAI API через v1/chat/completions
         response = openai.ChatCompletion.create(
@@ -120,6 +126,5 @@ def chat():
         return jsonify({'error': str(e)}), 500
 
 if __name__ == '__main__':
-    # Получаем порт из переменной окружения (Cloud Run передаёт порт через $PORT)
-    port = int(os.environ.get('PORT', 8080))  # 8080 — стандартный порт по умолчанию
+    port = int(os.environ.get('PORT', 8080))  # Порт из переменной окружения
     app.run(host='0.0.0.0', port=port)
