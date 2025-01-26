@@ -6,13 +6,14 @@ import os
 import openai
 import requests
 
-# Настройка API-ключа OpenAI
+# Настройка API-ключа OpenAI из переменной окружения
 openai.api_key = os.getenv("OPENAI_API_KEY")
 
+# Инициализация приложения Flask
 app = Flask(__name__)
 CORS(app)
 
-# Словарь для хранения данных клиентов
+# Словарь для хранения данных клиентов (временное решение для тестов)
 clients = {}
 
 # Генерация уникального кода клиента
@@ -24,6 +25,11 @@ def generate_unique_code():
 def send_telegram_notification(message):
     telegram_bot_token = os.getenv("TELEGRAM_BOT_TOKEN")
     telegram_chat_id = os.getenv("TELEGRAM_CHAT_ID")
+
+    if not telegram_bot_token or not telegram_chat_id:
+        print("Переменные окружения TELEGRAM_BOT_TOKEN и TELEGRAM_CHAT_ID не настроены.")
+        return
+
     url = f"https://api.telegram.org/bot{telegram_bot_token}/sendMessage"
     payload = {
         "chat_id": telegram_chat_id,
@@ -74,6 +80,7 @@ def register_client():
             'telegramSuggestion': 'Вы можете продолжить общение в Telegram: @ВашБот'
         }), 200
     except Exception as e:
+        print(f"Ошибка в /register-client: {e}")
         return jsonify({'error': str(e)}), 400
 
 @app.route('/verify-code', methods=['POST'])
@@ -87,6 +94,7 @@ def verify_code():
         else:
             return jsonify({'status': 'error', 'message': 'Неверный код'}), 404
     except Exception as e:
+        print(f"Ошибка в /verify-code: {e}")
         return jsonify({'error': str(e)}), 400
 
 @app.route('/chat', methods=['POST'])
@@ -108,6 +116,7 @@ def chat():
         reply = response['choices'][0]['message']['content'].strip()
         return jsonify({'reply': reply}), 200
     except Exception as e:
+        print(f"Ошибка в /chat: {e}")
         return jsonify({'error': str(e)}), 500
 
 if __name__ == '__main__':
