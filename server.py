@@ -218,6 +218,9 @@ def check_env():
 def debug():
     return jsonify({'message': 'Debug endpoint is working!'}), 200
 
+for rule in app.url_map.iter_rules():
+    print(f"Registered route: {rule}")
+
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 8080))  # Порт из переменной окружения
     app.run(host='0.0.0.0', port=port)
