@@ -133,6 +133,10 @@ def chat():
 # Новый маршрут для создания таблицы Google Sheets
 @app.route('/create-sheet', methods=['POST'])
 def create_sheet():
+    print("Маршрут /create-sheet вызван!")
+    try:
+        data = request.json
+        print("Данные запроса:", data)
     print("Данные запроса:", request.json)
     try:
         data = request.json
