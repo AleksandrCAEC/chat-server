@@ -137,9 +137,6 @@ def create_sheet():
     try:
         data = request.json
         print("Данные запроса:", data)
-    print("Данные запроса:", request.json)
-    try:
-        data = request.json
         title = data.get('title', 'Новая таблица')  # Название таблицы
         notes = data.get('notes', '')  # Примечания или дополнительные данные
 
