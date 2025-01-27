@@ -3,38 +3,13 @@ from flask_cors import CORS
 import random
 import string
 import os
-try:
-    import os
-    print("GOOGLE_APPLICATION_CREDENTIALS path:", os.getenv("GOOGLE_APPLICATION_CREDENTIALS"))
-except Exception as e:
-    print("Error while checking GOOGLE_APPLICATION_CREDENTIALS path:", e)
 import openai
 import requests
 from googleapiclient.discovery import build
 from google.oauth2.service_account import Credentials
-from google.cloud import secretmanager
 
-# Функция для получения секрета из Google Secret Manager
-def get_secret(secret_name):
-    try:
-        client = secretmanager.SecretManagerServiceClient()
-        project_id = os.getenv("GOOGLE_CLOUD_PROJECT")
-        name = f"projects/{project_id}/secrets/{secret_name}/versions/latest"
-        response = client.access_secret_version(request={"name": name})
-        return response.payload.data.decode("UTF-8")
-    except Exception as e:
-        print(f"Ошибка при доступе к секрету {secret_name}: {e}")
-        return None
-
-# Получение service_account.json из Secret Manager
-service_account_content = get_secret("service_account")
-if service_account_content:
-    # Сохраняем временный файл для использования учетных данных
-    with open("/tmp/service_account.json", "w") as f:
-        f.write(service_account_content)
-    os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = "/tmp/service_account.json"
-else:
-    print("Не удалось получить service_account.json. Проверьте настройки Secret Manager.")
+# Указание пути к файлу service_account.json
+os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = "/etc/secrets/service_account.json"
 
 # Настройка API-ключа OpenAI
 openai.api_key = os.getenv("OPENAI_API_KEY")
@@ -156,17 +131,18 @@ def chat():
         return jsonify({'error': str(e)}), 500
 
 # Новый маршрут для создания таблицы Google Sheets
-@app.route('/create-spreadsheet', methods=['POST'])
-def create_spreadsheet():
+@app.route('/create-sheet', methods=['POST'])
+def create_sheet():
     try:
         data = request.json
-        title = data.get('title', 'Новая таблица')
+        title = data.get('title', 'Новая таблица')  # Название таблицы
+        notes = data.get('notes', '')  # Примечания или дополнительные данные
 
-        credentials = Credentials.from_service_account_file('/etc/secrets/service_account')
-print("GOOGLE_APPLICATION_CREDENTIALS path:", os.getenv("GOOGLE_APPLICATION_CREDENTIALS"))
-print("Service Account Path:", '/etc/secrets/service_account')
+        # Установление соединения с Google Sheets API
+        credentials = Credentials.from_service_account_file(os.getenv("GOOGLE_APPLICATION_CREDENTIALS"))
         service = build('sheets', 'v4', credentials=credentials)
 
+        # Создание новой таблицы
         spreadsheet = {
             'properties': {
                 'title': title
@@ -175,21 +151,47 @@ print("Service Account Path:", '/etc/secrets/service_account')
         spreadsheet = service.spreadsheets().create(body=spreadsheet, fields='spreadsheetId').execute()
         spreadsheet_id = spreadsheet.get('spreadsheetId')
 
-        return jsonify({'status': 'success', 'spreadsheetId': spreadsheet_id, 'message': f'Таблица "{title}" успешно создана.'}), 200
-    except Exception as e:
-        print(f"Ошибка в /create-spreadsheet: {e}")
-        return jsonify({'error': str(e)}), 500
+        # Добавление заметок в таблицу, если указаны
+        if notes:
+            requests_body = {
+                'requests': [
+                    {
+                        'updateCells': {
+                            'range': {
+                                'sheetId': 0,  # ID листа по умолчанию
+                                'startRowIndex': 0,
+                                'startColumnIndex': 0
+                            },
+                            'rows': [
+                                {
+                                    'values': [
+                                        {
+                                            'userEnteredValue': {
+                                                'stringValue': notes
+                                            }
+                                        }
+                                    ]
+                                }
+                            ],
+                            'fields': 'userEnteredValue'
+                        }
+                    }
+                ]
+            }
+            service.spreadsheets().batchUpdate(
+                spreadsheetId=spreadsheet_id,
+                body=requests_body
+            ).execute()
 
-@app.route('/check-env', methods=['GET'])
-def check_env():
-    try:
-        credentials_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
-        if credentials_path:
-            return jsonify({"GOOGLE_APPLICATION_CREDENTIALS": credentials_path}), 200
-        else:
-            return jsonify({"error": "Переменная GOOGLE_APPLICATION_CREDENTIALS не установлена"}), 500
+        # Возврат результата
+        return jsonify({
+            'status': 'success',
+            'spreadsheetId': spreadsheet_id,
+            'spreadsheetLink': f"https://docs.google.com/spreadsheets/d/{spreadsheet_id}",
+            'message': f'Таблица "{title}" успешно создана.'
+        }), 200
     except Exception as e:
-        print(f"Ошибка в /check-env: {e}")
+        print(f"Ошибка в /create-sheet: {e}")
         return jsonify({'error': str(e)}), 500
 
 if __name__ == '__main__':
