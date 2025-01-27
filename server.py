@@ -168,6 +168,14 @@ def create_spreadsheet():
         spreadsheet = service.spreadsheets().create(body=spreadsheet, fields='spreadsheetId').execute()
         spreadsheet_id = spreadsheet.get('spreadsheetId')
 
+        @app.route('/check-env', methods=['GET'])
+def check_env():
+    credentials_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
+    if credentials_path:
+        return jsonify({"GOOGLE_APPLICATION_CREDENTIALS": credentials_path}), 200
+    else:
+        return jsonify({"error": "Переменная GOOGLE_APPLICATION_CREDENTIALS не установлена"}), 500
+
         return jsonify({'status': 'success', 'spreadsheetId': spreadsheet_id, 'message': f'Таблица "{title}" успешно создана.'}), 200
     except Exception as e:
         print(f"Ошибка в /create-spreadsheet: {e}")
