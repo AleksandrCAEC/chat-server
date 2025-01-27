@@ -134,11 +134,16 @@ def chat():
 @app.route('/create-spreadsheet', methods=['POST'])
 def create_spreadsheet():
     try:
+        print("Маршрут '/create-spreadsheet' вызван.")
         data = request.json
+        print(f"Полученные данные: {data}")
         title = data.get('title', 'Новая таблица')
-
+        print(f"Название таблицы: {title}")
+        
         credentials = Credentials.from_service_account_file(os.getenv("GOOGLE_APPLICATION_CREDENTIALS"))
+        print("Учетные данные успешно загружены.")
         service = build('sheets', 'v4', credentials=credentials)
+        print("Google Sheets API успешно подключен.")
 
         spreadsheet = {
             'properties': {
@@ -147,6 +152,7 @@ def create_spreadsheet():
         }
         spreadsheet = service.spreadsheets().create(body=spreadsheet, fields='spreadsheetId').execute()
         spreadsheet_id = spreadsheet.get('spreadsheetId')
+        print(f"Таблица создана с ID: {spreadsheet_id}")
 
         return jsonify({'status': 'success', 'spreadsheetId': spreadsheet_id, 'message': f'Таблица "{title}" успешно создана.'}), 200
     except Exception as e:
