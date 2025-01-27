@@ -5,6 +5,8 @@ import string
 import os
 import openai
 import requests
+from googleapiclient.discovery import build
+from google.oauth2.service_account import Credentials
 
 # Настройка API-ключа OpenAI
 openai.api_key = os.getenv("OPENAI_API_KEY")
@@ -42,6 +44,14 @@ def send_telegram_notification(message):
         print(f"Telegram уведомление отправлено: {response.json()}")
     except requests.exceptions.RequestException as e:
         print(f"Ошибка при отправке Telegram уведомления: {e}")
+
+# Настройка Google API
+SCOPES = ['https://www.googleapis.com/auth/drive']
+SERVICE_ACCOUNT_FILE = 'service_account.json'
+
+credentials = Credentials.from_service_account_file(
+    SERVICE_ACCOUNT_FILE, scopes=SCOPES)
+drive_service = build('drive', 'v3', credentials=credentials)
 
 @app.route('/register-client', methods=['POST'])
 def register_client():
@@ -125,22 +135,30 @@ def chat():
         print(f"Ошибка в /chat: {e}")
         return jsonify({'error': str(e)}), 500
 
-# Новый маршрут для уведомления о возвращении клиента
-@app.route('/notify-returning-client', methods=['POST'])
-def notify_returning_client():
+@app.route('/create-sheet', methods=['POST'])
+def create_sheet():
     try:
         data = request.json
-        name = data.get('name')
-        email = data.get('email')
-        phone = data.get('phone')
-        code = data.get('code')
+        client_code = data.get("client_code", "UnknownClient")
 
-        message = f"Пользователь вернулся в чат:\nИмя: {name}\nEmail: {email}\nТелефон: {phone}\nКод: {code}"
-        send_telegram_notification(message)
+        # Настройка метаданных для нового файла
+        file_metadata = {
+            'name': f'Client_{client_code}',
+            'mimeType': 'application/vnd.google-apps.spreadsheet',
+            'parents': ['1g1OtN7ID1lM01d0bLswGqLF0m2gQIcqo']  # ID папки
+        }
+        # Создание таблицы
+        file = drive_service.files().create(body=file_metadata, fields='id').execute()
+        spreadsheet_id = file.get('id')
 
-        return jsonify({'status': 'success', 'message': 'Уведомление отправлено.'}), 200
+        # Возвращение ссылки на созданную таблицу
+        return jsonify({
+            'message': 'Google Sheet успешно создан!',
+            'spreadsheet_id': spreadsheet_id,
+            'spreadsheet_url': f'https://docs.google.com/spreadsheets/d/{spreadsheet_id}'
+        }), 200
     except Exception as e:
-        print(f"Ошибка в /notify-returning-client: {e}")
+        print(f"Ошибка в /create-sheet: {e}")
         return jsonify({'error': str(e)}), 500
 
 if __name__ == '__main__':
