@@ -8,6 +8,9 @@ import requests
 from googleapiclient.discovery import build
 from google.oauth2.service_account import Credentials
 
+# Указание пути к файлу service_account.json
+os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = "/etc/secrets/service_account.json"
+
 # Настройка API-ключа OpenAI
 openai.api_key = os.getenv("OPENAI_API_KEY")
 
@@ -44,14 +47,6 @@ def send_telegram_notification(message):
         print(f"Telegram уведомление отправлено: {response.json()}")
     except requests.exceptions.RequestException as e:
         print(f"Ошибка при отправке Telegram уведомления: {e}")
-
-# Настройка Google API
-SCOPES = ['https://www.googleapis.com/auth/drive']
-SERVICE_ACCOUNT_FILE = 'service_account.json'
-
-credentials = Credentials.from_service_account_file(
-    SERVICE_ACCOUNT_FILE, scopes=SCOPES)
-drive_service = build('drive', 'v3', credentials=credentials)
 
 @app.route('/register-client', methods=['POST'])
 def register_client():
@@ -135,30 +130,27 @@ def chat():
         print(f"Ошибка в /chat: {e}")
         return jsonify({'error': str(e)}), 500
 
-@app.route('/create-sheet', methods=['POST'])
-def create_sheet():
+# Новый маршрут для создания таблицы Google Sheets
+@app.route('/create-spreadsheet', methods=['POST'])
+def create_spreadsheet():
     try:
         data = request.json
-        client_code = data.get("client_code", "UnknownClient")
+        title = data.get('title', 'Новая таблица')
 
-        # Настройка метаданных для нового файла
-        file_metadata = {
-            'name': f'Client_{client_code}',
-            'mimeType': 'application/vnd.google-apps.spreadsheet',
-            'parents': ['1g1OtN7ID1lM01d0bLswGqLF0m2gQIcqo']  # ID папки
+        credentials = Credentials.from_service_account_file(os.getenv("GOOGLE_APPLICATION_CREDENTIALS"))
+        service = build('sheets', 'v4', credentials=credentials)
+
+        spreadsheet = {
+            'properties': {
+                'title': title
+            }
         }
-        # Создание таблицы
-        file = drive_service.files().create(body=file_metadata, fields='id').execute()
-        spreadsheet_id = file.get('id')
+        spreadsheet = service.spreadsheets().create(body=spreadsheet, fields='spreadsheetId').execute()
+        spreadsheet_id = spreadsheet.get('spreadsheetId')
 
-        # Возвращение ссылки на созданную таблицу
-        return jsonify({
-            'message': 'Google Sheet успешно создан!',
-            'spreadsheet_id': spreadsheet_id,
-            'spreadsheet_url': f'https://docs.google.com/spreadsheets/d/{spreadsheet_id}'
-        }), 200
+        return jsonify({'status': 'success', 'spreadsheetId': spreadsheet_id, 'message': f'Таблица "{title}" успешно создана.'}), 200
     except Exception as e:
-        print(f"Ошибка в /create-sheet: {e}")
+        print(f"Ошибка в /create-spreadsheet: {e}")
         return jsonify({'error': str(e)}), 500
 
 if __name__ == '__main__':
