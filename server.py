@@ -9,15 +9,7 @@ from googleapiclient.discovery import build
 from google.oauth2.service_account import Credentials
 
 # Указание пути к файлу service_account.json
-SERVICE_ACCOUNT_PATH = "/etc/secrets/service_account.json"
-os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = SERVICE_ACCOUNT_PATH
-
-# Проверка доступности файла service_account.json
-if os.path.exists(SERVICE_ACCOUNT_PATH):
-    print(f"Файл service_account.json найден по пути: {SERVICE_ACCOUNT_PATH}")
-else:
-    print(f"Файл service_account.json не найден по пути: {SERVICE_ACCOUNT_PATH}")
-    raise FileNotFoundError(f"Файл service_account.json не найден по пути: {SERVICE_ACCOUNT_PATH}")
+os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = "/etc/secrets/service_account.json"
 
 # Настройка API-ключа OpenAI
 openai.api_key = os.getenv("OPENAI_API_KEY")
@@ -97,6 +89,20 @@ def register_client():
         }), 200
     except Exception as e:
         print(f"Ошибка в /register-client: {e}")
+        return jsonify({'error': str(e)}), 400
+
+@app.route('/verify-code', methods=['POST'])
+def verify_code():
+    try:
+        data = request.json
+        code = data.get('code', '')
+        if code in clients:
+            name = clients[code]['name']
+            return jsonify({'status': 'success', 'clientData': clients[code], 'message': f'Добро пожаловать обратно, {name}!'}), 200
+        else:
+            return jsonify({'status': 'error', 'message': 'Неверный код'}), 404
+    except Exception as e:
+        print(f"Ошибка в /verify-code: {e}")
         return jsonify({'error': str(e)}), 400
 
 @app.route('/chat', methods=['POST'])
