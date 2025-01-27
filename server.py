@@ -194,6 +194,7 @@ def create_sheet():
         print(f"Ошибка в /create-sheet: {e}")
         return jsonify({'error': str(e)}), 500
 
+# Новый маршрут для проверки окружения
 @app.route('/check-env', methods=['GET'])
 def check_env():
     try:
