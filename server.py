@@ -3,7 +3,10 @@ from flask_cors import CORS
 import random
 import string
 import os
-print("GOOGLE_APPLICATION_CREDENTIALS path:", os.getenv("GOOGLE_APPLICATION_CREDENTIALS"))
+try:
+    print("GOOGLE_APPLICATION_CREDENTIALS path:", os.getenv("GOOGLE_APPLICATION_CREDENTIALS"))
+except Exception as e:
+    print("Error while checking GOOGLE_APPLICATION_CREDENTIALS path:", e)
 import openai
 import requests
 from googleapiclient.discovery import build
