@@ -168,7 +168,7 @@ def create_spreadsheet():
         spreadsheet = service.spreadsheets().create(body=spreadsheet, fields='spreadsheetId').execute()
         spreadsheet_id = spreadsheet.get('spreadsheetId')
 
-        @app.route('/check-env', methods=['GET'])
+@app.route('/check-env', methods=['GET'])
 def check_env():
     credentials_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
     if credentials_path:
