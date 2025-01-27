@@ -194,6 +194,24 @@ def create_sheet():
         print(f"Ошибка в /create-sheet: {e}")
         return jsonify({'error': str(e)}), 500
 
+@app.route('/check-env', methods=['GET'])
+def check_env():
+    try:
+        openai_key = os.getenv("OPENAI_API_KEY")
+        telegram_token = os.getenv("TELEGRAM_BOT_TOKEN")
+        google_credentials_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
+
+        # Проверка, настроены ли ключи
+        return jsonify({
+            'status': 'success',
+            'openai_key_set': bool(openai_key),
+            'telegram_token_set': bool(telegram_token),
+            'google_credentials_path_set': bool(google_credentials_path),
+            'message': 'Окружение настроено корректно.'
+        }), 200
+    except Exception as e:
+        return jsonify({'status': 'error', 'error': str(e)}), 500
+
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 8080))  # Порт из переменной окружения
     app.run(host='0.0.0.0', port=port)
