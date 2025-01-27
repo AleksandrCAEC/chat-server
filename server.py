@@ -158,6 +158,8 @@ def create_spreadsheet():
         title = data.get('title', 'Новая таблица')
 
         credentials = Credentials.from_service_account_file('/etc/secrets/service_account')
+print("GOOGLE_APPLICATION_CREDENTIALS path:", os.getenv("GOOGLE_APPLICATION_CREDENTIALS"))
+print("Service Account Path:", '/etc/secrets/service_account')
         service = build('sheets', 'v4', credentials=credentials)
 
         spreadsheet = {
