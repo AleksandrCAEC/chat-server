@@ -213,6 +213,10 @@ def check_env():
     except Exception as e:
         return jsonify({'status': 'error', 'error': str(e)}), 500
 
+@app.route('/debug', methods=['GET'])
+def debug():
+    return jsonify({'message': 'Debug endpoint is working!'}), 200
+
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 8080))  # Порт из переменной окружения
     app.run(host='0.0.0.0', port=port)
