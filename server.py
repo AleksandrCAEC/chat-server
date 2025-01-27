@@ -219,6 +219,12 @@ def check_env():
 def debug():
     return jsonify({'message': 'Debug endpoint is working!'}), 200
 
+@app.route('/debug-secrets', methods=['GET'])
+def debug_secrets():
+    import os
+    exists = os.path.exists('/etc/secrets/service_account.json')
+    return jsonify({'file_exists': exists}), 200
+
 for rule in app.url_map.iter_rules():
     print(f"Registered route: {rule}")
 
