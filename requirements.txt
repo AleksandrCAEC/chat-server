@@ -3,3 +3,4 @@ Werkzeug==2.0.3
 openai==0.27.0
 flask_cors==3.0.10
 google-api-python-client
+google-cloud-secret-manager
