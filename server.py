@@ -7,9 +7,29 @@ import openai
 import requests
 from googleapiclient.discovery import build
 from google.oauth2.service_account import Credentials
+from google.cloud import secretmanager
 
-# Указание пути к файлу service_account.json
-os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = "/etc/secrets/service_account.json"
+# Функция для получения секрета из Google Secret Manager
+def get_secret(secret_name):
+    try:
+        client = secretmanager.SecretManagerServiceClient()
+        project_id = os.getenv("GOOGLE_CLOUD_PROJECT")
+        name = f"projects/{project_id}/secrets/{secret_name}/versions/latest"
+        response = client.access_secret_version(request={"name": name})
+        return response.payload.data.decode("UTF-8")
+    except Exception as e:
+        print(f"Ошибка при доступе к секрету {secret_name}: {e}")
+        return None
+
+# Получение service_account.json из Secret Manager
+service_account_content = get_secret("service_account")
+if service_account_content:
+    # Сохраняем временный файл для использования учетных данных
+    with open("/tmp/service_account.json", "w") as f:
+        f.write(service_account_content)
+    os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = "/tmp/service_account.json"
+else:
+    print("Не удалось получить service_account.json. Проверьте настройки Secret Manager.")
 
 # Настройка API-ключа OpenAI
 openai.api_key = os.getenv("OPENAI_API_KEY")
@@ -134,16 +154,11 @@ def chat():
 @app.route('/create-spreadsheet', methods=['POST'])
 def create_spreadsheet():
     try:
-        print("Маршрут '/create-spreadsheet' вызван.")
         data = request.json
-        print(f"Полученные данные: {data}")
         title = data.get('title', 'Новая таблица')
-        print(f"Название таблицы: {title}")
-        
+
         credentials = Credentials.from_service_account_file(os.getenv("GOOGLE_APPLICATION_CREDENTIALS"))
-        print("Учетные данные успешно загружены.")
         service = build('sheets', 'v4', credentials=credentials)
-        print("Google Sheets API успешно подключен.")
 
         spreadsheet = {
             'properties': {
@@ -152,7 +167,6 @@ def create_spreadsheet():
         }
         spreadsheet = service.spreadsheets().create(body=spreadsheet, fields='spreadsheetId').execute()
         spreadsheet_id = spreadsheet.get('spreadsheetId')
-        print(f"Таблица создана с ID: {spreadsheet_id}")
 
         return jsonify({'status': 'success', 'spreadsheetId': spreadsheet_id, 'message': f'Таблица "{title}" успешно создана.'}), 200
     except Exception as e:
