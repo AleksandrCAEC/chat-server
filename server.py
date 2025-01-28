@@ -9,7 +9,7 @@ from googleapiclient.discovery import build
 from google.oauth2.service_account import Credentials
 
 # Указание пути к файлу service_account.json
-os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = "/etc/secrets/service_account.json"
+os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = "/etc/secrets/service_account_json"
 
 # Настройка API-ключа OpenAI
 openai.api_key = os.getenv("OPENAI_API_KEY")
