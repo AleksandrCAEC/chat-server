@@ -8,12 +8,8 @@ import requests
 from googleapiclient.discovery import build
 from google.oauth2.service_account import Credentials
 
-# Проверка существования файла service_account.json
-if not os.path.exists("/etc/secrets/service_account.json"):
-    raise FileNotFoundError("Файл service_account.json не найден!")
-
 # Указание пути к файлу service_account.json
-os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = "/etc/secrets/service_account.json"
+os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = "/etc/secrets/service_account_json"
 
 # Настройка API-ключа OpenAI
 openai.api_key = os.getenv("OPENAI_API_KEY")
@@ -36,7 +32,7 @@ def send_telegram_notification(message):
     telegram_chat_id = os.getenv("TELEGRAM_CHAT_ID")
 
     if not telegram_bot_token or not telegram_chat_id:
-        [31mprint("Переменные окружения TELEGRAM_BOT_TOKEN и TELEGRAM_CHAT_ID не настроены.")[0m
+        print("Переменные окружения TELEGRAM_BOT_TOKEN и TELEGRAM_CHAT_ID не настроены.")
         return
 
     url = f"https://api.telegram.org/bot{telegram_bot_token}/sendMessage"
@@ -137,10 +133,8 @@ def chat():
 # Новый маршрут для создания таблицы Google Sheets
 @app.route('/create-sheet', methods=['POST'])
 def create_sheet():
-    print("Маршрут /create-sheet вызван!")
     try:
         data = request.json
-        print("Данные запроса:", data)
         title = data.get('title', 'Новая таблица')  # Название таблицы
         notes = data.get('notes', '')  # Примечания или дополнительные данные
 
@@ -150,11 +144,10 @@ def create_sheet():
 
         # Создание новой таблицы
         spreadsheet = {
-    'properties': {
-        'title': title
-    },
-    'parents': ['1g1OtN7ID1lM01d0bLswGqLF0m2gQIcqo']  # Добавьте этот параметр
-}
+            'properties': {
+                'title': title
+            }
+        }
         spreadsheet = service.spreadsheets().create(body=spreadsheet, fields='spreadsheetId').execute()
         spreadsheet_id = spreadsheet.get('spreadsheetId')
 
@@ -219,19 +212,6 @@ def check_env():
         }), 200
     except Exception as e:
         return jsonify({'status': 'error', 'error': str(e)}), 500
-
-@app.route('/debug', methods=['GET'])
-def debug():
-    return jsonify({'message': 'Debug endpoint is working!'}), 200
-
-@app.route('/debug-secrets', methods=['GET'])
-def debug_secrets():
-    import os
-    exists = os.path.exists('/etc/secrets/service_account.json')
-    return jsonify({'file_exists': exists}), 200
-
-for rule in app.url_map.iter_rules():
-    print(f"Registered route: {rule}")
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 8080))  # Порт из переменной окружения
