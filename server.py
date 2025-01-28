@@ -140,17 +140,26 @@ def create_sheet():
 
         # Установление соединения с Google Sheets API
         credentials = Credentials.from_service_account_file(os.getenv("GOOGLE_APPLICATION_CREDENTIALS"))
-        service = build('sheets', 'v4', credentials=credentials)
+        sheets_service = build('sheets', 'v4', credentials=credentials)
+        drive_service = build('drive', 'v3', credentials=credentials)
 
         # Создание новой таблицы
         sheet_body = {
             'properties': {
                 'title': title
-            },
-            'parents': ['1g1OtN7ID1lM01d0bLswGqLF0m2gQIcqo']  # Добавьте этот параметр
+            }
         }
-        spreadsheet = service.spreadsheets().create(body=sheet_body, fields='spreadsheetId').execute()
+        spreadsheet = sheets_service.spreadsheets().create(body=sheet_body, fields='spreadsheetId').execute()
         spreadsheet_id = spreadsheet.get('spreadsheetId')
+
+        # Перемещение таблицы в указанную папку
+        folder_id = '1g1OtN7ID1lM01d0bLswGqLF0m2gQIcqo'
+        drive_service.files().update(
+            fileId=spreadsheet_id,
+            addParents=folder_id,
+            removeParents='',
+            fields='id, parents'
+        ).execute()
 
         # Добавление заметок в таблицу, если указаны
         if notes:
@@ -179,7 +188,7 @@ def create_sheet():
                     }
                 ]
             }
-            service.spreadsheets().batchUpdate(
+            sheets_service.spreadsheets().batchUpdate(
                 spreadsheetId=spreadsheet_id,
                 body=requests_body
             ).execute()
@@ -188,32 +197,4 @@ def create_sheet():
         return jsonify({
             'status': 'success',
             'spreadsheetId': spreadsheet_id,
-            'spreadsheetLink': f"https://docs.google.com/spreadsheets/d/{spreadsheet_id}",
-            'message': f'Таблица "{title}" успешно создана.'
-        }), 200
-    except Exception as e:
-        print(f"Ошибка в /create-sheet: {e}")
-        return jsonify({'error': str(e)}), 500
-
-# Новый маршрут для проверки окружения
-@app.route('/check-env', methods=['GET'])
-def check_env():
-    try:
-        openai_key = os.getenv("OPENAI_API_KEY")
-        telegram_token = os.getenv("TELEGRAM_BOT_TOKEN")
-        google_credentials_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
-
-        # Проверка, настроены ли ключи
-        return jsonify({
-            'status': 'success',
-            'openai_key_set': bool(openai_key),
-            'telegram_token_set': bool(telegram_token),
-            'google_credentials_path_set': bool(google_credentials_path),
-            'message': 'Окружение настроено корректно.'
-        }), 200
-    except Exception as e:
-        return jsonify({'status': 'error', 'error': str(e)}), 500
-
-if __name__ == '__main__':
-    port = int(os.environ.get('PORT', 8080))  # Порт из переменной окружения
-    app.run(host='0.0.0.0', port=port)
+            'spreadsheetLink': f"https://docs.google.com/spreadsheets/d
