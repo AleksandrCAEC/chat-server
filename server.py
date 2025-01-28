@@ -8,10 +8,6 @@ import requests
 from googleapiclient.discovery import build
 from google.oauth2.service_account import Credentials
 
-# Проверка существования файла service_account.json
-if not os.path.exists("/etc/secrets/service_account.json"):
-    raise FileNotFoundError("Файл service_account.json не найден!")
-
 # Указание пути к файлу service_account.json
 os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = "/etc/secrets/service_account_json"
 
@@ -137,10 +133,8 @@ def chat():
 # Новый маршрут для создания таблицы Google Sheets
 @app.route('/create-sheet', methods=['POST'])
 def create_sheet():
-    print("Маршрут /create-sheet вызван!")
     try:
         data = request.json
-        print("Данные запроса:", data)
         title = data.get('title', 'Новая таблица')  # Название таблицы
         notes = data.get('notes', '')  # Примечания или дополнительные данные
 
@@ -219,19 +213,6 @@ def check_env():
         }), 200
     except Exception as e:
         return jsonify({'status': 'error', 'error': str(e)}), 500
-
-@app.route('/debug', methods=['GET'])
-def debug():
-    return jsonify({'message': 'Debug endpoint is working!'}), 200
-
-@app.route('/debug-secrets', methods=['GET'])
-def debug_secrets():
-    import os
-    exists = os.path.exists('/etc/secrets/service_account.json')
-    return jsonify({'file_exists': exists}), 200
-
-for rule in app.url_map.iter_rules():
-    print(f"Registered route: {rule}")
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 8080))  # Порт из переменной окружения
