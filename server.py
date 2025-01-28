@@ -142,12 +142,12 @@ def create_sheet():
         credentials = Credentials.from_service_account_file(os.getenv("GOOGLE_APPLICATION_CREDENTIALS"))
         service = build('sheets', 'v4', credentials=credentials)
 
-        # Создание новой таблицы с указанием родительской папки
+        # Создание новой таблицы
         sheet_body = {
             'properties': {
                 'title': title
             },
-            'parents': ['1g1OtN7ID1lM01d0bLswGqLF0m2gQIcqo']  # ID целевой папки
+            'parents': ['1g1OtN7ID1lM01d0bLswGqLF0m2gQIcqo']  # Добавление таблицы в указанную папку
         }
         spreadsheet = service.spreadsheets().create(body=sheet_body, fields='spreadsheetId').execute()
         spreadsheet_id = spreadsheet.get('spreadsheetId')
