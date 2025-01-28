@@ -8,6 +8,10 @@ import requests
 from googleapiclient.discovery import build
 from google.oauth2.service_account import Credentials
 
+# Проверка существования файла service_account.json
+if not os.path.exists("/etc/secrets/service_account.json"):
+    raise FileNotFoundError("Файл service_account.json не найден!")
+
 # Указание пути к файлу service_account.json
 os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = "/etc/secrets/service_account.json"
 
