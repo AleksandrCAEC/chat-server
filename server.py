@@ -13,7 +13,7 @@ if not os.path.exists("/etc/secrets/service_account.json"):
     raise FileNotFoundError("Файл service_account.json не найден!")
 
 # Указание пути к файлу service_account.json
-os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = "/etc/secrets/service_account.json"
+os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = "/etc/secrets/service_account_json"
 
 # Настройка API-ключа OpenAI
 openai.api_key = os.getenv("OPENAI_API_KEY")
