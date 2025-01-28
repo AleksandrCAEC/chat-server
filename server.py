@@ -133,10 +133,8 @@ def chat():
 # Новый маршрут для создания таблицы Google Sheets
 @app.route('/create-sheet', methods=['POST'])
 def create_sheet():
-    print("Маршрут /create-sheet вызван!")
     try:
         data = request.json
-        print("Данные запроса:", data)
         title = data.get('title', 'Новая таблица')  # Название таблицы
         notes = data.get('notes', '')  # Примечания или дополнительные данные
 
@@ -214,13 +212,6 @@ def check_env():
         }), 200
     except Exception as e:
         return jsonify({'status': 'error', 'error': str(e)}), 500
-
-@app.route('/debug', methods=['GET'])
-def debug():
-    return jsonify({'message': 'Debug endpoint is working!'}), 200
-
-for rule in app.url_map.iter_rules():
-    print(f"Registered route: {rule}")
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 8080))  # Порт из переменной окружения
