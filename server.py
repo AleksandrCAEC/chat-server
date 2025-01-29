@@ -102,7 +102,7 @@ def chat():
         if not user_message:
             return jsonify({'error': 'Сообщение не может быть пустым'}), 400
 
-        response = client.chat.completions.create(
+        response = openai.ChatCompletion.create(
             model="gpt-3.5-turbo",
             messages=[{"role": "assistant", "content": "Здравствуйте! Чем могу помочь?"}, {"role": "user", "content": user_message}],
             max_tokens=150
@@ -149,5 +149,5 @@ logging.basicConfig(level=logging.INFO)
 logging.info("✅ Server is starting...")
 
 if __name__ == '__main__':
-    port = int(os.environ.get('PORT', 8080))  # Используем порт из окружения
+    port = int(os.environ.get('PORT', '8080'))  # Используем порт из окружения
     app.run(host='0.0.0.0', port=port, debug=False, threaded=True)
