@@ -9,12 +9,13 @@ import requests
 from googleapiclient.discovery import build
 from google.oauth2.service_account import Credentials
 from clientdata import save_client_data
+import logging
 
 # Указание пути к файлу service_account_json
 os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = "/etc/secrets/service_account_json"
 
-# Настройка API-ключа OpenAI
-openai.api_key = os.getenv("OPENAI_API_KEY")
+# Инициализация клиента OpenAI
+client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 # Инициализация приложения Flask
 app = Flask(__name__)
@@ -101,7 +102,7 @@ def chat():
         if not user_message:
             return jsonify({'error': 'Сообщение не может быть пустым'}), 400
 
-        response = openai.ChatCompletion.create(
+        response = client.chat.completions.create(
             model="gpt-3.5-turbo",
             messages=[{"role": "assistant", "content": "Здравствуйте! Чем могу помочь?"}, {"role": "user", "content": user_message}],
             max_tokens=150
@@ -144,7 +145,6 @@ def create_sheet():
 def home():
     return jsonify({"status": "Server is running!"}), 200
 
-import logging
 logging.basicConfig(level=logging.INFO)
 logging.info("✅ Server is starting...")
 
