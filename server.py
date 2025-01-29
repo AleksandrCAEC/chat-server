@@ -131,6 +131,10 @@ def create_sheet():
         return jsonify({'error': str(e)}), 500
 
 # Добавляем логирование перед запуском сервера
+@app.route('/')
+def home():
+    return jsonify({"status": "Server is running!"}), 200
+
 import logging
 logging.basicConfig(level=logging.INFO)
 logging.info("Server is starting...")
