@@ -30,16 +30,16 @@ def load_client_data():
         return pd.DataFrame(columns=["Client Code", "Name", "Phone", "Email", "Created Date", "Last Visit", "Activity Status"])
 
 # Сохранение изменений в ClientData.xlsx
-def save_client_data(client_code, name, phone, email):
+def save_client_data(client_code, name, phone, email, created_date, last_visit):
     try:
         print("Подключение к Google Sheets...")
         credentials = Credentials.from_service_account_file(os.getenv("GOOGLE_APPLICATION_CREDENTIALS"))
         sheets_service = build('sheets', 'v4', credentials=credentials)
 
         spreadsheet_id = "1M-mRD32sQtkvTRcik7jq1n8ZshXhEearsaIBcFlheZk"
-        range_name = "Sheet1!A2:D1000"
+        range_name = "Sheet1!A2:G1000"
 
-        values = [[client_code, name, phone, email]]
+        values = [[client_code, name, phone, email, created_date, last_visit, "Active"]]
         body = {'values': values}
 
         print(f"Отправка данных в Google Sheets: {values}")
@@ -54,11 +54,9 @@ def save_client_data(client_code, name, phone, email):
         print(f"Ответ от Google API: {response}")
     except Exception as e:
         print(f"Ошибка записи в Google Sheets: {e}")
-    print(f"📝 Попытка сохранить данные: {client_code}, {name}, {phone}, {email}")  # <-- Должно появиться в логах
-    print(f"Сохранение данных: {client_code}, {name}, {phone}, {email}")  # <-- Отладка
+
     df = load_client_data()
     existing_client = df[df["Client Code"] == client_code]
-    current_date = datetime.now().strftime("%Y-%m-%d")
 
     if existing_client.empty:
         new_data = pd.DataFrame([{
@@ -66,13 +64,13 @@ def save_client_data(client_code, name, phone, email):
             "Name": name,
             "Phone": phone,
             "Email": email,
-            "Created Date": current_date,
-            "Last Visit": current_date,
+            "Created Date": created_date,
+            "Last Visit": last_visit,
             "Activity Status": "Active"
         }])
         df = pd.concat([df, new_data], ignore_index=True)
     else:
-        df.loc[df["Client Code"] == client_code, "Last Visit"] = current_date
+        df.loc[df["Client Code"] == client_code, "Last Visit"] = last_visit
 
     df.to_excel(CLIENT_DATA_FILE, index=False)
 
@@ -92,14 +90,16 @@ def register_or_update_client(data):
     email = data.get("email")
     phone = data.get("phone")
     name = data.get("name", "Unknown")
+    current_date = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
     # Проверка на существующего клиента
     existing_client = df[(df["Email"] == email) | (df["Phone"] == phone)]
 
     if not existing_client.empty:
         client_code = existing_client.iloc[0]["Client Code"]
-        df.loc[df["Client Code"] == client_code, "Last Visit"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        save_client_data(client_code, name, phone, email)
+        created_date = existing_client.iloc[0]["Created Date"]  # Берем старую дату регистрации
+        df.loc[df["Client Code"] == client_code, "Last Visit"] = current_date
+        save_client_data(client_code, name, phone, email, created_date, current_date)  # <-- Теперь аргументы всегда передаются
         return {
             "uniqueCode": client_code,
             "message": f"Добро пожаловать обратно, {name}! Ваш код: {client_code}.",
@@ -107,20 +107,11 @@ def register_or_update_client(data):
 
     # Регистрация нового клиента
     client_code = generate_unique_code()
-    new_client = {
-        "Client Code": client_code,
-        "Name": name,
-        "Phone": phone,
-        "Email": email,
-        "Created Date": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        "Last Visit": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        "Activity Status": "Active"
-    }
-    df = pd.concat([df, pd.DataFrame([new_client])], ignore_index=True)
-    save_client_data(client_code, name, phone, email)
+    created_date = current_date  # Для новых клиентов дата создания совпадает с датой первого посещения
+    save_client_data(client_code, name, phone, email, created_date, current_date)  # <-- Теперь аргументы всегда передаются
 
     # Создание файла клиента
-    create_client_file(client_code, new_client)
+    create_client_file(client_code)
 
     return {
         "uniqueCode": client_code,
@@ -128,7 +119,7 @@ def register_or_update_client(data):
     }
 
 # Создание индивидуального файла клиента
-def create_client_file(client_code, client_data):
+def create_client_file(client_code):
     client_file_path = os.path.join(BIG_DATA_PATH, f"{client_code}.xlsx")
     columns = ["Date", "Message"]
     df = pd.DataFrame(columns=columns)
