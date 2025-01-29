@@ -96,7 +96,7 @@ def register_or_update_client(data):
         client_code = existing_client.iloc[0]["Client Code"]
         created_date = existing_client.iloc[0]["Created Date"]
         df.loc[df["Client Code"] == client_code, "Last Visit"] = current_date
-        save_client_data(client_code, name, phone, email, created_date, current_date)
+        save_client_data(client_code, name, phone, email, created_date, current_date)  # <-- Исправленный вызов
         return {
             "uniqueCode": client_code,
             "message": f"Добро пожаловать обратно, {name}! Ваш код: {client_code}.",
@@ -104,7 +104,7 @@ def register_or_update_client(data):
 
     # Регистрация нового клиента
     client_code = generate_unique_code()
-    save_client_data(client_code, name, phone, email, current_date, current_date)
+    save_client_data(client_code, name, phone, email, current_date, current_date)  # <-- Исправленный вызов
 
     # Создание файла клиента
     create_client_file(client_code)
