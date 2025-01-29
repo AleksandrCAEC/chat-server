@@ -7,6 +7,7 @@ import openai
 import requests
 from googleapiclient.discovery import build
 from google.oauth2.service_account import Credentials
+from clientdata import save_client_data
 
 # Указание пути к файлу service_account_json
 os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = "/etc/secrets/service_account_json"
@@ -63,6 +64,8 @@ def register_client():
 
         unique_code = generate_unique_code()
         clients[unique_code] = {'name': name, 'phone': phone, 'email': email}
+
+        save_client_data(unique_code, name, phone, email)  # Сохраняем данные через save_client_data
 
         send_telegram_notification(f"Новый пользователь зарегистрирован: {name}, {email}, {phone}, Код: {unique_code}")
 
