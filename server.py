@@ -65,7 +65,8 @@ def register_client():
         unique_code = generate_unique_code()
         clients[unique_code] = {'name': name, 'phone': phone, 'email': email}
 
-        save_client_data(unique_code, name, phone, email)  # Сохраняем данные через save_client_data
+        print(f"🔍 Передача данных в save_client_data(): {unique_code}, {name}, {phone}, {email}")
+save_client_data(unique_code, name, phone, email)  # Сохраняем данные через save_client_data
 
         send_telegram_notification(f"Новый пользователь зарегистрирован: {name}, {email}, {phone}, Код: {unique_code}")
 
