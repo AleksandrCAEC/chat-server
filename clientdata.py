@@ -1,8 +1,13 @@
 import os
+import logging
 from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
 import pandas as pd
 from datetime import datetime
+
+# Set up logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 # Путь к подпапке BIG_DATA внутри проекта (изменено для Render)
 BIG_DATA_PATH = "./data/BIG_DATA"
@@ -19,20 +24,21 @@ def initialize_client_data():
         columns = ["Client Code", "Name", "Phone", "Email", "Created Date", "Last Visit", "Activity Status"]
         df = pd.DataFrame(columns=columns)
         df.to_excel(CLIENT_DATA_FILE, index=False)
+        logger.info("Initialized ClientData.xlsx")
 
 # Загрузка ClientData.xlsx
 def load_client_data():
     try:
         return pd.read_excel(CLIENT_DATA_FILE)
     except Exception as e:
-        print(f"Ошибка загрузки данных: {e}")
+        logger.error(f"Ошибка загрузки данных: {e}")
         initialize_client_data()
         return pd.DataFrame(columns=["Client Code", "Name", "Phone", "Email", "Created Date", "Last Visit", "Activity Status"])
 
 # Сохранение изменений в ClientData.xlsx
 def save_client_data(client_code, name, phone, email):
     try:
-        print("Подключение к Google Sheets...")
+        logger.info("Подключение к Google Sheets...")
         credentials = Credentials.from_service_account_file(os.getenv("GOOGLE_APPLICATION_CREDENTIALS"))
         sheets_service = build('sheets', 'v4', credentials=credentials)
 
@@ -42,7 +48,7 @@ def save_client_data(client_code, name, phone, email):
         values = [[client_code, name, phone, email]]
         body = {'values': values}
 
-        print(f"Отправка данных в Google Sheets: {values}")
+        logger.info(f"Отправка данных в Google Sheets: {values}")
 
         response = sheets_service.spreadsheets().values().append(
             spreadsheetId=spreadsheet_id,
@@ -51,11 +57,11 @@ def save_client_data(client_code, name, phone, email):
             body=body
         ).execute()
 
-        print(f"Ответ от Google API: {response}")
+        logger.info(f"Ответ от Google API: {response}")
     except Exception as e:
-        print(f"Ошибка записи в Google Sheets: {e}")
-    print(f"📝 Попытка сохранить данные: {client_code}, {name}, {phone}, {email}")  # <-- Должно появиться в логах
-    print(f"Сохранение данных: {client_code}, {name}, {phone}, {email}")  # <-- Отладка
+        logger.error(f"Ошибка записи в Google Sheets: {e}")
+
+    logger.info(f"📝 Попытка сохранить данные: {client_code}, {name}, {phone}, {email}")
     df = load_client_data()
     existing_client = df[df["Client Code"] == client_code]
     current_date = datetime.now().strftime("%Y-%m-%d")
@@ -75,6 +81,7 @@ def save_client_data(client_code, name, phone, email):
         df.loc[df["Client Code"] == client_code, "Last Visit"] = current_date
 
     df.to_excel(CLIENT_DATA_FILE, index=False)
+    logger.info(f"Данные сохранены: {client_code}, {name}, {phone}, {email}")
 
 # Генерация уникального кода клиента
 def generate_unique_code():
@@ -133,6 +140,7 @@ def create_client_file(client_code, client_data):
     columns = ["Date", "Message"]
     df = pd.DataFrame(columns=columns)
     df.to_excel(client_file_path, index=False)
+    logger.info(f"Создан файл клиента: {client_file_path}")
 
 # Инициализация системы при первом запуске
 initialize_client_data()
