@@ -2,12 +2,11 @@ import os
 import pandas as pd
 from datetime import datetime
 
-# Путь к подпапке BIG_DATA
-BIG_DATA_PATH = "/mnt/data/CAEC_API_Data/BIG_DATA"
+# Путь к подпапке BIG_DATA внутри проекта (изменено для Render)
+BIG_DATA_PATH = "./data/BIG_DATA"
 
 # Убедимся, что директория BIG_DATA существует
-if not os.path.exists(BIG_DATA_PATH):
-    os.makedirs(BIG_DATA_PATH)
+os.makedirs(BIG_DATA_PATH, exist_ok=True)
 
 # Путь к файлу ClientData.xlsx
 CLIENT_DATA_FILE = os.path.join(BIG_DATA_PATH, "ClientData.xlsx")
