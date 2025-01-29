@@ -1,79 +1,152 @@
+from flask import Flask, request, jsonify
+from flask_cors import CORS
+import random
+import string
 import os
-from google.oauth2.service_account import Credentials
+import openai
+import requests
 from googleapiclient.discovery import build
-import pandas as pd
-from datetime import datetime
+from google.oauth2.service_account import Credentials
+from clientdata import save_client_data
 
-# Путь к подпапке BIG_DATA внутри проекта
-BIG_DATA_PATH = "./data/BIG_DATA"
+# Указание пути к файлу service_account_json
+os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = "/etc/secrets/service_account_json"
 
-# Убедимся, что директория BIG_DATA существует
-os.makedirs(BIG_DATA_PATH, exist_ok=True)
+# Настройка API-ключа OpenAI
+openai.api_key = os.getenv("OPENAI_API_KEY")
 
-# Путь к файлу ClientData.xlsx
-CLIENT_DATA_FILE = os.path.join(BIG_DATA_PATH, "ClientData.xlsx")
+# Инициализация приложения Flask
+app = Flask(__name__)
+CORS(app)
 
-# Инициализация ClientData.xlsx, если файл не существует
-def initialize_client_data():
-    if not os.path.exists(CLIENT_DATA_FILE):
-        columns = ["Client Code", "Name", "Phone", "Email", "Created Date", "Last Visit", "Activity Status"]
-        df = pd.DataFrame(columns=columns)
-        df.to_excel(CLIENT_DATA_FILE, index=False)
+# Словарь для хранения данных клиентов
+clients = {}
 
-# Загрузка ClientData.xlsx
-def load_client_data():
+# Генерация уникального кода клиента
+def generate_unique_code():
+    random_digits = ''.join(random.choices(string.digits, k=7))
+    return f"CAEC{random_digits}"
+
+# Отправка уведомлений в Telegram
+def send_telegram_notification(message):
+    telegram_bot_token = os.getenv("TELEGRAM_BOT_TOKEN")
+    telegram_chat_id = os.getenv("TELEGRAM_CHAT_ID")
+
+    if not telegram_bot_token or not telegram_chat_id:
+        print("Переменные окружения TELEGRAM_BOT_TOKEN и TELEGRAM_CHAT_ID не настроены.")
+        return
+
+    url = f"https://api.telegram.org/bot{telegram_bot_token}/sendMessage"
+    payload = {"chat_id": telegram_chat_id, "text": message, "parse_mode": "HTML"}
+    
     try:
-        return pd.read_excel(CLIENT_DATA_FILE)
+        response = requests.post(url, json=payload)
+        response.raise_for_status()
+        print(f"✅ Telegram уведомление отправлено: {response.json()}")
+    except requests.exceptions.RequestException as e:
+        print(f"❌ Ошибка при отправке Telegram уведомления: {e}")
+
+@app.route('/register-client', methods=['POST'])
+def register_client():
+    try:
+        data = request.json
+        name = data.get('name', 'Неизвестный пользователь')
+        email = data.get('email', '')
+        phone = data.get('phone', '')
+
+        if not email or not phone:
+            return jsonify({'error': 'Email и телефон обязательны.'}), 400
+
+        # Проверяем, зарегистрирован ли клиент ранее
+        for code, client_data in clients.items():
+            if client_data['email'] == email or client_data['phone'] == phone:
+                send_telegram_notification(f"🔁 Пользователь {name} повторно вошел. Код: {code}.")
+                return jsonify({'uniqueCode': code, 'message': f'Добро пожаловать обратно, {name}! Ваш код: {code}.'}), 200
+
+        unique_code = generate_unique_code()
+        clients[unique_code] = {'name': name, 'phone': phone, 'email': email}
+
+        try:
+            print(f"🔵 Передача данных в save_client_data(): {unique_code}, {name}, {phone}, {email}")
+            save_client_data(unique_code, name, phone, email)  # Сохранение данных
+        except Exception as e:
+            print(f"❌ Ошибка при сохранении клиента: {e}")  # Логируем ошибку
+
+        send_telegram_notification(f"🆕 Новый пользователь зарегистрирован: {name}, {email}, {phone}, Код: {unique_code}")
+
+        return jsonify({'uniqueCode': unique_code, 'message': f'Добро пожаловать, {name}! Ваш код: {unique_code}.'}), 200
     except Exception as e:
-        print(f"Ошибка загрузки данных: {e}")
-        initialize_client_data()
-        return pd.DataFrame(columns=["Client Code", "Name", "Phone", "Email", "Created Date", "Last Visit", "Activity Status"])
+        print(f"❌ Ошибка в /register-client: {e}")
+        return jsonify({'error': str(e)}), 400
 
-# Сохранение изменений в ClientData.xlsx и Google Sheets
-def save_client_data(client_code, name, phone, email):
+@app.route('/verify-code', methods=['POST'])
+def verify_code():
     try:
-        print("✅ Подключение к Google Sheets...")
+        data = request.json
+        code = data.get('code', '')
+        if code in clients:
+            return jsonify({'status': 'success', 'clientData': clients[code]}), 200
+        return jsonify({'status': 'error', 'message': 'Неверный код'}), 404
+    except Exception as e:
+        print(f"❌ Ошибка в /verify-code: {e}")
+        return jsonify({'error': str(e)}), 400
+
+@app.route('/chat', methods=['POST'])
+def chat():
+    try:
+        data = request.json
+        user_message = data.get('message', '')
+
+        if not user_message:
+            return jsonify({'error': 'Сообщение не может быть пустым'}), 400
+
+        response = openai.ChatCompletion.create(
+            model="gpt-3.5-turbo",
+            messages=[{"role": "assistant", "content": "Здравствуйте! Чем могу помочь?"}, {"role": "user", "content": user_message}],
+            max_tokens=150
+        )
+
+        reply = response['choices'][0]['message']['content'].strip()
+        return jsonify({'reply': reply}), 200
+    except Exception as e:
+        print(f"❌ Ошибка в /chat: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/create-sheet', methods=['POST'])
+def create_sheet():
+    try:
+        data = request.json
+        title = data.get('title', 'Новая таблица')
+        notes = data.get('notes', '')
+
         credentials = Credentials.from_service_account_file(os.getenv("GOOGLE_APPLICATION_CREDENTIALS"))
         sheets_service = build('sheets', 'v4', credentials=credentials)
+        drive_service = build('drive', 'v3', credentials=credentials)
 
-        spreadsheet_id = "1M-mRD32sQtkvTRcik7jq1n8ZshXhEearsaIBcFlheZk"
-        range_name = "Sheet1!A2:G1000"
+        spreadsheet = sheets_service.spreadsheets().create(body={'properties': {'title': title}}, fields='spreadsheetId').execute()
+        spreadsheet_id = spreadsheet.get('spreadsheetId')
 
-        current_date = datetime.now().strftime("%Y-%m-%d")
-        values = [[client_code, name, phone, email, current_date, current_date, "Active"]]
-        body = {'values': values}
+        folder_id = '1g1OtN7ID1lM01d0bLswGqLF0m2gQIcqo'
+        drive_service.files().update(fileId=spreadsheet_id, addParents=folder_id, removeParents='root', fields='id, parents').execute()
 
-        print(f"📤 Отправка данных в Google Sheets: {values}")
+        if notes:
+            requests_body = {'requests': [{'updateCells': {'range': {'sheetId': 0, 'startRowIndex': 0, 'startColumnIndex': 0}, 'rows': [{'values': [{'userEnteredValue': {'stringValue': notes}}]}], 'fields': 'userEnteredValue'}}]}
+            sheets_service.spreadsheets().batchUpdate(spreadsheetId=spreadsheet_id, body=requests_body).execute()
 
-        response = sheets_service.spreadsheets().values().append(
-            spreadsheetId=spreadsheet_id,
-            range=range_name,
-            valueInputOption="RAW",
-            body=body
-        ).execute()
-
-        print(f"✅ Ответ от Google API: {response}")
-
+        return jsonify({'status': 'success', 'spreadsheetId': spreadsheet_id, 'spreadsheetLink': f"https://docs.google.com/spreadsheets/d/{spreadsheet_id}", 'message': f'Таблица "{title}" успешно создана.'}), 200
     except Exception as e:
-        print(f"❌ Ошибка записи в Google Sheets: {e}")
+        print(f"❌ Ошибка в /create-sheet: {e}")
+        return jsonify({'error': str(e)}), 500
 
-    print(f"📝 Локальное сохранение данных: {client_code}, {name}, {phone}, {email}")
+# Добавляем логирование перед запуском сервера
+@app.route('/')
+def home():
+    return jsonify({"status": "Server is running!"}), 200
 
-    df = load_client_data()
-    existing_client = df[df["Client Code"] == client_code]
+import logging
+logging.basicConfig(level=logging.INFO)
+logging.info("✅ Server is starting...")
 
-    if existing_client.empty:
-        new_data = pd.DataFrame([{
-            "Client Code": client_code,
-            "Name": name,
-            "Phone": phone,
-            "Email": email,
-            "Created Date": current_date,
-            "Last Visit": current_date,
-            "Activity Status": "Active"
-        }])
-        df = pd.concat([df, new_data], ignore_index=True)
-    else:
-        df.loc[df["Client Code"] == client_code, "Last Visit"] = current_date
-
-    df.to_excel(CLIENT_DATA_FILE, index=False)
+if __name__ == '__main__':
+    port = int(os.environ.get('PORT', 8080))  # Используем порт из окружения
+    app.run(host='0.0.0.0', port=port, debug=False, threaded=True)
