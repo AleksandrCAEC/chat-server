@@ -11,13 +11,13 @@ from google.oauth2.service_account import Credentials
 from clientdata import save_client_data
 import logging
 
-# Указание пути к файлу service_account_json
+# Указываем путь к файлу service_account_json
 os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = "/etc/secrets/service_account_json"
 
-# Инициализация клиента OpenAI
-openai.api_key = os.getenv("OPENAI_API_KEY")
+# Инициализируем клиент OpenAI 
+client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
-# Инициализация приложения Flask
+# Инициализируем приложение Flask
 app = Flask(__name__)
 CORS(app)
 
@@ -62,14 +62,14 @@ def register_client():
         # Проверяем, зарегистрирован ли клиент ранее
         for code, client_data in clients.items():
             if client_data['email'] == email or client_data['phone'] == phone:
-                send_telegram_notification(f"🔁 Пользователь {name} повторно вошел. Код: {code}.")
+                send_telegram_notification(f" Пользователь {name} повторно вошел. Код: {code}.")
                 return jsonify({'uniqueCode': code, 'message': f'Добро пожаловать обратно, {name}! Ваш код: {code}.'}), 200
 
         unique_code = generate_unique_code()
         clients[unique_code] = {'name': name, 'phone': phone, 'email': email}
 
         try:
-            print(f"🔵 Передача данных в save_client_data(): {unique_code}, {name}, {phone}, {email}")
+            print(f" Передача данных в save_client_data(): {unique_code}, {name}, {phone}, {email}")
             save_client_data(unique_code, name, phone, email)  # Сохранение данных
         except Exception as e:
             print(f"❌ Ошибка при сохранении клиента: {e}")  # Логируем ошибку
@@ -102,7 +102,7 @@ def chat():
         if not user_message:
             return jsonify({'error': 'Сообщение не может быть пустым'}), 400
 
-        response = openai.ChatCompletion.create(
+        response = client.chat.completions.create(
             model="gpt-3.5-turbo",
             messages=[{"role": "assistant", "content": "Здравствуйте! Чем могу помочь?"}, {"role": "user", "content": user_message}],
             max_tokens=150
@@ -128,7 +128,7 @@ def create_sheet():
         spreadsheet = sheets_service.spreadsheets().create(body={'properties': {'title': title}}, fields='spreadsheetId').execute()
         spreadsheet_id = spreadsheet.get('spreadsheetId')
 
-        folder_id = '1g1OtN7ID1lM01d0bLswGqLF0m2gQIcqo'
+        folder_id = '1g1OtN7ID1lM01d0bLswGqLF0m2gQIcqo' # замените на ID вашей папки
         drive_service.files().update(fileId=spreadsheet_id, addParents=folder_id, removeParents='root', fields='id, parents').execute()
 
         if notes:
