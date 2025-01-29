@@ -7,7 +7,6 @@ import openai
 import requests
 from googleapiclient.discovery import build
 from google.oauth2.service_account import Credentials
-from clientdata import register_or_update_client
 
 # Указание пути к файлу service_account_json
 os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = "/etc/secrets/service_account_json"
@@ -37,11 +36,8 @@ def send_telegram_notification(message):
         return
 
     url = f"https://api.telegram.org/bot{telegram_bot_token}/sendMessage"
-    payload = {
-        "chat_id": telegram_chat_id,
-        "text": message,
-        "parse_mode": "HTML"
-    }
+    payload = {"chat_id": telegram_chat_id, "text": message, "parse_mode": "HTML"}
+    
     try:
         response = requests.post(url, json=payload)
         response.raise_for_status()
@@ -53,8 +49,24 @@ def send_telegram_notification(message):
 def register_client():
     try:
         data = request.json
-        response = register_or_update_client(data)
-        return jsonify(response)
+        name = data.get('name', 'Неизвестный пользователь')
+        email = data.get('email', '')
+        phone = data.get('phone', '')
+
+        if not email or not phone:
+            return jsonify({'error': 'Email и телефон обязательны.'}), 400
+
+        for code, client_data in clients.items():
+            if client_data['email'] == email or client_data['phone'] == phone:
+                send_telegram_notification(f"Пользователь {name} повторно вошел. Код: {code}.")
+                return jsonify({'uniqueCode': code, 'message': f'Добро пожаловать обратно, {name}! Ваш код: {code}.'}), 200
+
+        unique_code = generate_unique_code()
+        clients[unique_code] = {'name': name, 'phone': phone, 'email': email}
+
+        send_telegram_notification(f"Новый пользователь зарегистрирован: {name}, {email}, {phone}, Код: {unique_code}")
+
+        return jsonify({'uniqueCode': unique_code, 'message': f'Добро пожаловать, {name}! Ваш код: {unique_code}.'}), 200
     except Exception as e:
         print(f"Ошибка в /register-client: {e}")
         return jsonify({'error': str(e)}), 400
@@ -65,10 +77,8 @@ def verify_code():
         data = request.json
         code = data.get('code', '')
         if code in clients:
-            name = clients[code]['name']
-            return jsonify({'status': 'success', 'clientData': clients[code], 'message': f'Добро пожаловать обратно, {name}!'}), 200
-        else:
-            return jsonify({'status': 'error', 'message': 'Неверный код'}), 404
+            return jsonify({'status': 'success', 'clientData': clients[code]}), 200
+        return jsonify({'status': 'error', 'message': 'Неверный код'}), 404
     except Exception as e:
         print(f"Ошибка в /verify-code: {e}")
         return jsonify({'error': str(e)}), 400
@@ -82,13 +92,9 @@ def chat():
         if not user_message:
             return jsonify({'error': 'Сообщение не может быть пустым'}), 400
 
-        # Вызов OpenAI API через v1/chat/completions
         response = openai.ChatCompletion.create(
             model="gpt-3.5-turbo",
-            messages=[
-                {"role": "assistant", "content": "Здравствуйте! Чем могу помочь?"},
-                {"role": "user", "content": user_message}
-            ],
+            messages=[{"role": "assistant", "content": "Здравствуйте! Чем могу помочь?"}, {"role": "user", "content": user_message}],
             max_tokens=150
         )
 
@@ -102,75 +108,33 @@ def chat():
 def create_sheet():
     try:
         data = request.json
-        title = data.get('title', 'Новая таблица')  # Название таблицы
-        notes = data.get('notes', '')  # Примечания или дополнительные данные
+        title = data.get('title', 'Новая таблица')
+        notes = data.get('notes', '')
 
-        # Установление соединения с Google Sheets API
         credentials = Credentials.from_service_account_file(os.getenv("GOOGLE_APPLICATION_CREDENTIALS"))
         sheets_service = build('sheets', 'v4', credentials=credentials)
         drive_service = build('drive', 'v3', credentials=credentials)
 
-        # Создание новой таблицы
-        spreadsheet = {
-            'properties': {
-                'title': title
-            }
-        }
-        spreadsheet = sheets_service.spreadsheets().create(body=spreadsheet, fields='spreadsheetId').execute()
+        spreadsheet = sheets_service.spreadsheets().create(body={'properties': {'title': title}}, fields='spreadsheetId').execute()
         spreadsheet_id = spreadsheet.get('spreadsheetId')
 
-        # Перемещение таблицы в указанную папку
         folder_id = '1g1OtN7ID1lM01d0bLswGqLF0m2gQIcqo'
-        drive_service.files().update(
-            fileId=spreadsheet_id,
-            addParents=folder_id,
-            removeParents='root',
-            fields='id, parents'
-        ).execute()
+        drive_service.files().update(fileId=spreadsheet_id, addParents=folder_id, removeParents='root', fields='id, parents').execute()
 
-        # Добавление заметок в таблицу, если указаны
         if notes:
-            requests_body = {
-                'requests': [
-                    {
-                        'updateCells': {
-                            'range': {
-                                'sheetId': 0,  # ID листа по умолчанию
-                                'startRowIndex': 0,
-                                'startColumnIndex': 0
-                            },
-                            'rows': [
-                                {
-                                    'values': [
-                                        {
-                                            'userEnteredValue': {
-                                                'stringValue': notes
-                                            }
-                                        }
-                                    ]
-                                }
-                            ],
-                            'fields': 'userEnteredValue'
-                        }
-                    }
-                ]
-            }
-            sheets_service.spreadsheets().batchUpdate(
-                spreadsheetId=spreadsheet_id,
-                body=requests_body
-            ).execute()
+            requests_body = {'requests': [{'updateCells': {'range': {'sheetId': 0, 'startRowIndex': 0, 'startColumnIndex': 0}, 'rows': [{'values': [{'userEnteredValue': {'stringValue': notes}}]}], 'fields': 'userEnteredValue'}}]}
+            sheets_service.spreadsheets().batchUpdate(spreadsheetId=spreadsheet_id, body=requests_body).execute()
 
-        # Возврат результата
-        return jsonify({
-            'status': 'success',
-            'spreadsheetId': spreadsheet_id,
-            'spreadsheetLink': f"https://docs.google.com/spreadsheets/d/{spreadsheet_id}",
-            'message': f'Таблица "{title}" успешно создана.'
-        }), 200
+        return jsonify({'status': 'success', 'spreadsheetId': spreadsheet_id, 'spreadsheetLink': f"https://docs.google.com/spreadsheets/d/{spreadsheet_id}", 'message': f'Таблица "{title}" успешно создана.'}), 200
     except Exception as e:
         print(f"Ошибка в /create-sheet: {e}")
         return jsonify({'error': str(e)}), 500
 
+# Добавляем логирование перед запуском сервера
+import logging
+logging.basicConfig(level=logging.INFO)
+logging.info("Server is starting...")
+
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 8080))  # Используем порт из окружения
-    app.run(host='0.0.0.0', port=port, debug=True, threaded=True)
+    app.run(host='0.0.0.0', port=port, debug=False, threaded=True)
