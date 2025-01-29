@@ -101,7 +101,7 @@ def chat():
         if not user_message:
             return jsonify({'error': 'Сообщение не может быть пустым'}), 400
 
-        response = client.chat.completions.create(
+        response = openai.ChatCompletion.create(
             model="gpt-3.5-turbo",
             messages=[{"role": "assistant", "content": "Здравствуйте! Чем могу помочь?"}, {"role": "user", "content": user_message}],
             max_tokens=150
