@@ -29,6 +29,29 @@ def load_client_data():
 
 # Сохранение изменений в ClientData.xlsx
 def save_client_data(client_code, name, phone, email):
+    try:
+        print("Подключение к Google Sheets...")
+        credentials = Credentials.from_service_account_file(os.getenv("GOOGLE_APPLICATION_CREDENTIALS"))
+        sheets_service = build('sheets', 'v4', credentials=credentials)
+
+        spreadsheet_id = "ID_ТВОЕЙ_ТАБЛИЦЫ"
+        range_name = "ClientData!A2:D1000"
+
+        values = [[client_code, name, phone, email]]
+        body = {'values': values}
+
+        print(f"Отправка данных в Google Sheets: {values}")
+
+        response = sheets_service.spreadsheets().values().append(
+            spreadsheetId=spreadsheet_id,
+            range=range_name,
+            valueInputOption="RAW",
+            body=body
+        ).execute()
+
+        print(f"Ответ от Google API: {response}")
+    except Exception as e:
+        print(f"Ошибка записи в Google Sheets: {e}")
     print(f"📝 Попытка сохранить данные: {client_code}, {name}, {phone}, {email}")  # <-- Должно появиться в логах
     print(f"Сохранение данных: {client_code}, {name}, {phone}, {email}")  # <-- Отладка
     df = load_client_data()
