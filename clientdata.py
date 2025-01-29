@@ -28,18 +28,13 @@ def load_client_data():
         return pd.DataFrame(columns=["Client Code", "Name", "Phone", "Email", "Created Date", "Last Visit", "Activity Status"])
 
 # Сохранение данных клиента в ClientData.xlsx и Google Sheets
-def save_client_data(client_code, name, phone, email, created_date=None, last_visit=None):
+def save_client_data(client_code, name, phone, email, created_date, last_visit):
     try:
         credentials = Credentials.from_service_account_file(os.getenv("GOOGLE_APPLICATION_CREDENTIALS"))
         sheets_service = build('sheets', 'v4', credentials=credentials)
 
         spreadsheet_id = "1M-mRD32sQtkvTRcik7jq1n8ZshXhEearsaIBcFlheZk"
         range_name = "Sheet1!A2:G1000"
-
-        if not created_date:
-            created_date = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        if not last_visit:
-            last_visit = created_date
 
         values = [[client_code, name, phone, email, created_date, last_visit, "Active"]]
         body = {'values': values}
