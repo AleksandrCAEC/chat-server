@@ -20,7 +20,12 @@ def initialize_client_data():
 
 # Загрузка ClientData.xlsx
 def load_client_data():
-    return pd.read_excel(CLIENT_DATA_FILE)
+    try:
+        return pd.read_excel(CLIENT_DATA_FILE)
+    except Exception as e:
+        print(f"Ошибка загрузки данных: {e}")
+        initialize_client_data()
+        return pd.DataFrame(columns=["Client Code", "Name", "Phone", "Email", "Created Date", "Last Visit", "Activity Status"])
 
 # Сохранение изменений в ClientData.xlsx
 def save_client_data(df):
@@ -66,7 +71,7 @@ def register_or_update_client(data):
         "Last Visit": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "Activity Status": "Active"
     }
-    df = df.append(new_client, ignore_index=True)
+    df = pd.concat([df, pd.DataFrame([new_client])], ignore_index=True)
     save_client_data(df)
 
     # Создание файла клиента
@@ -83,6 +88,28 @@ def create_client_file(client_code, client_data):
     columns = ["Date", "Message"]
     df = pd.DataFrame(columns=columns)
     df.to_excel(client_file_path, index=False)
+
+# Сохранение клиента (обновлённая функция)
+def save_client_data_v2(client_code, name, phone, email):
+    df = load_client_data()
+    existing_client = df[df["Client Code"] == client_code]
+    current_date = datetime.now().strftime("%Y-%m-%d")
+
+    if existing_client.empty:
+        new_data = pd.DataFrame([{
+            "Client Code": client_code,
+            "Name": name,
+            "Phone": phone,
+            "Email": email,
+            "Created Date": current_date,
+            "Last Visit": current_date,
+            "Activity Status": "Active"
+        }])
+        df = pd.concat([df, new_data], ignore_index=True)
+    else:
+        df.loc[df["Client Code"] == client_code, "Last Visit"] = current_date
+
+    save_client_data(df)
 
 # Инициализация системы при первом запуске
 initialize_client_data()
