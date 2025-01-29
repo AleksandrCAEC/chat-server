@@ -42,9 +42,9 @@ def send_telegram_notification(message):
     try:
         response = requests.post(url, json=payload)
         response.raise_for_status()
-        print(f"Telegram уведомление отправлено: {response.json()}")
+        print(f"✅ Telegram уведомление отправлено: {response.json()}")
     except requests.exceptions.RequestException as e:
-        print(f"Ошибка при отправке Telegram уведомления: {e}")
+        print(f"❌ Ошибка при отправке Telegram уведомления: {e}")
 
 @app.route('/register-client', methods=['POST'])
 def register_client():
@@ -57,25 +57,26 @@ def register_client():
         if not email or not phone:
             return jsonify({'error': 'Email и телефон обязательны.'}), 400
 
+        # Проверяем, зарегистрирован ли клиент ранее
         for code, client_data in clients.items():
             if client_data['email'] == email or client_data['phone'] == phone:
-                send_telegram_notification(f"Пользователь {name} повторно вошел. Код: {code}.")
+                send_telegram_notification(f"🔁 Пользователь {name} повторно вошел. Код: {code}.")
                 return jsonify({'uniqueCode': code, 'message': f'Добро пожаловать обратно, {name}! Ваш код: {code}.'}), 200
 
         unique_code = generate_unique_code()
         clients[unique_code] = {'name': name, 'phone': phone, 'email': email}
 
         try:
-    print(f"🔵 Передача данных в save_client_data(): {unique_code}, {name}, {phone}, {email}")
-    save_client_data(unique_code, name, phone, email)  # Сохранение данных
-except Exception as e:
-    print(f"❌ Ошибка при сохранении клиента: {e}")  # Логируем ошибку  # Сохраняем данные через save_client_data
+            print(f"🔵 Передача данных в save_client_data(): {unique_code}, {name}, {phone}, {email}")
+            save_client_data(unique_code, name, phone, email)  # Сохранение данных
+        except Exception as e:
+            print(f"❌ Ошибка при сохранении клиента: {e}")  # Логируем ошибку
 
-        send_telegram_notification(f"Новый пользователь зарегистрирован: {name}, {email}, {phone}, Код: {unique_code}")
+        send_telegram_notification(f"🆕 Новый пользователь зарегистрирован: {name}, {email}, {phone}, Код: {unique_code}")
 
         return jsonify({'uniqueCode': unique_code, 'message': f'Добро пожаловать, {name}! Ваш код: {unique_code}.'}), 200
     except Exception as e:
-        print(f"Ошибка в /register-client: {e}")
+        print(f"❌ Ошибка в /register-client: {e}")
         return jsonify({'error': str(e)}), 400
 
 @app.route('/verify-code', methods=['POST'])
@@ -87,7 +88,7 @@ def verify_code():
             return jsonify({'status': 'success', 'clientData': clients[code]}), 200
         return jsonify({'status': 'error', 'message': 'Неверный код'}), 404
     except Exception as e:
-        print(f"Ошибка в /verify-code: {e}")
+        print(f"❌ Ошибка в /verify-code: {e}")
         return jsonify({'error': str(e)}), 400
 
 @app.route('/chat', methods=['POST'])
@@ -108,7 +109,7 @@ def chat():
         reply = response['choices'][0]['message']['content'].strip()
         return jsonify({'reply': reply}), 200
     except Exception as e:
-        print(f"Ошибка в /chat: {e}")
+        print(f"❌ Ошибка в /chat: {e}")
         return jsonify({'error': str(e)}), 500
 
 @app.route('/create-sheet', methods=['POST'])
@@ -134,7 +135,7 @@ def create_sheet():
 
         return jsonify({'status': 'success', 'spreadsheetId': spreadsheet_id, 'spreadsheetLink': f"https://docs.google.com/spreadsheets/d/{spreadsheet_id}", 'message': f'Таблица "{title}" успешно создана.'}), 200
     except Exception as e:
-        print(f"Ошибка в /create-sheet: {e}")
+        print(f"❌ Ошибка в /create-sheet: {e}")
         return jsonify({'error': str(e)}), 500
 
 # Добавляем логирование перед запуском сервера
@@ -144,7 +145,7 @@ def home():
 
 import logging
 logging.basicConfig(level=logging.INFO)
-logging.info("Server is starting...")
+logging.info("✅ Server is starting...")
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 8080))  # Используем порт из окружения
