@@ -7,6 +7,7 @@ import openai
 import requests
 from googleapiclient.discovery import build
 from google.oauth2.service_account import Credentials
+from clientdata import register_or_update_client
 
 # Указание пути к файлу service_account_json
 os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = "/etc/secrets/service_account_json"
@@ -52,41 +53,8 @@ def send_telegram_notification(message):
 def register_client():
     try:
         data = request.json
-        name = data.get('name', 'Неизвестный пользователь')
-        email = data.get('email', '')
-        phone = data.get('phone', '')
-
-        if not email or not phone:
-            return jsonify({'error': 'Email и телефон обязательны.'}), 400
-
-        # Проверка на существующего пользователя
-        for code, client_data in clients.items():
-            if client_data['email'] == email or client_data['phone'] == phone:
-                send_telegram_notification(f"Пользователь {name} повторно вошел. Код: {code}.")
-                return jsonify({
-                    'uniqueCode': code,
-                    'message': f'Добро пожаловать обратно, {name}! Ваш код: {code}.',
-                    'telegramSuggestion': 'Вы можете продолжить общение в Telegram: @ВашБот'
-                }), 200
-
-        # Регистрация нового клиента
-        unique_code = generate_unique_code()
-        clients[unique_code] = {
-            'name': name,
-            'phone': phone,
-            'email': email
-        }
-
-        # Отправка уведомления в Telegram
-        send_telegram_notification(
-            f"Новый пользователь зарегистрирован:\nИмя: {name}\nEmail: {email}\nТелефон: {phone}\nКод: {unique_code}"
-        )
-
-        return jsonify({
-            'uniqueCode': unique_code,
-            'message': f'Добро пожаловать, {name}! Ваш код: {unique_code}.',
-            'telegramSuggestion': 'Вы можете продолжить общение в Telegram: @ВашБот'
-        }), 200
+        response = register_or_update_client(data)
+        return jsonify(response)
     except Exception as e:
         print(f"Ошибка в /register-client: {e}")
         return jsonify({'error': str(e)}), 400
