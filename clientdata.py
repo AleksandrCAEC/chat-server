@@ -37,7 +37,7 @@ def save_client_data(client_code, name, phone, email):
         sheets_service = build('sheets', 'v4', credentials=credentials)
 
         spreadsheet_id = "1M-mRD32sQtkvTRcik7jq1n8ZshXhEearsaIBcFlheZk"
-        range_name = "ClientData!A2:D1000"
+        range_name = "Sheet1!A2:D1000"
 
         values = [[client_code, name, phone, email]]
         body = {'values': values}
