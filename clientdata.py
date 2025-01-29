@@ -94,7 +94,7 @@ def register_or_update_client(data):
 
     if not existing_client.empty:
         client_code = existing_client.iloc[0]["Client Code"]
-        created_date = existing_client.iloc[0]["Created Date"]
+        created_date = existing_client.iloc[0]["Created Date"]  # Берем старую дату создания
         df.loc[df["Client Code"] == client_code, "Last Visit"] = current_date
         save_client_data(client_code, name, phone, email, created_date, current_date)  # <-- Исправленный вызов
         return {
