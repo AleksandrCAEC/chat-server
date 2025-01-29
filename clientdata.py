@@ -111,10 +111,7 @@ def register_or_update_client(data):
     save_client_data(client_code, name, phone, email, created_date, current_date)  # <-- Теперь аргументы всегда передаются
 
     # Создание файла клиента
-    create_client_file(client_code, {
-        "Created Date": created_date,
-        "Last Visit": current_date
-    })
+    create_client_file(client_code, created_date, current_date)
 
     return {
         "uniqueCode": client_code,
@@ -122,9 +119,9 @@ def register_or_update_client(data):
     }
 
 # Создание индивидуального файла клиента
-def create_client_file(client_code, client_data):
+def create_client_file(client_code, created_date, last_visit):
     client_file_path = os.path.join(BIG_DATA_PATH, f"{client_code}.xlsx")
-    
+
     if not os.path.exists(client_file_path):
         columns = ["Date", "Message", "Created Date", "Last Visit"]
         df = pd.DataFrame(columns=columns)
@@ -132,8 +129,8 @@ def create_client_file(client_code, client_data):
         df = df.append({
             "Date": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             "Message": "Клиент зарегистрирован",
-            "Created Date": client_data["Created Date"],
-            "Last Visit": client_data["Last Visit"]
+            "Created Date": created_date,
+            "Last Visit": last_visit
         }, ignore_index=True)
 
         df.to_excel(client_file_path, index=False)
