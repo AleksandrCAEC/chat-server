@@ -4,10 +4,8 @@ from googleapiclient.discovery import build
 import pandas as pd
 from datetime import datetime
 
-# Путь к подпапке BIG_DATA внутри проекта (изменено для Render)
+# Путь к подпапке BIG_DATA
 BIG_DATA_PATH = "./data/BIG_DATA"
-
-# Убедимся, что директория BIG_DATA существует
 os.makedirs(BIG_DATA_PATH, exist_ok=True)
 
 # Путь к файлу ClientData.xlsx
@@ -29,10 +27,9 @@ def load_client_data():
         initialize_client_data()
         return pd.DataFrame(columns=["Client Code", "Name", "Phone", "Email", "Created Date", "Last Visit", "Activity Status"])
 
-# Сохранение данных клиента в Google Sheets и локальный Excel
+# Сохранение данных клиента в Google Sheets и локальный файл
 def save_client_data(client_code, name, phone, email, created_date, last_visit):
     try:
-        print("Подключение к Google Sheets...")
         credentials = Credentials.from_service_account_file(os.getenv("GOOGLE_APPLICATION_CREDENTIALS"))
         sheets_service = build('sheets', 'v4', credentials=credentials)
 
@@ -99,7 +96,7 @@ def register_or_update_client(data):
         client_code = existing_client.iloc[0]["Client Code"]
         created_date = existing_client.iloc[0]["Created Date"]  # Берем старую дату регистрации
         df.loc[df["Client Code"] == client_code, "Last Visit"] = current_date
-        save_client_data(client_code, name, phone, email, created_date, current_date)  # <-- Передаем все аргументы
+        save_client_data(client_code, name, phone, email, created_date, current_date)  # Передаем все аргументы
         return {
             "uniqueCode": client_code,
             "message": f"Добро пожаловать обратно, {name}! Ваш код: {client_code}.",
@@ -108,7 +105,7 @@ def register_or_update_client(data):
     # Регистрация нового клиента
     client_code = generate_unique_code()
     created_date = current_date  # Для новых клиентов дата регистрации = текущая дата
-    save_client_data(client_code, name, phone, email, created_date, current_date)  # <-- Передаем все аргументы
+    save_client_data(client_code, name, phone, email, created_date, current_date)  # Передаем все аргументы
 
     # Создание файла клиента
     create_client_file(client_code, created_date, current_date)
