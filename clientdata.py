@@ -29,6 +29,7 @@ def load_client_data():
 
 # Сохранение изменений в ClientData.xlsx
 def save_client_data(client_code, name, phone, email):
+    print(f"📝 Попытка сохранить данные: {client_code}, {name}, {phone}, {email}")  # <-- Должно появиться в логах
     print(f"Сохранение данных: {client_code}, {name}, {phone}, {email}")  # <-- Отладка
     df = load_client_data()
     existing_client = df[df["Client Code"] == client_code]
