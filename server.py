@@ -4,6 +4,7 @@ import random
 import string
 import os
 import openai
+from openai import OpenAI
 import requests
 from googleapiclient.discovery import build
 from google.oauth2.service_account import Credentials
