@@ -99,6 +99,18 @@ def save_client_data(client_code, name, phone, email, created_date, last_visit, 
     df.to_excel(CLIENT_DATA_FILE, index=False)
     logger.info(f"Данные сохранены в ClientData.xlsx: {client_code}, {name}, {phone}, {email}")
 
+# Проверка существующего клиента по email или телефону
+def find_existing_client(email, phone):
+    df = load_client_data()
+    existing_client = df[(df["Email"] == email) | (df["Phone"] == phone)]
+    return existing_client.iloc[0] if not existing_client.empty else None
+
+# Проверка кода клиента
+def verify_client_code(code):
+    df = load_client_data()
+    existing_client = df[df["Client Code"] == code]
+    return existing_client.iloc[0] if not existing_client.empty else None
+
 # Регистрация или обновление клиента
 def register_or_update_client(data):
     initialize_client_data()
@@ -109,18 +121,18 @@ def register_or_update_client(data):
     name = data.get("name", "Unknown")
 
     # Проверка на существующего клиента по email или телефону
-    existing_client = df[(df["Email"].str.contains(email, na=False)) | (df["Phone"].str.contains(phone, na=False))]
+    existing_client = find_existing_client(email, phone)
 
-    if not existing_client.empty:
+    if existing_client is not None:
         # Если клиент уже существует, возвращаем его код
-        client_code = existing_client.iloc[0]["Client Code"]
-        created_date = existing_client.iloc[0]["Created Date"]
+        client_code = existing_client["Client Code"]
+        created_date = existing_client["Created Date"]
         last_visit = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         activity_status = "Active"  # Устанавливаем статус "Active"
 
         # Обновляем телефон и email, если они отличаются
-        existing_phone = existing_client.iloc[0]["Phone"]
-        existing_email = existing_client.iloc[0]["Email"]
+        existing_phone = existing_client["Phone"]
+        existing_email = existing_client["Email"]
 
         if phone not in existing_phone:
             existing_phone += f", {phone}"
