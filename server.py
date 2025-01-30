@@ -50,11 +50,13 @@ def send_telegram_notification(message):
 def register_client():
     try:
         data = request.json
+        logger.info(f"Данные, полученные от клиента: {data}")  # Логируем данные
         name = data.get('name', 'Неизвестный пользователь')
         email = data.get('email', '')
         phone = data.get('phone', '')
 
         if not email or not phone:
+            logger.error("Отсутствует email или телефон.")
             return jsonify({'error': 'Email и телефон обязательны.'}), 400
 
         # Регистрация или обновление клиента через clientdata.py
@@ -70,13 +72,19 @@ def register_client():
 def verify_code():
     try:
         data = request.json
+        logger.info(f"Данные, полученные от клиента: {data}")  # Логируем данные
         code = data.get('code', '')
+
+        if not code:
+            logger.error("Код клиента не был передан.")
+            return jsonify({'error': 'Код клиента обязателен.'}), 400
 
         # Проверка кода клиента через clientdata.py
         client_data = verify_client_code(code)
         if client_data is not None:
             send_telegram_notification(f"🔁 Пользователь вернулся: {client_data['Name']}, {client_data['Phone']}, {client_data['Email']}, Код: {code}")
             return jsonify({'status': 'success', 'clientData': client_data}), 200
+        logger.error(f"Код клиента не найден: {code}")
         return jsonify({'status': 'error', 'message': 'Неверный код'}), 404
     except Exception as e:
         logger.error(f"❌ Ошибка в /verify-code: {e}")
