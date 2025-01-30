@@ -6,6 +6,17 @@ import requests
 from clientdata import register_or_update_client, verify_client_code  # Импортируем функции из clientdata.py
 import logging
 
+# Настройка логирования
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    handlers=[
+        logging.FileHandler("app.log"),  # Логи записываются в файл app.log
+        logging.StreamHandler()  # Логи выводятся в консоль
+    ]
+)
+logger = logging.getLogger(__name__)
+
 # Указание пути к файлу service_account_json
 os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = "/etc/secrets/service_account_json"
 
