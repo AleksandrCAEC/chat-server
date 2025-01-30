@@ -3,7 +3,7 @@ from flask_cors import CORS
 import os
 from openai import OpenAI
 import requests
-from clientdata import register_or_update_client  # Импортируем функцию из clientdata.py
+from clientdata import register_or_update_client, verify_client_code  # Импортируем функции из clientdata.py
 import logging
 
 # Указание пути к файлу service_account_json
@@ -60,8 +60,11 @@ def verify_code():
     try:
         data = request.json
         code = data.get('code', '')
-        if code in clients:
-            return jsonify({'status': 'success', 'clientData': clients[code]}), 200
+
+        # Проверка кода клиента через clientdata.py
+        client_data = verify_client_code(code)
+        if client_data is not None:
+            return jsonify({'status': 'success', 'clientData': client_data.to_dict()}), 200
         return jsonify({'status': 'error', 'message': 'Неверный код'}), 404
     except Exception as e:
         print(f"❌ Ошибка в /verify-code: {e}")
