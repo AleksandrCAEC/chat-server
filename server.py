@@ -64,7 +64,7 @@ def verify_code():
         # Проверка кода клиента через clientdata.py
         client_data = verify_client_code(code)
         if client_data is not None:
-            return jsonify({'status': 'success', 'clientData': client_data.to_dict()}), 200
+            return jsonify({'status': 'success', 'clientData': client_data}), 200
         return jsonify({'status': 'error', 'message': 'Неверный код'}), 404
     except Exception as e:
         print(f"❌ Ошибка в /verify-code: {e}")
