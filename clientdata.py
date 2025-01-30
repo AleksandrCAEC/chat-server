@@ -75,6 +75,7 @@ def save_client_data(client_code, name, phone, email, created_date, last_visit, 
         logger.info(f"Ответ от Google API: {response}")
     except Exception as e:
         logger.error(f"Ошибка записи в Google Sheets: {e}")
+        raise  # Повторно выбрасываем исключение для диагностики
 
     # Сохранение в локальный файл ClientData.xlsx
     df = load_client_data()
