@@ -2,7 +2,7 @@ import os
 from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
 import pandas as pd
-from datetime import datetime
+from datetime import datetime, timedelta
 import logging
 
 # Настройка логирования
@@ -93,6 +93,7 @@ def save_client_data(client_code, name, phone, email, created_date, last_visit, 
         }])
         df = pd.concat([df, new_data], ignore_index=True)
     else:
+        # Обновляем данные клиента
         df.loc[df["Client Code"] == client_code, ["Name", "Phone", "Email", "Last Visit", "Activity Status"]] = [name, phone, email, last_visit, activity_status]
 
     df.to_excel(CLIENT_DATA_FILE, index=False)
@@ -108,7 +109,7 @@ def register_or_update_client(data):
     name = data.get("name", "Unknown")
 
     # Проверка на существующего клиента по email или телефону
-    existing_client = df[(df["Email"] == email) | (df["Phone"] == phone)]
+    existing_client = df[(df["Email"].str.contains(email, na=False)) | (df["Phone"].str.contains(phone, na=False))]
 
     if not existing_client.empty:
         # Если клиент уже существует, возвращаем его код
@@ -117,11 +118,20 @@ def register_or_update_client(data):
         last_visit = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         activity_status = "Active"  # Устанавливаем статус "Active"
 
+        # Обновляем телефон и email, если они отличаются
+        existing_phone = existing_client.iloc[0]["Phone"]
+        existing_email = existing_client.iloc[0]["Email"]
+
+        if phone not in existing_phone:
+            existing_phone += f", {phone}"
+        if email not in existing_email:
+            existing_email += f", {email}"
+
         save_client_data(
             client_code=client_code,
             name=name,
-            phone=phone,
-            email=email,
+            phone=existing_phone,
+            email=existing_email,
             created_date=created_date,  # Используем существующую дату создания
             last_visit=last_visit,  # Обновляем дату последнего визита
             activity_status=activity_status  # Устанавливаем статус "Active"
@@ -129,6 +139,7 @@ def register_or_update_client(data):
         return {
             "uniqueCode": client_code,
             "message": f"Добро пожаловать обратно, {name}! Ваш код: {client_code}.",
+            "reminder": f"Возможно вы забыли или потеряли свой уникальный код. Разрешите его напомнить: <b>{client_code}</b>. Это позволит вам входить в систему без дополнительных формальностей, а нам запомнить ваши запросы и потребности."
         }
 
     # Регистрация нового клиента
