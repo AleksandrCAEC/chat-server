@@ -4,24 +4,18 @@ import random
 import string
 import os
 import openai
-from openai import OpenAI
 import requests
 from googleapiclient.discovery import build
 from google.oauth2.service_account import Credentials
 from clientdata import save_client_data
-import logging
 
-# Указываем путь к файлу service_account_json
+# Указание пути к файлу service_account_json
 os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = "/etc/secrets/service_account_json"
 
-# Инициализируем клиент OpenAI БЕЗ proxies
-try:
-    client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-except Exception as e:
-    print(f"❌ Ошибка инициализации OpenAI: {e}")
-    exit(1)  # Завершаем работу сервера, если ошибка инициализации
+# Настройка API-ключа OpenAI
+openai.api_key = os.getenv("OPENAI_API_KEY")
 
-# Инициализируем приложение Flask
+# Инициализация приложения Flask
 app = Flask(__name__)
 CORS(app)
 
@@ -66,14 +60,14 @@ def register_client():
         # Проверяем, зарегистрирован ли клиент ранее
         for code, client_data in clients.items():
             if client_data['email'] == email or client_data['phone'] == phone:
-                send_telegram_notification(f" Пользователь {name} повторно вошел. Код: {code}.")
+                send_telegram_notification(f"🔁 Пользователь {name} повторно вошел. Код: {code}.")
                 return jsonify({'uniqueCode': code, 'message': f'Добро пожаловать обратно, {name}! Ваш код: {code}.'}), 200
 
         unique_code = generate_unique_code()
         clients[unique_code] = {'name': name, 'phone': phone, 'email': email}
 
         try:
-            print(f" Передача данных в save_client_data(): {unique_code}, {name}, {phone}, {email}")
+            print(f"🔵 Передача данных в save_client_data(): {unique_code}, {name}, {phone}, {email}")
             save_client_data(unique_code, name, phone, email)  # Сохранение данных
         except Exception as e:
             print(f"❌ Ошибка при сохранении клиента: {e}")  # Логируем ошибку
@@ -106,13 +100,13 @@ def chat():
         if not user_message:
             return jsonify({'error': 'Сообщение не может быть пустым'}), 400
 
-        response = client.chat.completions.create(
+        response = openai.ChatCompletion.create(
             model="gpt-3.5-turbo",
             messages=[{"role": "assistant", "content": "Здравствуйте! Чем могу помочь?"}, {"role": "user", "content": user_message}],
             max_tokens=150
         )
 
-        reply = response.choices[0].message.content.strip()
+        reply = response['choices'][0]['message']['content'].strip()
         return jsonify({'reply': reply}), 200
     except Exception as e:
         print(f"❌ Ошибка в /chat: {e}")
@@ -132,7 +126,7 @@ def create_sheet():
         spreadsheet = sheets_service.spreadsheets().create(body={'properties': {'title': title}}, fields='spreadsheetId').execute()
         spreadsheet_id = spreadsheet.get('spreadsheetId')
 
-        folder_id = '1g1OtN7ID1lM01d0bLswGqLF0m2gQIcqo' # замените на ID вашей папки
+        folder_id = '1g1OtN7ID1lM01d0bLswGqLF0m2gQIcqo'
         drive_service.files().update(fileId=spreadsheet_id, addParents=folder_id, removeParents='root', fields='id, parents').execute()
 
         if notes:
@@ -149,9 +143,10 @@ def create_sheet():
 def home():
     return jsonify({"status": "Server is running!"}), 200
 
+import logging
 logging.basicConfig(level=logging.INFO)
 logging.info("✅ Server is starting...")
 
 if __name__ == '__main__':
-    port = int(os.environ.get('PORT', '8080'))  # Используем порт из окружения
+    port = int(os.environ.get('PORT', 8080))  # Используем порт из окружения
     app.run(host='0.0.0.0', port=port, debug=False, threaded=True)
