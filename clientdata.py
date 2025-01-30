@@ -102,14 +102,18 @@ def save_client_data(client_code, name, phone, email, created_date, last_visit, 
 # Проверка существующего клиента по email или телефону
 def find_existing_client(email, phone):
     df = load_client_data()
-    existing_client = df[(df["Email"] == email) | (df["Phone"] == phone)]
+    # Ищем клиента, у которого email или телефон совпадают (даже частично)
+    existing_client = df[(df["Email"].str.contains(email, na=False)) | (df["Phone"].str.contains(phone, na=False))]
     return existing_client.iloc[0] if not existing_client.empty else None
 
 # Проверка кода клиента
 def verify_client_code(code):
     df = load_client_data()
     existing_client = df[df["Client Code"] == code]
-    return existing_client.iloc[0] if not existing_client.empty else None
+    if not existing_client.empty:
+        # Возвращаем данные клиента в виде словаря
+        return existing_client.iloc[0].to_dict()
+    return None
 
 # Регистрация или обновление клиента
 def register_or_update_client(data):
