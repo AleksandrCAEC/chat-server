@@ -5,9 +5,7 @@ import string
 import os
 from openai import OpenAI  # Импортируем новый клиент OpenAI
 import requests
-from googleapiclient.discovery import build
-from google.oauth2.service_account import Credentials
-from clientdata import save_client_data
+from clientdata import register_or_update_client  # Импортируем функцию из clientdata.py
 import logging
 
 # Указание пути к файлу service_account_json
@@ -22,11 +20,6 @@ CORS(app)
 
 # Словарь для хранения данных клиентов
 clients = {}
-
-# Генерация уникального кода клиента
-def generate_unique_code():
-    random_digits = ''.join(random.choices(string.digits, k=7))
-    return f"CAEC{random_digits}"
 
 # Отправка уведомлений в Telegram
 def send_telegram_notification(message):
@@ -58,24 +51,11 @@ def register_client():
         if not email or not phone:
             return jsonify({'error': 'Email и телефон обязательны.'}), 400
 
-        # Проверяем, зарегистрирован ли клиент ранее
-        for code, client_data in clients.items():
-            if client_data['email'] == email or client_data['phone'] == phone:
-                send_telegram_notification(f"🔁 Пользователь {name} повторно вошел. Код: {code}.")
-                return jsonify({'uniqueCode': code, 'message': f'Добро пожаловать обратно, {name}! Ваш код: {code}.'}), 200
+        # Регистрация или обновление клиента через clientdata.py
+        result = register_or_update_client(data)
+        send_telegram_notification(f"🆕 Новый пользователь зарегистрирован: {name}, {email}, {phone}, Код: {result['uniqueCode']}")
 
-        unique_code = generate_unique_code()
-        clients[unique_code] = {'name': name, 'phone': phone, 'email': email}
-
-        try:
-            print(f"🔵 Передача данных в save_client_data(): {unique_code}, {name}, {phone}, {email}")
-            save_client_data(unique_code, name, phone, email)  # Сохранение данных
-        except Exception as e:
-            print(f"❌ Ошибка при сохранении клиента: {e}")  # Логируем ошибку
-
-        send_telegram_notification(f"🆕 Новый пользователь зарегистрирован: {name}, {email}, {phone}, Код: {unique_code}")
-
-        return jsonify({'uniqueCode': unique_code, 'message': f'Добро пожаловать, {name}! Ваш код: {unique_code}.'}), 200
+        return jsonify(result), 200
     except Exception as e:
         print(f"❌ Ошибка в /register-client: {e}")
         return jsonify({'error': str(e)}), 400
@@ -116,32 +96,6 @@ def chat():
         return jsonify({'reply': reply}), 200
     except Exception as e:
         print(f"❌ Ошибка в /chat: {e}")
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/create-sheet', methods=['POST'])
-def create_sheet():
-    try:
-        data = request.json
-        title = data.get('title', 'Новая таблица')
-        notes = data.get('notes', '')
-
-        credentials = Credentials.from_service_account_file(os.getenv("GOOGLE_APPLICATION_CREDENTIALS"))
-        sheets_service = build('sheets', 'v4', credentials=credentials)
-        drive_service = build('drive', 'v3', credentials=credentials)
-
-        spreadsheet = sheets_service.spreadsheets().create(body={'properties': {'title': title}}, fields='spreadsheetId').execute()
-        spreadsheet_id = spreadsheet.get('spreadsheetId')
-
-        folder_id = '1g1OtN7ID1lM01d0bLswGqLF0m2gQIcqo'
-        drive_service.files().update(fileId=spreadsheet_id, addParents=folder_id, removeParents='root', fields='id, parents').execute()
-
-        if notes:
-            requests_body = {'requests': [{'updateCells': {'range': {'sheetId': 0, 'startRowIndex': 0, 'startColumnIndex': 0}, 'rows': [{'values': [{'userEnteredValue': {'stringValue': notes}}]}], 'fields': 'userEnteredValue'}}]}
-            sheets_service.spreadsheets().batchUpdate(spreadsheetId=spreadsheet_id, body=requests_body).execute()
-
-        return jsonify({'status': 'success', 'spreadsheetId': spreadsheet_id, 'spreadsheetLink': f"https://docs.google.com/spreadsheets/d/{spreadsheet_id}", 'message': f'Таблица "{title}" успешно создана.'}), 200
-    except Exception as e:
-        print(f"❌ Ошибка в /create-sheet: {e}")
         return jsonify({'error': str(e)}), 500
 
 # Добавляем логирование перед запуском сервера
