@@ -22,7 +22,7 @@ def send_telegram_notification(message):
     telegram_chat_id = os.getenv("TELEGRAM_CHAT_ID")
 
     if not telegram_bot_token or not telegram_chat_id:
-        print("Переменные окружения TELEGRAM_BOT_TOKEN и TELEGRAM_CHAT_ID не настроены.")
+        logger.error("Переменные окружения TELEGRAM_BOT_TOKEN и TELEGRAM_CHAT_ID не настроены.")
         return
 
     url = f"https://api.telegram.org/bot{telegram_bot_token}/sendMessage"
@@ -31,9 +31,9 @@ def send_telegram_notification(message):
     try:
         response = requests.post(url, json=payload)
         response.raise_for_status()
-        print(f"✅ Telegram уведомление отправлено: {response.json()}")
+        logger.info(f"✅ Telegram уведомление отправлено: {response.json()}")
     except requests.exceptions.RequestException as e:
-        print(f"❌ Ошибка при отправке Telegram уведомления: {e}")
+        logger.error(f"❌ Ошибка при отправке Telegram уведомления: {e}")
 
 @app.route('/register-client', methods=['POST'])
 def register_client():
@@ -52,7 +52,7 @@ def register_client():
 
         return jsonify(result), 200
     except Exception as e:
-        print(f"❌ Ошибка в /register-client: {e}")
+        logger.error(f"❌ Ошибка в /register-client: {e}")
         return jsonify({'error': str(e)}), 400
 
 @app.route('/verify-code', methods=['POST'])
@@ -64,10 +64,11 @@ def verify_code():
         # Проверка кода клиента через clientdata.py
         client_data = verify_client_code(code)
         if client_data is not None:
+            send_telegram_notification(f"🔁 Пользователь вернулся: {client_data['Name']}, {client_data['Phone']}, {client_data['Email']}, Код: {code}")
             return jsonify({'status': 'success', 'clientData': client_data}), 200
         return jsonify({'status': 'error', 'message': 'Неверный код'}), 404
     except Exception as e:
-        print(f"❌ Ошибка в /verify-code: {e}")
+        logger.error(f"❌ Ошибка в /verify-code: {e}")
         return jsonify({'error': str(e)}), 400
 
 @app.route('/chat', methods=['POST'])
@@ -93,7 +94,7 @@ def chat():
         reply = response.choices[0].message.content.strip()
         return jsonify({'reply': reply}), 200
     except Exception as e:
-        print(f"❌ Ошибка в /chat: {e}")
+        logger.error(f"❌ Ошибка в /chat: {e}")
         return jsonify({'error': str(e)}), 500
 
 # Добавляем логирование перед запуском сервера
