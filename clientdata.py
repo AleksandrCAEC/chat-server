@@ -114,7 +114,8 @@ def register_or_update_client(data):
         client_code = existing_client.iloc[0]["Client Code"]
         created_date = existing_client.iloc[0]["Created Date"]
         last_visit = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        df.loc[df["Client Code"] == client_code, "Last Visit"] = last_visit
+        activity_status = "Active"  # Устанавливаем статус "Active"
+
         save_client_data(
             client_code=client_code,
             name=name,
@@ -122,7 +123,7 @@ def register_or_update_client(data):
             email=email,
             created_date=created_date,  # Используем существующую дату создания
             last_visit=last_visit,  # Обновляем дату последнего визита
-            activity_status="Active"  # Устанавливаем статус "Active"
+            activity_status=activity_status  # Устанавливаем статус "Active"
         )
         return {
             "uniqueCode": client_code,
