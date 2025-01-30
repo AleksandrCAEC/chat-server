@@ -53,26 +53,29 @@ def generate_unique_code():
 # Сохранение изменений в ClientData.xlsx и Google Sheets
 def save_client_data(client_code, name, phone, email, created_date, last_visit, activity_status):
     try:
-        logger.info("Подключение к Google Sheets...")
-        credentials = Credentials.from_service_account_file(os.getenv("GOOGLE_APPLICATION_CREDENTIALS"))
-        sheets_service = build('sheets', 'v4', credentials=credentials)
+        if not os.getenv("GOOGLE_APPLICATION_CREDENTIALS"):
+            logger.warning("Переменная окружения GOOGLE_APPLICATION_CREDENTIALS не настроена. Данные не будут сохранены в Google Sheets.")
+        else:
+            logger.info("Подключение к Google Sheets...")
+            credentials = Credentials.from_service_account_file(os.getenv("GOOGLE_APPLICATION_CREDENTIALS"))
+            sheets_service = build('sheets', 'v4', credentials=credentials)
 
-        spreadsheet_id = "1M-mRD32sQtkvTRcik7jq1n8ZshXhEearsaIBcFlheZk"
-        range_name = "Sheet1!A2:G1000"  # Диапазон для всех столбцов
+            spreadsheet_id = "1M-mRD32sQtkvTRcik7jq1n8ZshXhEearsaIBcFlheZk"
+            range_name = "Sheet1!A2:G1000"  # Диапазон для всех столбцов
 
-        values = [[client_code, name, phone, email, created_date, last_visit, activity_status]]
-        body = {'values': values}
+            values = [[client_code, name, phone, email, created_date, last_visit, activity_status]]
+            body = {'values': values}
 
-        logger.info(f"Отправка данных в Google Sheets: {values}")
+            logger.info(f"Отправка данных в Google Sheets: {values}")
 
-        response = sheets_service.spreadsheets().values().append(
-            spreadsheetId=spreadsheet_id,
-            range=range_name,
-            valueInputOption="RAW",
-            body=body
-        ).execute()
+            response = sheets_service.spreadsheets().values().append(
+                spreadsheetId=spreadsheet_id,
+                range=range_name,
+                valueInputOption="RAW",
+                body=body
+            ).execute()
 
-        logger.info(f"Ответ от Google API: {response}")
+            logger.info(f"Ответ от Google API: {response}")
     except Exception as e:
         logger.error(f"Ошибка записи в Google Sheets: {e}")
         raise  # Повторно выбрасываем исключение для диагностики
