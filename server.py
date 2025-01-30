@@ -14,8 +14,12 @@ import logging
 # Указываем путь к файлу service_account_json
 os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = "/etc/secrets/service_account_json"
 
-# Инициализируем клиент OpenAI 
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+# Инициализируем клиент OpenAI БЕЗ proxies
+try:
+    client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+except Exception as e:
+    print(f"❌ Ошибка инициализации OpenAI: {e}")
+    exit(1)  # Завершаем работу сервера, если ошибка инициализации
 
 # Инициализируем приложение Flask
 app = Flask(__name__)
