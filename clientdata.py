@@ -109,6 +109,8 @@ def find_existing_client(email, phone):
 # Проверка кода клиента
 def verify_client_code(code):
     df = load_client_data()
+    # Убедимся, что код не содержит лишних пробелов
+    code = code.strip()
     existing_client = df[df["Client Code"] == code]
     if not existing_client.empty:
         # Возвращаем данные клиента в виде словаря
