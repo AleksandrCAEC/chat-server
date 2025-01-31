@@ -3,7 +3,7 @@ from flask_cors import CORS
 import os
 from openai import OpenAI
 import requests
-from clientdata import register_or_update_client  # Импортируем функцию из clientdata.py
+from clientdata import register_or_update_client, verify_client_code  # Импортируем функцию из clientdata.py
 import logging
 
 # Указание пути к файлу service_account_json
@@ -39,17 +39,8 @@ def send_telegram_notification(message):
 def register_client():
     try:
         data = request.json
-        name = data.get('name', 'Неизвестный пользователь')
-        email = data.get('email', '')
-        phone = data.get('phone', '')
-
-        if not email or not phone:
-            return jsonify({'error': 'Email и телефон обязательны.'}), 400
-
-        # Регистрация или обновление клиента через clientdata.py
         result = register_or_update_client(data)
-        send_telegram_notification(f"🆕 Новый пользователь зарегистрирован: {name}, {email}, {phone}, Код: {result['uniqueCode']}")
-
+        send_telegram_notification(f"🆕 Новый пользователь зарегистрирован: {result['name']}, {result['email']}, {result['phone']}, Код: {result['uniqueCode']}")
         return jsonify(result), 200
     except Exception as e:
         print(f"❌ Ошибка в /register-client: {e}")
@@ -60,8 +51,9 @@ def verify_code():
     try:
         data = request.json
         code = data.get('code', '')
-        if code in clients:
-            return jsonify({'status': 'success', 'clientData': clients[code]}), 200
+        client_data = verify_client_code(code)
+        if client_data:
+            return jsonify({'status': 'success', 'clientData': client_data}), 200
         return jsonify({'status': 'error', 'message': 'Неверный код'}), 404
     except Exception as e:
         print(f"❌ Ошибка в /verify-code: {e}")
@@ -76,7 +68,6 @@ def chat():
         if not user_message:
             return jsonify({'error': 'Сообщение не может быть пустым'}), 400
 
-        # Используем новый метод для взаимодействия с OpenAI API
         response = client.chat.completions.create(
             model="gpt-3.5-turbo",
             messages=[
@@ -86,7 +77,6 @@ def chat():
             max_tokens=150
         )
 
-        # Получаем ответ от модели
         reply = response.choices[0].message.content.strip()
         return jsonify({'reply': reply}), 200
     except Exception as e:
