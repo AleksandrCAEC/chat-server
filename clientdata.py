@@ -31,12 +31,15 @@ def initialize_client_data():
         columns = ["Client Code", "Name", "Phone", "Email", "Created Date", "Last Visit", "Activity Status"]
         df = pd.DataFrame(columns=columns)
         df.to_excel(CLIENT_DATA_FILE, index=False)
-        logger.info("Инициализирован новый файл ClientData.xlsx")
+        logger.info(f"Инициализирован новый файл ClientData.xlsx по пути: {CLIENT_DATA_FILE}")
 
 # Загрузка ClientData.xlsx
 def load_client_data():
     try:
-        return pd.read_excel(CLIENT_DATA_FILE)
+        logger.info(f"Загрузка данных из файла: {CLIENT_DATA_FILE}")
+        df = pd.read_excel(CLIENT_DATA_FILE)
+        logger.info(f"Загруженные данные: {df}")
+        return df
     except Exception as e:
         logger.error(f"Ошибка загрузки данных: {e}")
         initialize_client_data()
@@ -95,6 +98,7 @@ def save_client_data(client_code, name, phone, email, created_date, last_visit, 
     else:
         df.loc[df["Client Code"] == client_code, ["Name", "Phone", "Email", "Last Visit", "Activity Status"]] = [name, phone, email, last_visit, activity_status]
 
+    logger.info(f"Сохранение данных в файл: {CLIENT_DATA_FILE}")
     df.to_excel(CLIENT_DATA_FILE, index=False)
     logger.info(f"Данные сохранены в ClientData.xlsx: {client_code}, {name}, {phone}, {email}")
 
