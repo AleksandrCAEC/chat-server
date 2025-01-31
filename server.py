@@ -20,11 +20,21 @@ CORS(app)
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+@app.route('/register-client', methods=['POST'])
+def register_client():
+    try:
+        data = request.json
+        result = register_or_update_client(data)
+        return jsonify(result), 200
+    except Exception as e:
+        logger.error(f"Ошибка в /register-client: {e}")
+        return jsonify({'error': str(e)}), 400
+
 @app.route('/verify-code', methods=['POST'])
 def verify_code():
     try:
         data = request.json
-        code = data.get('code', '').strip()  # Убедимся, что код очищен от пробелов
+        code = data.get('code', '').strip()
 
         if not code:
             logger.error("Код не был предоставлен")
@@ -40,8 +50,6 @@ def verify_code():
     except Exception as e:
         logger.error(f"Ошибка в /verify-code: {e}")
         return jsonify({'error': str(e)}), 500
-
-# Остальные маршруты (register-client, chat и т.д.) остаются без изменений
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 8080))
