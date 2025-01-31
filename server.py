@@ -3,7 +3,7 @@ from flask_cors import CORS
 import os
 from openai import OpenAI
 import requests
-from clientdata import register_or_update_client  # Импортируем функцию из clientdata.py
+from clientdata import register_or_update_client, verify_client_code  # Импортируем функции из clientdata.py
 import logging
 
 # Указание пути к файлу service_account_json
