@@ -48,5 +48,3 @@ def load_client_data():
     except Exception as e:
         logger.error(f"Ошибка загрузки данных: {e}")
         return pd.DataFrame(columns=["Client Code", "Name", "Phone", "Email", "Created Date", "Last Visit", "Activity Status"])
-
-# Остальные функции (save_client_data, register_or_update_client, verify_client_code) остаются без изменений
