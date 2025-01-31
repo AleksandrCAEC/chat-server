@@ -1,7 +1,7 @@
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 import os
-from openai import OpenAI
+import openai  # Используем старый способ импорта
 import requests
 from clientdata import register_or_update_client, verify_client_code
 import logging
@@ -9,8 +9,8 @@ import logging
 # Указание пути к файлу service_account_json
 os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = "/etc/secrets/service_account_json"
 
-# Инициализация клиента OpenAI
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))  # Убедитесь, что OPENAI_API_KEY установлен
+# Инициализация клиента OpenAI (старый способ для версии 0.28.1)
+openai.api_key = os.getenv("OPENAI_API_KEY")  # Убедитесь, что OPENAI_API_KEY установлен
 
 # Инициализация приложения Flask
 app = Flask(__name__)
@@ -68,7 +68,8 @@ def chat():
         if not user_message:
             return jsonify({'error': 'Сообщение не может быть пустым'}), 400
 
-        response = client.chat.completions.create(
+        # Используем старый способ для взаимодействия с OpenAI API
+        response = openai.Completion.create(
             model="gpt-3.5-turbo",
             messages=[
                 {"role": "assistant", "content": "Здравствуйте! Чем могу помочь?"},
