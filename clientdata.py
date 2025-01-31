@@ -1,9 +1,8 @@
 import os
-from google.oauth2.service_account import Credentials
-from googleapiclient.discovery import build
 import pandas as pd
 from datetime import datetime
 import logging
+import sys
 
 # Настройка логирования
 logging.basicConfig(
@@ -19,39 +18,33 @@ logger = logging.getLogger(__name__)
 # Путь к папке CAEC_API_Data/BIG_DATA
 BIG_DATA_PATH = "./CAEC_API_Data/BIG_DATA"
 
-# Убедимся, что директория BIG_DATA существует
-os.makedirs(BIG_DATA_PATH, exist_ok=True)
-
 # Путь к файлу ClientData.xlsx
 CLIENT_DATA_FILE = os.path.join(BIG_DATA_PATH, "ClientData.xlsx")
 
-# Инициализация ClientData.xlsx, если файл не существует
-def initialize_client_data():
-    if not os.path.exists(CLIENT_DATA_FILE):
-        columns = ["Client Code", "Name", "Phone", "Email", "Created Date", "Last Visit", "Activity Status"]
-        df = pd.DataFrame(columns=columns)
-        df.to_excel(CLIENT_DATA_FILE, index=False)
-        logger.info(f"Инициализирован новый файл ClientData.xlsx по пути: {CLIENT_DATA_FILE}")
+# Проверка существования файла ClientData.xlsx
+if not os.path.exists(CLIENT_DATA_FILE):
+    logger.error(f"Файл {CLIENT_DATA_FILE} не найден! Программа завершена.")
+    sys.exit(1)  # Завершаем программу с ошибкой, если файл отсутствует
 
 # Загрузка ClientData.xlsx
 def load_client_data():
     try:
         logger.info(f"Загрузка данных из файла: {CLIENT_DATA_FILE}")
+
+        # Загрузка данных из файла
         df = pd.read_excel(CLIENT_DATA_FILE)
-        logger.info(f"Загруженные данные: {df}")
-        return df
+
+        # Проверка, что файл не пуст
+        if df.empty:
+            logger.error("Файл ClientData.xlsx пуст или не содержит данных!")
+            return pd.DataFrame(columns=["Client Code", "Name", "Phone", "Email", "Created Date", "Last Visit", "Activity Status"])
+        else:
+            logger.info(f"Загруженные данные: {df}")
+            return df
+
     except Exception as e:
         logger.error(f"Ошибка загрузки данных: {e}")
-        initialize_client_data()
         return pd.DataFrame(columns=["Client Code", "Name", "Phone", "Email", "Created Date", "Last Visit", "Activity Status"])
-
-# Генерация уникального кода клиента
-def generate_unique_code():
-    existing_codes = set(load_client_data()["Client Code"].astype(str).str.strip())
-    while True:
-        code = f"CAEC{str(datetime.now().timestamp()).replace('.', '')[-7:]}"
-        if code not in existing_codes:
-            return code
 
 # Сохранение данных клиента
 def save_client_data(client_code, name, phone, email, created_date, last_visit, activity_status):
@@ -60,6 +53,7 @@ def save_client_data(client_code, name, phone, email, created_date, last_visit, 
         existing_client = df[df["Client Code"].astype(str).str.strip() == client_code.strip()]
 
         if existing_client.empty:
+            # Добавляем нового клиента
             new_data = pd.DataFrame([{
                 "Client Code": client_code,
                 "Name": name,
@@ -71,10 +65,13 @@ def save_client_data(client_code, name, phone, email, created_date, last_visit, 
             }])
             df = pd.concat([df, new_data], ignore_index=True)
         else:
+            # Обновляем данные существующего клиента
             df.loc[df["Client Code"].astype(str).str.strip() == client_code.strip(), ["Name", "Phone", "Email", "Last Visit", "Activity Status"]] = [name, phone, email, last_visit, activity_status]
 
+        # Сохраняем данные в файл
         df.to_excel(CLIENT_DATA_FILE, index=False)
         logger.info(f"Данные сохранены в ClientData.xlsx: {client_code}, {name}, {phone}, {email}")
+
     except Exception as e:
         logger.error(f"Ошибка при сохранении данных: {e}")
         raise
@@ -82,7 +79,6 @@ def save_client_data(client_code, name, phone, email, created_date, last_visit, 
 # Регистрация или обновление клиента
 def register_or_update_client(data):
     try:
-        initialize_client_data()
         df = load_client_data()
 
         email = data.get("email", "").strip()
@@ -117,7 +113,7 @@ def register_or_update_client(data):
             }
 
         # Регистрация нового клиента
-        client_code = generate_unique_code()
+        client_code = f"CAEC{str(datetime.now().timestamp()).replace('.', '')[-7:]}"
         created_date = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         last_visit = created_date
         activity_status = "Active"
@@ -164,6 +160,3 @@ def verify_client_code(code):
     except Exception as e:
         logger.error(f"Ошибка при верификации кода: {e}")
         return None
-
-# Инициализация системы при первом запуске
-initialize_client_data()
