@@ -2,7 +2,7 @@ import os
 from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
 import pandas as pd
-from datetime import datetime, timedelta
+from datetime import datetime
 import logging
 
 # Настройка логирования
@@ -53,29 +53,26 @@ def generate_unique_code():
 # Сохранение изменений в ClientData.xlsx и Google Sheets
 def save_client_data(client_code, name, phone, email, created_date, last_visit, activity_status):
     try:
-        if not os.getenv("GOOGLE_APPLICATION_CREDENTIALS"):
-            logger.warning("Переменная окружения GOOGLE_APPLICATION_CREDENTIALS не настроена. Данные не будут сохранены в Google Sheets.")
-        else:
-            logger.info("Подключение к Google Sheets...")
-            credentials = Credentials.from_service_account_file(os.getenv("GOOGLE_APPLICATION_CREDENTIALS"))
-            sheets_service = build('sheets', 'v4', credentials=credentials)
+        logger.info("Подключение к Google Sheets...")
+        credentials = Credentials.from_service_account_file(os.getenv("GOOGLE_APPLICATION_CREDENTIALS"))
+        sheets_service = build('sheets', 'v4', credentials=credentials)
 
-            spreadsheet_id = "1M-mRD32sQtkvTRcik7jq1n8ZshXhEearsaIBcFlheZk"
-            range_name = "Sheet1!A2:G1000"  # Диапазон для всех столбцов
+        spreadsheet_id = "1M-mRD32sQtkvTRcik7jq1n8ZshXhEearsaIBcFlheZk"
+        range_name = "Sheet1!A2:G1000"  # Диапазон для всех столбцов
 
-            values = [[client_code, name, phone, email, created_date, last_visit, activity_status]]
-            body = {'values': values}
+        values = [[client_code, name, phone, email, created_date, last_visit, activity_status]]
+        body = {'values': values}
 
-            logger.info(f"Отправка данных в Google Sheets: {values}")
+        logger.info(f"Отправка данных в Google Sheets: {values}")
 
-            response = sheets_service.spreadsheets().values().append(
-                spreadsheetId=spreadsheet_id,
-                range=range_name,
-                valueInputOption="RAW",
-                body=body
-            ).execute()
+        response = sheets_service.spreadsheets().values().append(
+            spreadsheetId=spreadsheet_id,
+            range=range_name,
+            valueInputOption="RAW",
+            body=body
+        ).execute()
 
-            logger.info(f"Ответ от Google API: {response}")
+        logger.info(f"Ответ от Google API: {response}")
     except Exception as e:
         logger.error(f"Ошибка записи в Google Sheets: {e}")
         raise  # Повторно выбрасываем исключение для диагностики
@@ -96,29 +93,10 @@ def save_client_data(client_code, name, phone, email, created_date, last_visit, 
         }])
         df = pd.concat([df, new_data], ignore_index=True)
     else:
-        # Обновляем данные клиента
         df.loc[df["Client Code"] == client_code, ["Name", "Phone", "Email", "Last Visit", "Activity Status"]] = [name, phone, email, last_visit, activity_status]
 
     df.to_excel(CLIENT_DATA_FILE, index=False)
     logger.info(f"Данные сохранены в ClientData.xlsx: {client_code}, {name}, {phone}, {email}")
-
-# Проверка существующего клиента по email или телефону
-def find_existing_client(email, phone):
-    df = load_client_data()
-    # Ищем клиента, у которого email или телефон совпадают (даже частично)
-    existing_client = df[(df["Email"].str.contains(email, na=False)) | (df["Phone"].str.contains(phone, na=False))]
-    return existing_client.iloc[0] if not existing_client.empty else None
-
-# Проверка кода клиента
-def verify_client_code(code):
-    df = load_client_data()
-    # Убедимся, что код не содержит лишних пробелов
-    code = code.strip()
-    existing_client = df[df["Client Code"] == code]
-    if not existing_client.empty:
-        # Возвращаем данные клиента в виде словаря
-        return existing_client.iloc[0].to_dict()
-    return None
 
 # Регистрация или обновление клиента
 def register_or_update_client(data):
@@ -130,29 +108,20 @@ def register_or_update_client(data):
     name = data.get("name", "Unknown")
 
     # Проверка на существующего клиента по email или телефону
-    existing_client = find_existing_client(email, phone)
+    existing_client = df[(df["Email"] == email) | (df["Phone"] == phone)]
 
-    if existing_client is not None:
+    if not existing_client.empty:
         # Если клиент уже существует, возвращаем его код
-        client_code = existing_client["Client Code"]
-        created_date = existing_client["Created Date"]
+        client_code = existing_client.iloc[0]["Client Code"]
+        created_date = existing_client.iloc[0]["Created Date"]
         last_visit = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         activity_status = "Active"  # Устанавливаем статус "Active"
-
-        # Обновляем телефон и email, если они отличаются
-        existing_phone = existing_client["Phone"]
-        existing_email = existing_client["Email"]
-
-        if phone not in existing_phone:
-            existing_phone += f", {phone}"
-        if email not in existing_email:
-            existing_email += f", {email}"
 
         save_client_data(
             client_code=client_code,
             name=name,
-            phone=existing_phone,
-            email=existing_email,
+            phone=phone,
+            email=email,
             created_date=created_date,  # Используем существующую дату создания
             last_visit=last_visit,  # Обновляем дату последнего визита
             activity_status=activity_status  # Устанавливаем статус "Active"
@@ -160,7 +129,6 @@ def register_or_update_client(data):
         return {
             "uniqueCode": client_code,
             "message": f"Добро пожаловать обратно, {name}! Ваш код: {client_code}.",
-            "reminder": f"Возможно вы забыли или потеряли свой уникальный код. Разрешите его напомнить: <b>{client_code}</b>. Это позволит вам входить в систему без дополнительных формальностей, а нам запомнить ваши запросы и потребности."
         }
 
     # Регистрация нового клиента
