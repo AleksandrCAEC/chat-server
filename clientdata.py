@@ -187,5 +187,13 @@ def create_client_file(client_code, client_data):
     df.to_excel(client_file_path, index=False)
     logger.info(f"Создан файл клиента: {client_file_path}")
 
+# Верификация кода клиента
+def verify_client_code(code):
+    df = load_client_data()
+    client_data = df[df["Client Code"] == code]
+    if not client_data.empty:
+        return client_data.iloc[0].to_dict()
+    return None
+
 # Инициализация системы при первом запуске
 initialize_client_data()
