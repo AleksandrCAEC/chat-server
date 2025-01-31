@@ -1,9 +1,7 @@
 from flask import Flask, request, jsonify
 from flask_cors import CORS
-import random
-import string
 import os
-from openai import OpenAI  # Импортируем новый клиент OpenAI
+from openai import OpenAI
 import requests
 from clientdata import register_or_update_client  # Импортируем функцию из clientdata.py
 import logging
@@ -12,14 +10,11 @@ import logging
 os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = "/etc/secrets/service_account_json"
 
 # Инициализация клиента OpenAI
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))  # Новый способ инициализации
+client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 # Инициализация приложения Flask
 app = Flask(__name__)
 CORS(app)
-
-# Словарь для хранения данных клиентов
-clients = {}
 
 # Отправка уведомлений в Telegram
 def send_telegram_notification(message):
