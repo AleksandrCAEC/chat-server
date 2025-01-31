@@ -129,6 +129,9 @@ def register_or_update_client(data):
         return {
             "uniqueCode": client_code,
             "message": f"Добро пожаловать обратно, {name}! Ваш код: {client_code}.",
+            "name": name,
+            "email": email,
+            "phone": phone
         }
 
     # Регистрация нового клиента
@@ -163,7 +166,18 @@ def register_or_update_client(data):
     return {
         "uniqueCode": client_code,
         "message": f"Добро пожаловать, {name}! Ваш код: {client_code}.",
+        "name": name,
+        "email": email,
+        "phone": phone
     }
+
+# Верификация кода клиента
+def verify_client_code(code):
+    df = load_client_data()
+    client_data = df[df["Client Code"] == code]
+    if not client_data.empty:
+        return client_data.iloc[0].to_dict()
+    return None
 
 # Создание индивидуального файла клиента
 def create_client_file(client_code, client_data):
