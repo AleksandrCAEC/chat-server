@@ -107,7 +107,7 @@ def register_or_update_client(data):
     phone = data.get("phone")
     name = data.get("name", "Unknown")
 
-    # Проверка на существующего клиента по email или телефону
+    # Поиск существующего клиента по email или телефону
     existing_client = df[(df["Email"] == email) | (df["Phone"] == phone)]
 
     if not existing_client.empty:
@@ -170,14 +170,6 @@ def register_or_update_client(data):
         "email": email,
         "phone": phone
     }
-
-# Верификация кода клиента
-def verify_client_code(code):
-    df = load_client_data()
-    client_data = df[df["Client Code"] == code]
-    if not client_data.empty:
-        return client_data.iloc[0].to_dict()
-    return None
 
 # Создание индивидуального файла клиента
 def create_client_file(client_code, client_data):
