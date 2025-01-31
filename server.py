@@ -3,14 +3,14 @@ from flask_cors import CORS
 import os
 from openai import OpenAI
 import requests
-from clientdata import register_or_update_client, verify_client_code  # Импортируем функции из clientdata.py
+from clientdata import register_or_update_client, verify_client_code
 import logging
 
 # Указание пути к файлу service_account_json
 os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = "/etc/secrets/service_account_json"
 
 # Инициализация клиента OpenAI
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))  # Убедитесь, что OPENAI_API_KEY установлен
 
 # Инициализация приложения Flask
 app = Flask(__name__)
