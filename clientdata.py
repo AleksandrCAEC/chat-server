@@ -16,8 +16,8 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Путь к подпапке BIG_DATA внутри проекта
-BIG_DATA_PATH = "./data/BIG_DATA"
+# Путь к папке CAEC_API_Data/BIG_DATA
+BIG_DATA_PATH = "./CAEC_API_Data/BIG_DATA"
 
 # Убедимся, что директория BIG_DATA существует
 os.makedirs(BIG_DATA_PATH, exist_ok=True)
