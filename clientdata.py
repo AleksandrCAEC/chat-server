@@ -113,7 +113,10 @@ def send_email(to_email, client_code, name):
         smtp_server = "smtp.gmail.com"
         smtp_port = 587
         smtp_username = "office@caec.bz"
-        smtp_password = os.getenv("EMAIL_TOKEN")  # Пароль из переменной окружения
+        
+        # Чтение пароля из секрета
+        with open("/etc/secrets/EMAIL_TOKEN", "r") as secret_file:
+            smtp_password = secret_file.read().strip()
 
         # Создаем сообщение
         subject = "Регистрация в базе данных CAEC GmbH"
