@@ -1,7 +1,7 @@
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 import os
-import openai  # Используем старый способ импорта
+import openai
 import requests
 from clientdata import register_or_update_client, verify_client_code
 import logging
@@ -9,8 +9,8 @@ import logging
 # Указание пути к файлу service_account_json
 os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = "/etc/secrets/service_account_json"
 
-# Инициализация клиента OpenAI (старый способ для версии 0.28.1)
-openai.api_key = os.getenv("OPENAI_API_KEY")  # Убедитесь, что OPENAI_API_KEY установлен
+# Инициализация клиента OpenAI
+openai.api_key = os.getenv("OPENAI_API_KEY")
 
 # Инициализация приложения Flask
 app = Flask(__name__)
@@ -68,7 +68,6 @@ def chat():
         if not user_message:
             return jsonify({'error': 'Сообщение не может быть пустым'}), 400
 
-        # Используем старый способ для взаимодействия с OpenAI API
         response = openai.Completion.create(
             model="gpt-3.5-turbo",
             messages=[
@@ -84,7 +83,6 @@ def chat():
         print(f"❌ Ошибка в /chat: {e}")
         return jsonify({'error': str(e)}), 500
 
-# Добавляем логирование перед запуском сервера
 @app.route('/')
 def home():
     return jsonify({"status": "Server is running!"}), 200
@@ -93,5 +91,5 @@ logging.basicConfig(level=logging.INFO)
 logging.info("✅ Server is starting...")
 
 if __name__ == '__main__':
-    port = int(os.environ.get('PORT', 8080))  # Используем порт из окружения
+    port = int(os.environ.get('PORT', 8080))
     app.run(host='0.0.0.0', port=port, debug=False, threaded=True)
