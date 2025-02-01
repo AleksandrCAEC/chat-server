@@ -1,7 +1,6 @@
 import os
 import pandas as pd
 from openpyxl import Workbook
-from openpyxl.styles import PatternFill
 import logging
 from datetime import datetime
 
