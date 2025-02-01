@@ -59,6 +59,7 @@ def verify_code():
         code = data.get('code', '')
         client_data = verify_client_code(code)
         if client_data:
+            # Отправляем уведомление в Telegram о возвращении клиента
             send_telegram_notification(f"🔙 Пользователь вернулся: {client_data['Name']}, {client_data['Email']}, {client_data['Phone']}, Код: {code}")
             return jsonify({'status': 'success', 'clientData': client_data}), 200
         return jsonify({'status': 'error', 'message': 'Неверный код'}), 404
