@@ -1,7 +1,7 @@
 import os
 import pandas as pd
 from openpyxl import Workbook
-from openpyxl.styles import Alignment
+from openpyxl.styles import numbers
 import logging
 from datetime import datetime
 from google.oauth2.service_account import Credentials
@@ -99,6 +99,11 @@ def create_client_file(client_code, client_data):
             client_data["Created Date"]
         ])
 
+        # Устанавливаем формат ячеек как текст
+        for row in ws.iter_rows(min_row=1, max_row=ws.max_row, min_col=1, max_col=ws.max_column):
+            for cell in row:
+                cell.number_format = numbers.FORMAT_TEXT
+
         # Настраиваем выравнивание и автоподбор ширины столбцов
         for col in ws.columns:
             max_length = 0
@@ -160,6 +165,11 @@ def add_message_to_client_file(client_code, message, is_assistant=False):
                 ws.append([f"{current_time} - {message}", "", "", "", "", "", ""])
             else:
                 ws.append(["", f"{current_time} - {message}", "", "", "", "", ""])
+
+            # Устанавливаем формат ячеек как текст
+            for row in ws.iter_rows(min_row=1, max_row=ws.max_row, min_col=1, max_col=ws.max_column):
+                for cell in row:
+                    cell.number_format = numbers.FORMAT_TEXT
 
             # Настраиваем выравнивание и автоподбор ширины столбцов
             for col in ws.columns:
