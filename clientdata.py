@@ -7,6 +7,7 @@ from googleapiclient.discovery import build
 import pandas as pd
 from datetime import datetime, timedelta
 import logging
+from google.cloud import secretmanager
 
 # Настройка логирования
 logging.basicConfig(
@@ -106,6 +107,17 @@ def save_client_data(client_code, name, phone, email, created_date, last_visit, 
     except Exception as e:
         logger.error(f"Ошибка сохранения в локальный файл: {e}")
 
+# Получение секрета из Google Cloud Secret Manager
+def get_secret(secret_id):
+    try:
+        client = secretmanager.SecretManagerServiceClient()
+        name = f"projects/amazing-strand-449014-r8/secrets/{secret_id}/versions/latest"
+        response = client.access_secret_version(request={"name": name})
+        return response.payload.data.decode("UTF-8")
+    except Exception as e:
+        logger.error(f"Ошибка при получении секрета: {e}")
+        return None
+
 # Отправка email клиенту
 def send_email(to_email, client_code, name):
     try:
@@ -114,9 +126,10 @@ def send_email(to_email, client_code, name):
         smtp_port = 587
         smtp_username = "office@caec.bz"
         
-        # Чтение пароля из секрета
-        with open("/etc/secrets/EMAIL_TOKEN", "r") as secret_file:
-            smtp_password = secret_file.read().strip()
+        # Получаем пароль из Secret Manager
+        smtp_password = get_secret("EMAIL_TOKEN")
+        if not smtp_password:
+            raise Exception("Не удалось получить пароль из Secret Manager")
 
         # Создаем сообщение
         subject = "Регистрация в базе данных CAEC GmbH"
