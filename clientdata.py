@@ -97,20 +97,29 @@ def register_or_update_client(data):
     existing_client = df[(df["Email"] == email) | (df["Phone"] == phone)]
 
     if not existing_client.empty:
+        # Если клиент уже существует, обновляем его данные
         client_code = existing_client.iloc[0]["Client Code"]
         created_date = existing_client.iloc[0]["Created Date"]
         last_visit = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         activity_status = "Active"
 
-        save_client_data(
-            client_code=client_code,
-            name=name,
-            phone=phone,
-            email=email,
-            created_date=created_date,
-            last_visit=last_visit,
-            activity_status=activity_status
-        )
+        # Проверяем, изменились ли email или телефон
+        if email != existing_client.iloc[0]["Email"] or phone != existing_client.iloc[0]["Phone"]:
+            # Если email или телефон изменились, создаем новую запись с тем же кодом
+            save_client_data(
+                client_code=client_code,
+                name=name,
+                phone=phone,
+                email=email,
+                created_date=created_date,
+                last_visit=last_visit,
+                activity_status=activity_status
+            )
+        else:
+            # Если данные не изменились, просто обновляем последний визит
+            df.loc[df["Client Code"] == client_code, "Last Visit"] = last_visit
+            df.to_excel("ClientData.xlsx", index=False)
+
         return {
             "uniqueCode": client_code,
             "message": f"Добро пожаловать обратно, {name}! Ваш код: {client_code}.",
