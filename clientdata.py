@@ -63,7 +63,7 @@ def generate_unique_code():
         if code not in existing_codes:
             return code
 
-# Сохранение изменений в Google Sheets
+# Сохранение изменений в Google Sheets и локальном файле
 def save_client_data(client_code, name, phone, email, created_date, last_visit, activity_status):
     try:
         logger.info("Подключение к Google Sheets...")
@@ -86,6 +86,24 @@ def save_client_data(client_code, name, phone, email, created_date, last_visit, 
     except Exception as e:
         logger.error(f"Ошибка записи в Google Sheets: {e}")
         raise
+
+    # Сохранение в локальный файл ClientData.xlsx
+    try:
+        df = load_client_data()
+        new_data = pd.DataFrame([{
+            "Client Code": str(client_code),
+            "Name": name,
+            "Phone": phone,
+            "Email": email,
+            "Created Date": created_date,
+            "Last Visit": last_visit,
+            "Activity Status": activity_status
+        }])
+        df = pd.concat([df, new_data], ignore_index=True)
+        df.to_excel("ClientData.xlsx", index=False)
+        logger.info(f"Данные сохранены в ClientData.xlsx: {client_code}, {name}, {phone}, {email}")
+    except Exception as e:
+        logger.error(f"Ошибка сохранения в локальный файл: {e}")
 
 # Подсветка строк с дубликатами кодов
 def highlight_duplicate_codes(file_path):
