@@ -3,6 +3,9 @@ import pandas as pd
 from openpyxl import Workbook
 import logging
 from datetime import datetime
+from google.oauth2.service_account import Credentials
+from googleapiclient.discovery import build
+from googleapiclient.http import MediaFileUpload
 
 # Настройка логирования
 logging.basicConfig(
@@ -18,13 +21,45 @@ logger = logging.getLogger(__name__)
 # Путь к файлу ClientData.xlsx
 CLIENT_DATA_PATH = "ClientData.xlsx"
 
-# Путь к директории для сохранения файлов клиентов
-CLIENT_FILES_DIR = "./CAEC_API_Data/Data_CAEC_client"
+# ID папки на Google Drive
+GOOGLE_DRIVE_FOLDER_ID = "11cQYLDGKlu2Rn_9g8R_4xNA59ikhvJpS"
 
-# Создаем директорию, если она не существует
-if not os.path.exists(CLIENT_FILES_DIR):
-    os.makedirs(CLIENT_FILES_DIR)
-    logger.info(f"Создана директория для файлов клиентов: {CLIENT_FILES_DIR}")
+# Инициализация Google Drive API
+def get_drive_service():
+    try:
+        credentials = Credentials.from_service_account_file(
+            os.getenv("GOOGLE_APPLICATION_CREDENTIALS"),
+            scopes=["https://www.googleapis.com/auth/drive"]
+        )
+        return build("drive", "v3", credentials=credentials)
+    except Exception as e:
+        logger.error(f"Ошибка инициализации Google Drive API: {e}")
+        return None
+
+# Загрузка файла на Google Drive
+def upload_to_google_drive(file_path, file_name):
+    try:
+        drive_service = get_drive_service()
+        if not drive_service:
+            raise Exception("Google Drive API не инициализирован.")
+
+        file_metadata = {
+            "name": file_name,
+            "parents": [GOOGLE_DRIVE_FOLDER_ID]
+        }
+
+        media = MediaFileUpload(file_path, mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+        file = drive_service.files().create(
+            body=file_metadata,
+            media_body=media,
+            fields="id"
+        ).execute()
+
+        logger.info(f"Файл {file_name} успешно загружен на Google Drive. ID файла: {file.get('id')}")
+        return file.get("id")
+    except Exception as e:
+        logger.error(f"Ошибка загрузки файла на Google Drive: {e}")
+        return None
 
 # Функция для загрузки данных из ClientData.xlsx
 def load_client_data():
@@ -42,7 +77,12 @@ def create_client_file(client_code, client_data):
     try:
         # Убираем дублирование "CAEC" в имени файла
         file_name = f"Client_{client_code}.xlsx"
-        file_path = os.path.join(CLIENT_FILES_DIR, file_name)
+        file_path = os.path.join("temp", file_name)  # Временная папка для хранения файла перед загрузкой
+
+        # Создаем временную папку, если она не существует
+        if not os.path.exists("temp"):
+            os.makedirs("temp")
+
         logger.info(f"Создание файла клиента: {file_path}")
 
         # Создаем новый Excel-файл
@@ -66,39 +106,18 @@ def create_client_file(client_code, client_data):
         # Сохраняем файл
         wb.save(file_path)
         logger.info(f"Файл {file_path} успешно создан.")
-        return file_path
+
+        # Загружаем файл на Google Drive
+        upload_to_google_drive(file_path, file_name)
+
+        # Удаляем временный файл
+        os.remove(file_path)
+        logger.info(f"Временный файл {file_path} удален.")
+
+        return file_name
     except Exception as e:
         logger.error(f"Ошибка при создании файла клиента: {e}")
         return None
-
-# Функция для обновления данных клиента в Client_CAECxxxxxxx.xlsx
-def update_client_file(client_code, new_data):
-    try:
-        # Убираем дублирование "CAEC" в имени файла
-        file_name = f"Client_{client_code}.xlsx"
-        file_path = os.path.join(CLIENT_FILES_DIR, file_name)
-        logger.info(f"Обновление файла клиента: {file_path}")
-
-        # Загружаем существующий файл
-        wb = load_workbook(file_path)
-        ws = wb.active
-
-        # Добавляем новую строку с обновленными данными
-        ws.append([
-            new_data["Client Code"],
-            new_data["Name"],
-            new_data["Phone"],
-            new_data["Email"],
-            new_data["Created Date"],
-            new_data["Last Visit"],
-            new_data["Activity Status"]
-        ])
-
-        # Сохраняем изменения
-        wb.save(file_path)
-        logger.info(f"Файл {file_path} успешно обновлен.")
-    except Exception as e:
-        logger.error(f"Ошибка при обновлении файла клиента: {e}")
 
 # Функция для поиска клиента по коду и создания/обновления его файла
 def handle_client(client_code):
@@ -112,15 +131,10 @@ def handle_client(client_code):
         if not client_data.empty:
             client_data = client_data.iloc[0].to_dict()
 
-            # Проверяем, существует ли файл клиента
+            # Создаем файл клиента
             file_name = f"Client_{client_code}.xlsx"
-            file_path = os.path.join(CLIENT_FILES_DIR, file_name)
-            if os.path.exists(file_path):
-                logger.info(f"Файл клиента {file_path} уже существует. Обновляем данные.")
-                update_client_file(client_code, client_data)
-            else:
-                logger.info(f"Файл клиента {file_path} не существует. Создаем новый.")
-                create_client_file(client_code, client_data)
+            logger.info(f"Создание файла клиента: {file_name}")
+            create_client_file(client_code, client_data)
         else:
             logger.warning(f"Клиент с кодом {client_code} не найден в ClientData.xlsx.")
     except Exception as e:
