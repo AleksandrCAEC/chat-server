@@ -125,7 +125,8 @@ def register_or_update_client(data):
             "message": f"Добро пожаловать обратно, {name}! Ваш код: {client_code}.",
             "name": name,
             "email": email,
-            "phone": phone
+            "phone": phone,
+            "isNewClient": False  # Указываем, что клиент не новый
         }
 
     # Регистрация нового клиента
@@ -149,7 +150,8 @@ def register_or_update_client(data):
         "message": f"Добро пожаловать, {name}! Ваш код: {client_code}.",
         "name": name,
         "email": email,
-        "phone": phone
+        "phone": phone,
+        "isNewClient": True  # Указываем, что клиент новый
     }
 
 # Верификация кода клиента
