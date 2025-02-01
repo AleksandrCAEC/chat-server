@@ -159,7 +159,7 @@ def register_or_update_client(data):
             df.to_excel("ClientData.xlsx", index=False)
 
         # Обработка файла клиента
-        handle_client(client_code)
+        handle_client(client_code)  # Вызов функции для создания/обновления файла клиента
 
         return {
             "uniqueCode": client_code,
@@ -187,7 +187,7 @@ def register_or_update_client(data):
     )
 
     # Обработка файла клиента
-    handle_client(client_code)
+    handle_client(client_code)  # Вызов функции для создания/обновления файла клиента
 
     # Обновляем статус активности клиентов
     update_activity_status()
