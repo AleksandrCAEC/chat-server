@@ -4,6 +4,8 @@ from googleapiclient.discovery import build
 import pandas as pd
 from datetime import datetime
 import logging
+from openpyxl import load_workbook
+from openpyxl.styles import PatternFill
 
 # Настройка логирования
 logging.basicConfig(
@@ -85,6 +87,39 @@ def save_client_data(client_code, name, phone, email, created_date, last_visit, 
         logger.error(f"Ошибка записи в Google Sheets: {e}")
         raise
 
+# Подсветка строк с дубликатами кодов
+def highlight_duplicate_codes(file_path):
+    try:
+        # Загружаем Excel-файл
+        workbook = load_workbook(file_path)
+        sheet = workbook.active
+
+        # Создаем объект для заливки красным цветом
+        red_fill = PatternFill(start_color="FF0000", end_color="FF0000", fill_type="solid")
+
+        # Собираем все коды клиентов и их строки
+        codes = {}
+        for row in sheet.iter_rows(min_row=2, max_col=1, values_only=True):
+            code = row[0]
+            if code in codes:
+                codes[code].append(row)
+            else:
+                codes[code] = [row]
+
+        # Подсвечиваем строки с дубликатами
+        for code, rows in codes.items():
+            if len(rows) > 1:
+                for row in sheet.iter_rows(min_row=2):
+                    if row[0].value == code:
+                        for cell in row:
+                            cell.fill = red_fill
+
+        # Сохраняем изменения в файле
+        workbook.save(file_path)
+        logger.info(f"Дубликаты кодов подсвечены в файле: {file_path}")
+    except Exception as e:
+        logger.error(f"Ошибка при подсветке дубликатов: {e}")
+
 # Регистрация или обновление клиента
 def register_or_update_client(data):
     df = load_client_data()
@@ -144,6 +179,9 @@ def register_or_update_client(data):
         last_visit=last_visit,
         activity_status=activity_status
     )
+
+    # Подсвечиваем дубликаты кодов в Excel-файле
+    highlight_duplicate_codes("ClientData.xlsx")
 
     return {
         "uniqueCode": client_code,
