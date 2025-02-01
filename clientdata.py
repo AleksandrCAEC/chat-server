@@ -2,7 +2,7 @@ import os
 from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
 import pandas as pd
-from datetime import datetime
+from datetime import datetime, timedelta
 import logging
 from openpyxl import load_workbook
 from openpyxl.styles import PatternFill
@@ -63,7 +63,7 @@ def generate_unique_code():
         if code not in existing_codes:
             return code
 
-# Сохранение изменений в Google Sheets
+# Сохранение изменений в Google Sheets и локальном файле
 def save_client_data(client_code, name, phone, email, created_date, last_visit, activity_status):
     try:
         logger.info("Подключение к Google Sheets...")
@@ -86,6 +86,43 @@ def save_client_data(client_code, name, phone, email, created_date, last_visit, 
     except Exception as e:
         logger.error(f"Ошибка записи в Google Sheets: {e}")
         raise
+
+    # Сохранение в локальный файл ClientData.xlsx
+    try:
+        df = load_client_data()
+        new_data = pd.DataFrame([{
+            "Client Code": str(client_code),
+            "Name": name,
+            "Phone": phone,
+            "Email": email,
+            "Created Date": created_date,
+            "Last Visit": last_visit,
+            "Activity Status": activity_status
+        }])
+        df = pd.concat([df, new_data], ignore_index=True)
+        df.to_excel("ClientData.xlsx", index=False)
+        logger.info(f"Данные сохранены в ClientData.xlsx: {client_code}, {name}, {phone}, {email}")
+    except Exception as e:
+        logger.error(f"Ошибка сохранения в локальный файл: {e}")
+
+# Обновление статуса активности клиентов
+def update_activity_status():
+    try:
+        df = load_client_data()
+        current_date = datetime.now()
+        one_year_ago = current_date - timedelta(days=365)
+
+        # Обновляем статус для клиентов, которые не активны более года
+        df.loc[(pd.to_datetime(df["Last Visit"]) < one_year_ago), "Activity Status"] = "Not Active"
+
+        # Сортируем таблицу: неактивные клиенты на первых строках
+        df = df.sort_values(by=["Activity Status"], ascending=True)
+
+        # Сохраняем обновленные данные
+        df.to_excel("ClientData.xlsx", index=False)
+        logger.info("Статус активности клиентов обновлен.")
+    except Exception as e:
+        logger.error(f"Ошибка при обновлении статуса активности: {e}")
 
 # Подсветка строк с дубликатами кодов
 def highlight_duplicate_codes(file_path):
@@ -182,6 +219,9 @@ def register_or_update_client(data):
 
     # Подсвечиваем дубликаты кодов в Excel-файле
     highlight_duplicate_codes("ClientData.xlsx")
+
+    # Обновляем статус активности клиентов
+    update_activity_status()
 
     return {
         "uniqueCode": client_code,
