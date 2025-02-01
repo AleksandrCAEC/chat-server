@@ -70,34 +70,6 @@ def create_client_file(client_code, client_data):
         logger.error(f"Ошибка при создании файла клиента: {e}")
         return None
 
-# Функция для обновления данных клиента в Client_CAECxxxxxxx.xlsx
-def update_client_file(client_code, new_data):
-    try:
-        file_name = f"Client_CAEC{client_code}.xlsx"
-        file_path = os.path.join(CLIENT_FILES_DIR, file_name)
-        logger.info(f"Обновление файла клиента: {file_path}")
-
-        # Загружаем существующий файл
-        wb = load_workbook(file_path)
-        ws = wb.active
-
-        # Добавляем новую строку с обновленными данными
-        ws.append([
-            new_data["Client Code"],
-            new_data["Name"],
-            new_data["Phone"],
-            new_data["Email"],
-            new_data["Created Date"],
-            new_data["Last Visit"],
-            new_data["Activity Status"]
-        ])
-
-        # Сохраняем изменения
-        wb.save(file_path)
-        logger.info(f"Файл {file_path} успешно обновлен.")
-    except Exception as e:
-        logger.error(f"Ошибка при обновлении файла клиента: {e}")
-
 # Функция для поиска клиента по коду и создания/обновления его файла
 def handle_client(client_code):
     try:
