@@ -1,95 +1,153 @@
-from flask import Flask, request, jsonify
-from flask_cors import CORS
 import os
-import openai
-import requests
-from clientdata import register_or_update_client, verify_client_code
+from google.oauth2.service_account import Credentials
+from googleapiclient.discovery import build
+import pandas as pd
+from datetime import datetime
 import logging
 
-# Указание пути к файлу service_account_json
-os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = "/etc/secrets/service_account_json"
+# Настройка логирования
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    handlers=[
+        logging.FileHandler("app.log"),
+        logging.StreamHandler()
+    ]
+)
+logger = logging.getLogger(__name__)
 
-# Инициализация клиента OpenAI
-openai.api_key = os.getenv("OPENAI_API_KEY")
+# Идентификатор Google Sheets таблицы
+SPREADSHEET_ID = "1eGpB0hiRxXPpYN75-UKyXoar7yh-zne8r8ox-hXrS1I"
 
-# Инициализация приложения Flask
-app = Flask(__name__)
-CORS(app)
+# Инициализация Google Sheets API
+def get_sheets_service():
+    credentials = Credentials.from_service_account_file(os.getenv("GOOGLE_APPLICATION_CREDENTIALS"))
+    return build('sheets', 'v4', credentials=credentials)
 
-# Отправка уведомлений в Telegram
-def send_telegram_notification(message):
-    telegram_bot_token = os.getenv("TELEGRAM_BOT_TOKEN")
-    telegram_chat_id = os.getenv("TELEGRAM_CHAT_ID")
-
-    if not telegram_bot_token or not telegram_chat_id:
-        print("Переменные окружения TELEGRAM_BOT_TOKEN и TELEGRAM_CHAT_ID не настроены.")
-        return
-
-    url = f"https://api.telegram.org/bot{telegram_bot_token}/sendMessage"
-    payload = {"chat_id": telegram_chat_id, "text": message, "parse_mode": "HTML"}
-    
+# Загрузка данных из Google Sheets
+def load_client_data():
     try:
-        response = requests.post(url, json=payload)
-        response.raise_for_status()
-        print(f"✅ Telegram уведомление отправлено: {response.json()}")
-    except requests.exceptions.RequestException as e:
-        print(f"❌ Ошибка при отправке Telegram уведомления: {e}")
+        logger.info("Загрузка данных из Google Sheets...")
+        sheets_service = get_sheets_service()
+        range_name = "Sheet1!A2:G1000"  # Диапазон для всех столбцов
 
-@app.route('/register-client', methods=['POST'])
-def register_client():
-    try:
-        data = request.json
-        result = register_or_update_client(data)
-        send_telegram_notification(f"🆕 Новый пользователь зарегистрирован: {result['name']}, {result['email']}, {result['phone']}, Код: {result['uniqueCode']}")
-        return jsonify(result), 200
+        result = sheets_service.spreadsheets().values().get(
+            spreadsheetId=SPREADSHEET_ID,
+            range=range_name
+        ).execute()
+
+        values = result.get('values', [])
+        if not values:
+            logger.info("Данные не найдены.")
+            return pd.DataFrame(columns=["Client Code", "Name", "Phone", "Email", "Created Date", "Last Visit", "Activity Status"])
+
+        # Преобразуем данные в DataFrame
+        df = pd.DataFrame(values, columns=["Client Code", "Name", "Phone", "Email", "Created Date", "Last Visit", "Activity Status"])
+        
+        # Преобразуем столбец "Client Code" в строковый тип
+        df["Client Code"] = df["Client Code"].astype(str)
+        
+        logger.info(f"Загружены данные: {df}")
+        return df
     except Exception as e:
-        print(f"❌ Ошибка в /register-client: {e}")
-        return jsonify({'error': str(e)}), 400
+        logger.error(f"Ошибка загрузки данных: {e}")
+        return pd.DataFrame(columns=["Client Code", "Name", "Phone", "Email", "Created Date", "Last Visit", "Activity Status"])
 
-@app.route('/verify-code', methods=['POST'])
-def verify_code():
+# Генерация уникального кода клиента
+def generate_unique_code():
+    existing_codes = set(load_client_data()["Client Code"])
+    while True:
+        code = f"CAEC{str(datetime.now().timestamp()).replace('.', '')[-7:]}"
+        if code not in existing_codes:
+            return code
+
+# Сохранение изменений в Google Sheets
+def save_client_data(client_code, name, phone, email, created_date, last_visit, activity_status):
     try:
-        data = request.json
-        code = data.get('code', '')
-        client_data = verify_client_code(code)
-        if client_data:
-            return jsonify({'status': 'success', 'clientData': client_data}), 200
-        return jsonify({'status': 'error', 'message': 'Неверный код'}), 404
+        logger.info("Подключение к Google Sheets...")
+        sheets_service = get_sheets_service()
+
+        # Преобразуем client_code в строковый тип
+        values = [[str(client_code), name, phone, email, created_date, last_visit, activity_status]]
+        body = {'values': values}
+
+        logger.info(f"Отправка данных в Google Sheets: {values}")
+
+        response = sheets_service.spreadsheets().values().append(
+            spreadsheetId=SPREADSHEET_ID,
+            range="Sheet1!A2:G2",  # Диапазон для добавления новой строки
+            valueInputOption="RAW",
+            body=body
+        ).execute()
+
+        logger.info(f"Ответ от Google API: {response}")
     except Exception as e:
-        print(f"❌ Ошибка в /verify-code: {e}")
-        return jsonify({'error': str(e)}), 400
+        logger.error(f"Ошибка записи в Google Sheets: {e}")
+        raise
 
-@app.route('/chat', methods=['POST'])
-def chat():
-    try:
-        data = request.json
-        user_message = data.get('message', '')
+# Регистрация или обновление клиента
+def register_or_update_client(data):
+    df = load_client_data()
 
-        if not user_message:
-            return jsonify({'error': 'Сообщение не может быть пустым'}), 400
+    email = data.get("email")
+    phone = data.get("phone")
+    name = data.get("name", "Unknown")
 
-        response = openai.Completion.create(
-            model="gpt-3.5-turbo",
-            messages=[
-                {"role": "assistant", "content": "Здравствуйте! Чем могу помочь?"},
-                {"role": "user", "content": user_message}
-            ],
-            max_tokens=150
+    # Поиск существующего клиента по email или телефону
+    existing_client = df[(df["Email"] == email) | (df["Phone"] == phone)]
+
+    if not existing_client.empty:
+        client_code = existing_client.iloc[0]["Client Code"]
+        created_date = existing_client.iloc[0]["Created Date"]
+        last_visit = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        activity_status = "Active"
+
+        save_client_data(
+            client_code=client_code,
+            name=name,
+            phone=phone,
+            email=email,
+            created_date=created_date,
+            last_visit=last_visit,
+            activity_status=activity_status
         )
+        return {
+            "uniqueCode": client_code,
+            "message": f"Добро пожаловать обратно, {name}! Ваш код: {client_code}.",
+            "name": name,
+            "email": email,
+            "phone": phone
+        }
 
-        reply = response.choices[0].message.content.strip()
-        return jsonify({'reply': reply}), 200
-    except Exception as e:
-        print(f"❌ Ошибка в /chat: {e}")
-        return jsonify({'error': str(e)}), 500
+    # Регистрация нового клиента
+    client_code = generate_unique_code()
+    created_date = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    last_visit = created_date
+    activity_status = "Active"
 
-@app.route('/')
-def home():
-    return jsonify({"status": "Server is running!"}), 200
+    save_client_data(
+        client_code=client_code,
+        name=name,
+        phone=phone,
+        email=email,
+        created_date=created_date,
+        last_visit=last_visit,
+        activity_status=activity_status
+    )
 
-logging.basicConfig(level=logging.INFO)
-logging.info("✅ Server is starting...")
+    return {
+        "uniqueCode": client_code,
+        "message": f"Добро пожаловать, {name}! Ваш код: {client_code}.",
+        "name": name,
+        "email": email,
+        "phone": phone
+    }
 
-if __name__ == '__main__':
-    port = int(os.environ.get('PORT', 8080))
-    app.run(host='0.0.0.0', port=port, debug=False, threaded=True)
+# Верификация кода клиента
+def verify_client_code(code):
+    df = load_client_data()
+    code = str(code)  # Преобразуем код к строковому типу
+    client_data = df[df["Client Code"] == code]
+    if not client_data.empty:
+        return client_data.iloc[0].to_dict()
+    return None
