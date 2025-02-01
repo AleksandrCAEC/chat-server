@@ -1,11 +1,12 @@
 import os
+import smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
 from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
 import pandas as pd
 from datetime import datetime, timedelta
 import logging
-from openpyxl import load_workbook
-from openpyxl.styles import PatternFill
 
 # Настройка логирования
 logging.basicConfig(
@@ -105,6 +106,46 @@ def save_client_data(client_code, name, phone, email, created_date, last_visit, 
     except Exception as e:
         logger.error(f"Ошибка сохранения в локальный файл: {e}")
 
+# Отправка email клиенту
+def send_email(to_email, client_code, name):
+    try:
+        # Настройки SMTP
+        smtp_server = "smtp.gmail.com"
+        smtp_port = 587
+        smtp_username = "office@caec.bz"
+        smtp_password = "1970APgls**"  # Пароль от почты
+
+        # Создаем сообщение
+        subject = "Регистрация в базе данных CAEC GmbH"
+        body = f"""
+        Уважаемый(ая) {name},
+
+        Благодарим вас за регистрацию в базе данных компании CAEC GmbH. Вам присвоен уникальный код: {client_code}.
+
+        Этот код облегчит ваш вход в систему и позволит нам поддерживать с вами связь согласно вашим текущим интересам.
+
+        Пожалуйста, сохраните этот код для дальнейшего использования.
+
+        С уважением,
+        Команда CAEC GmbH
+        """
+
+        msg = MIMEMultipart()
+        msg["From"] = smtp_username
+        msg["To"] = to_email
+        msg["Subject"] = subject
+        msg.attach(MIMEText(body, "plain"))
+
+        # Подключаемся к SMTP-серверу и отправляем письмо
+        with smtplib.SMTP(smtp_server, smtp_port) as server:
+            server.starttls()
+            server.login(smtp_username, smtp_password)
+            server.sendmail(smtp_username, to_email, msg.as_string())
+
+        logger.info(f"Письмо успешно отправлено на {to_email}")
+    except Exception as e:
+        logger.error(f"Ошибка при отправке письма: {e}")
+
 # Обновление статуса активности клиентов
 def update_activity_status():
     try:
@@ -123,39 +164,6 @@ def update_activity_status():
         logger.info("Статус активности клиентов обновлен.")
     except Exception as e:
         logger.error(f"Ошибка при обновлении статуса активности: {e}")
-
-# Подсветка строк с дубликатами кодов
-def highlight_duplicate_codes(file_path):
-    try:
-        # Загружаем Excel-файл
-        workbook = load_workbook(file_path)
-        sheet = workbook.active
-
-        # Создаем объект для заливки красным цветом
-        red_fill = PatternFill(start_color="FF0000", end_color="FF0000", fill_type="solid")
-
-        # Собираем все коды клиентов и их строки
-        codes = {}
-        for row in sheet.iter_rows(min_row=2, max_col=1, values_only=True):
-            code = row[0]
-            if code in codes:
-                codes[code].append(row)
-            else:
-                codes[code] = [row]
-
-        # Подсвечиваем строки с дубликатами
-        for code, rows in codes.items():
-            if len(rows) > 1:
-                for row in sheet.iter_rows(min_row=2):
-                    if row[0].value == code:
-                        for cell in row:
-                            cell.fill = red_fill
-
-        # Сохраняем изменения в файле
-        workbook.save(file_path)
-        logger.info(f"Дубликаты кодов подсвечены в файле: {file_path}")
-    except Exception as e:
-        logger.error(f"Ошибка при подсветке дубликатов: {e}")
 
 # Регистрация или обновление клиента
 def register_or_update_client(data):
@@ -217,8 +225,8 @@ def register_or_update_client(data):
         activity_status=activity_status
     )
 
-    # Подсвечиваем дубликаты кодов в Excel-файле
-    highlight_duplicate_codes("ClientData.xlsx")
+    # Отправляем email клиенту
+    send_email(email, client_code, name)
 
     # Обновляем статус активности клиентов
     update_activity_status()
