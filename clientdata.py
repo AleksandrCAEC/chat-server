@@ -10,39 +10,47 @@ logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     handlers=[
-        logging.FileHandler("app.log"),  # Логи записываются в файл app.log
-        logging.StreamHandler()  # Логи выводятся в консоль
+        logging.FileHandler("app.log"),
+        logging.StreamHandler()
     ]
 )
 logger = logging.getLogger(__name__)
 
-# Путь к папке CAEC_API_Data/BIG_DATA
-BIG_DATA_PATH = "./CAEC_API_Data/BIG_DATA"
+# Идентификатор Google Sheets таблицы
+SPREADSHEET_ID = "1eGpB0hiRxXPpYN75-UKyXoar7yh-zne8r8ox-hXrS1I"
 
-# Убедимся, что директория BIG_DATA существует
-os.makedirs(BIG_DATA_PATH, exist_ok=True)
+# Инициализация Google Sheets API
+def get_sheets_service():
+    credentials = Credentials.from_service_account_file(os.getenv("GOOGLE_APPLICATION_CREDENTIALS"))
+    return build('sheets', 'v4', credentials=credentials)
 
-# Путь к файлу ClientData.xlsx
-CLIENT_DATA_FILE = os.path.join(BIG_DATA_PATH, "ClientData.xlsx")
-
-# Инициализация ClientData.xlsx, если файл не существует
-def initialize_client_data():
-    if not os.path.exists(CLIENT_DATA_FILE):
-        columns = ["Client Code", "Name", "Phone", "Email", "Created Date", "Last Visit", "Activity Status"]
-        df = pd.DataFrame(columns=columns)
-        df.to_excel(CLIENT_DATA_FILE, index=False)
-        logger.info(f"Инициализирован новый файл ClientData.xlsx по пути: {CLIENT_DATA_FILE}")
-
-# Загрузка ClientData.xlsx
+# Загрузка данных из Google Sheets
 def load_client_data():
     try:
-        logger.info(f"Загрузка данных из файла: {CLIENT_DATA_FILE}")
-        df = pd.read_excel(CLIENT_DATA_FILE)
-        logger.info(f"Загруженные данные: {df}")
+        logger.info("Загрузка данных из Google Sheets...")
+        sheets_service = get_sheets_service()
+        range_name = "Sheet1!A2:G1000"  # Диапазон для всех столбцов
+
+        result = sheets_service.spreadsheets().values().get(
+            spreadsheetId=SPREADSHEET_ID,
+            range=range_name
+        ).execute()
+
+        values = result.get('values', [])
+        if not values:
+            logger.info("Данные не найдены.")
+            return pd.DataFrame(columns=["Client Code", "Name", "Phone", "Email", "Created Date", "Last Visit", "Activity Status"])
+
+        # Преобразуем данные в DataFrame
+        df = pd.DataFrame(values, columns=["Client Code", "Name", "Phone", "Email", "Created Date", "Last Visit", "Activity Status"])
+        
+        # Преобразуем столбец "Client Code" в строковый тип
+        df["Client Code"] = df["Client Code"].astype(str)
+        
+        logger.info(f"Загружены данные: {df}")
         return df
     except Exception as e:
         logger.error(f"Ошибка загрузки данных: {e}")
-        initialize_client_data()
         return pd.DataFrame(columns=["Client Code", "Name", "Phone", "Email", "Created Date", "Last Visit", "Activity Status"])
 
 # Генерация уникального кода клиента
@@ -53,24 +61,21 @@ def generate_unique_code():
         if code not in existing_codes:
             return code
 
-# Сохранение изменений в ClientData.xlsx и Google Sheets
+# Сохранение изменений в Google Sheets
 def save_client_data(client_code, name, phone, email, created_date, last_visit, activity_status):
     try:
         logger.info("Подключение к Google Sheets...")
-        credentials = Credentials.from_service_account_file(os.getenv("GOOGLE_APPLICATION_CREDENTIALS"))
-        sheets_service = build('sheets', 'v4', credentials=credentials)
+        sheets_service = get_sheets_service()
 
-        spreadsheet_id = "1eGpB0hiRxXPpYN75-UKyXoar7yh-zne8r8ox-hXrS1I"
-        range_name = "Sheet1!A2:G1000"  # Диапазон для всех столбцов
-
-        values = [[client_code, name, phone, email, created_date, last_visit, activity_status]]
+        # Преобразуем client_code в строковый тип
+        values = [[str(client_code), name, phone, email, created_date, last_visit, activity_status]]
         body = {'values': values}
 
         logger.info(f"Отправка данных в Google Sheets: {values}")
 
         response = sheets_service.spreadsheets().values().append(
-            spreadsheetId=spreadsheet_id,
-            range=range_name,
+            spreadsheetId=SPREADSHEET_ID,
+            range="Sheet1!A2:G2",  # Диапазон для добавления новой строки
             valueInputOption="RAW",
             body=body
         ).execute()
@@ -78,33 +83,10 @@ def save_client_data(client_code, name, phone, email, created_date, last_visit, 
         logger.info(f"Ответ от Google API: {response}")
     except Exception as e:
         logger.error(f"Ошибка записи в Google Sheets: {e}")
-        raise  # Повторно выбрасываем исключение для диагностики
-
-    # Сохранение в локальный файл ClientData.xlsx
-    df = load_client_data()
-    existing_client = df[df["Client Code"] == client_code]
-
-    if existing_client.empty:
-        new_data = pd.DataFrame([{
-            "Client Code": client_code,
-            "Name": name,
-            "Phone": phone,
-            "Email": email,
-            "Created Date": created_date,
-            "Last Visit": last_visit,
-            "Activity Status": activity_status
-        }])
-        df = pd.concat([df, new_data], ignore_index=True)
-    else:
-        df.loc[df["Client Code"] == client_code, ["Name", "Phone", "Email", "Last Visit", "Activity Status"]] = [name, phone, email, last_visit, activity_status]
-
-    logger.info(f"Сохранение данных в файл: {CLIENT_DATA_FILE}")
-    df.to_excel(CLIENT_DATA_FILE, index=False)
-    logger.info(f"Данные сохранены в ClientData.xlsx: {client_code}, {name}, {phone}, {email}")
+        raise
 
 # Регистрация или обновление клиента
 def register_or_update_client(data):
-    initialize_client_data()
     df = load_client_data()
 
     email = data.get("email")
@@ -115,20 +97,19 @@ def register_or_update_client(data):
     existing_client = df[(df["Email"] == email) | (df["Phone"] == phone)]
 
     if not existing_client.empty:
-        # Если клиент уже существует, возвращаем его код
         client_code = existing_client.iloc[0]["Client Code"]
         created_date = existing_client.iloc[0]["Created Date"]
         last_visit = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        activity_status = "Active"  # Устанавливаем статус "Active"
+        activity_status = "Active"
 
         save_client_data(
             client_code=client_code,
             name=name,
             phone=phone,
             email=email,
-            created_date=created_date,  # Используем существующую дату создания
-            last_visit=last_visit,  # Обновляем дату последнего визита
-            activity_status=activity_status  # Устанавливаем статус "Active"
+            created_date=created_date,
+            last_visit=last_visit,
+            activity_status=activity_status
         )
         return {
             "uniqueCode": client_code,
@@ -144,28 +125,15 @@ def register_or_update_client(data):
     last_visit = created_date
     activity_status = "Active"
 
-    new_client = {
-        "Client Code": client_code,
-        "Name": name,
-        "Phone": phone,
-        "Email": email,
-        "Created Date": created_date,
-        "Last Visit": last_visit,
-        "Activity Status": activity_status
-    }
-    df = pd.concat([df, pd.DataFrame([new_client])], ignore_index=True)
     save_client_data(
         client_code=client_code,
         name=name,
         phone=phone,
         email=email,
-        created_date=created_date,  # Передаем дату создания
-        last_visit=last_visit,  # Передаем дату последнего визита
-        activity_status=activity_status  # Передаем статус активности
+        created_date=created_date,
+        last_visit=last_visit,
+        activity_status=activity_status
     )
-
-    # Создание файла клиента
-    create_client_file(client_code, new_client)
 
     return {
         "uniqueCode": client_code,
@@ -175,25 +143,11 @@ def register_or_update_client(data):
         "phone": phone
     }
 
-# Создание индивидуального файла клиента
-def create_client_file(client_code, client_data):
-    client_file_path = os.path.join(BIG_DATA_PATH, f"{client_code}.xlsx")
-    columns = ["Date", "Message"]
-    initial_data = {
-        "Date": [datetime.now().strftime("%Y-%m-%d %H:%M:%S")],
-        "Message": ["Файл клиента создан"]
-    }
-    df = pd.DataFrame(initial_data, columns=columns)
-    df.to_excel(client_file_path, index=False)
-    logger.info(f"Создан файл клиента: {client_file_path}")
-
 # Верификация кода клиента
 def verify_client_code(code):
     df = load_client_data()
+    code = str(code)  # Преобразуем код к строковому типу
     client_data = df[df["Client Code"] == code]
     if not client_data.empty:
         return client_data.iloc[0].to_dict()
     return None
-
-# Инициализация системы при первом запуске
-initialize_client_data()
