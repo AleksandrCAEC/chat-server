@@ -4,7 +4,6 @@ from googleapiclient.discovery import build
 import pandas as pd
 from datetime import datetime, timedelta
 import logging
-from openpyxl import load_workbook
 from client_caec import handle_client  # Импорт функции для обработки файла клиента
 
 # Настройка логирования
