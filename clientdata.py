@@ -113,7 +113,7 @@ def send_email(to_email, client_code, name):
         smtp_server = "smtp.gmail.com"
         smtp_port = 587
         smtp_username = "office@caec.bz"
-        smtp_password = "1970APgls**"  # Пароль от почты
+        smtp_password = "***"  # Пароль от почты
 
         # Создаем сообщение
         subject = "Регистрация в базе данных CAEC GmbH"
