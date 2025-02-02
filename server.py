@@ -76,16 +76,17 @@ def chat():
         if not user_message:
             return jsonify({'error': 'Сообщение не может быть пустым'}), 400
 
-        response = openai.Completion.create(
+        # Используем ChatCompletion для gpt-3.5-turbo
+        response = openai.ChatCompletion.create(
             model="gpt-3.5-turbo",
             messages=[
-                {"role": "assistant", "content": "Здравствуйте! Чем могу помочь?"},
+                {"role": "system", "content": "Вы - помощник компании CAEC."},
                 {"role": "user", "content": user_message}
             ],
             max_tokens=150
         )
 
-        reply = response.choices[0].message.content.strip()
+        reply = response.choices[0].message['content'].strip()
         return jsonify({'reply': reply}), 200
     except Exception as e:
         print(f"❌ Ошибка в /chat: {e}")
