@@ -1,6 +1,6 @@
 import os
 import pandas as pd
-from openpyxl import Workbook
+from openpyxl import Workbook, load_workbook
 from openpyxl.styles import numbers
 import logging
 from datetime import datetime
@@ -133,67 +133,33 @@ def create_client_file(client_code, client_data):
 # Функция для добавления сообщения в файл клиента
 def add_message_to_client_file(client_code, message, is_assistant=False):
     try:
-        # Получаем данные клиента
-        df = load_client_data()
-        client_data = df[df["Client Code"] == client_code]
+        file_name = f"Client_{client_code}.xlsx"
 
-        if not client_data.empty:
-            client_data = client_data.iloc[0].to_dict()
-
-            # Создаем файл в памяти
-            output = BytesIO()
+        # Открываем существующий файл или создаем новый, если он не существует
+        if os.path.exists(file_name):
+            wb = load_workbook(file_name)
+            ws = wb.active
+        else:
             wb = Workbook()
             ws = wb.active
-
-            # Записываем заголовки
+            # Записываем заголовки, если файл новый
             ws.append(["Assistant", "Client", "Client Code", "Name", "Phone", "Email", "Created Date"])
 
-            # Записываем данные клиента в первую строку
-            ws.append([
-                "",  # Assistant (пока пусто)
-                "",  # Client (пока пусто)
-                client_data["Client Code"],
-                client_data["Name"],
-                client_data["Phone"],
-                client_data["Email"],
-                client_data["Created Date"]
-            ])
-
-            # Добавляем новое сообщение
-            current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            if is_assistant:
-                ws.append([f"{current_time} - {message}", "", "", "", "", "", ""])
-            else:
-                ws.append(["", f"{current_time} - {message}", "", "", "", "", ""])
-
-            # Устанавливаем формат ячеек как текст
-            for row in ws.iter_rows(min_row=1, max_row=ws.max_row, min_col=1, max_col=ws.max_column):
-                for cell in row:
-                    cell.number_format = numbers.FORMAT_TEXT
-
-            # Настраиваем выравнивание и автоподбор ширины столбцов
-            for col in ws.columns:
-                max_length = 0
-                column = col[0].column_letter  # Получаем букву столбца
-                for cell in col:
-                    try:
-                        if len(str(cell.value)) > max_length:
-                            max_length = len(str(cell.value))
-                    except:
-                        pass
-                adjusted_width = (max_length + 2) * 1.2  # Подбираем ширину столбца
-                ws.column_dimensions[column].width = adjusted_width
-
-            # Сохраняем файл в памяти
-            wb.save(output)
-            output.seek(0)
-
-            # Загружаем файл на Google Drive
-            upload_to_google_drive(output, f"Client_{client_code}.xlsx")
-
-            logger.info(f"Сообщение добавлено в файл клиента {client_code}.")
+        # Добавляем новое сообщение
+        current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        if is_assistant:
+            ws.append([f"{current_time} - {message}", "", "", "", "", "", ""])
         else:
-            logger.warning(f"Клиент с кодом {client_code} не найден в ClientData.xlsx.")
+            ws.append(["", f"{current_time} - {message}", "", "", "", "", ""])
+
+        # Сохраняем файл
+        wb.save(file_name)
+
+        # Загружаем файл на Google Drive
+        with open(file_name, "rb") as file_stream:
+            upload_to_google_drive(file_stream, file_name)
+
+        logger.info(f"Сообщение добавлено в файл клиента {client_code}.")
     except Exception as e:
         logger.error(f"Ошибка при добавлении сообщения в файл клиента: {e}")
 
@@ -209,10 +175,11 @@ def handle_client(client_code):
         if not client_data.empty:
             client_data = client_data.iloc[0].to_dict()
 
-            # Создаем файл клиента
+            # Создаем файл клиента, если он не существует
             file_name = f"Client_{client_code}.xlsx"
-            logger.info(f"Создание файла клиента: {file_name}")
-            create_client_file(client_code, client_data)
+            if not os.path.exists(file_name):
+                logger.info(f"Создание файла клиента: {file_name}")
+                create_client_file(client_code, client_data)
         else:
             logger.warning(f"Клиент с кодом {client_code} не найден в ClientData.xlsx.")
     except Exception as e:
