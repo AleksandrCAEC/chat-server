@@ -4,6 +4,7 @@ import os
 import openai
 import requests
 from clientdata import register_or_update_client, verify_client_code
+from client_caec import add_message_to_client_file  # Импорт функции для добавления сообщения
 import logging
 
 # Указание пути к файлу service_account_json
@@ -72,9 +73,10 @@ def chat():
     try:
         data = request.json
         user_message = data.get('message', '')
+        client_code = data.get('client_code', '')  # Получаем код клиента из запроса
 
-        if not user_message:
-            return jsonify({'error': 'Сообщение не может быть пустым'}), 400
+        if not user_message or not client_code:
+            return jsonify({'error': 'Сообщение и код клиента не могут быть пустыми'}), 400
 
         # Используем метод ChatCompletion.create, который принимает параметр messages
         response = openai.ChatCompletion.create(
@@ -88,6 +90,13 @@ def chat():
 
         # Извлекаем ответ
         reply = response['choices'][0]['message']['content'].strip()
+
+        # Добавляем сообщение пользователя в файл клиента
+        add_message_to_client_file(client_code, user_message, is_assistant=False)
+
+        # Добавляем ответ ассистента в файл клиента
+        add_message_to_client_file(client_code, reply, is_assistant=True)
+
         return jsonify({'reply': reply}), 200
     except Exception as e:
         print(f"❌ Ошибка в /chat: {e}")
