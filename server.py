@@ -6,13 +6,16 @@ from flask import Flask, request, jsonify
 from flask_cors import CORS
 from clientdata import register_or_update_client, verify_client_code
 
-# Установка переменной для доступа к файлу с сервисными учётными данными Google
+# Вывод версии библиотеки openai для отладки
+print("OpenAI version:", openai.__version__)
+
+# Установка пути к файлу сервисного аккаунта Google
 os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = "/etc/secrets/service_account_json"
 
 # Инициализация клиента OpenAI (убедитесь, что переменная OPENAI_API_KEY установлена)
 openai.api_key = os.getenv("OPENAI_API_KEY")
 
-# Инициализация Flask-приложения
+# Инициализация Flask-приложения и CORS
 app = Flask(__name__)
 CORS(app)
 
@@ -33,11 +36,7 @@ def send_telegram_notification(message):
         return
 
     url = f"https://api.telegram.org/bot{telegram_bot_token}/sendMessage"
-    payload = {
-        "chat_id": telegram_chat_id,
-        "text": message,
-        "parse_mode": "HTML"
-    }
+    payload = {"chat_id": telegram_chat_id, "text": message, "parse_mode": "HTML"}
     
     try:
         response = requests.post(url, json=payload)
@@ -101,7 +100,7 @@ def chat():
         if not user_message:
             return jsonify({'error': 'Сообщение не может быть пустым'}), 400
 
-        # Используем ChatCompletion.create для модели gpt-3.5-turbo
+        # Используем метод ChatCompletion.create, который принимает параметр messages
         response = openai.ChatCompletion.create(
             model="gpt-3.5-turbo",
             messages=[
