@@ -7,7 +7,6 @@ import logging
 from logging.handlers import RotatingFileHandler
 from datetime import datetime
 import pandas as pd
-import uuid
 
 # Настройка логирования
 def setup_logging():
@@ -59,13 +58,11 @@ def load_bible_data():
     bible_path = "./CAEC_API_Data/BIG_DATA/Bible.xlsx"
     if not os.path.exists(bible_path):
         logger.error("Файл Bible.xlsx не найден.")
-        send_telegram_notification("❌ Ошибка базы данных: Файл Bible.xlsx не найден.")
         return None
     try:
         return pd.read_excel(bible_path)
     except Exception as e:
         logger.error(f"Ошибка при чтении Bible.xlsx: {e}")
-        send_telegram_notification(f"❌ Ошибка при чтении Bible.xlsx: {e}")
         return None
 
 # Загрузка данных клиента
@@ -85,6 +82,7 @@ def prepare_assistant_context(client_code):
     # Загружаем данные из Bible.xlsx
     bible_data = load_bible_data()
     if bible_data is None:
+        send_telegram_notification("❌ Ошибка базы данных: Файл Bible.xlsx не найден.")
         return None
 
     # Загружаем данные клиента
@@ -96,23 +94,6 @@ def prepare_assistant_context(client_code):
     # Если клиент существует, загружаем историю переписки
     logger.info("Клиент существует. Ассистент загрузил историю переписки.")
     return {"bible": bible_data, "client_history": client_data}
-
-# Добавление сообщения в файл клиента
-def add_message_to_client_file(client_code, message, is_assistant=False):
-    try:
-        client_path = f"./CAEC_API_Data/Data_CAEC_Client/Client_{client_code}.xlsx"
-        if not os.path.exists(client_path):
-            df = pd.DataFrame(columns=["Timestamp", "Message", "is_assistant"])
-        else:
-            df = pd.read_excel(client_path)
-
-        new_entry = {"Timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"), "Message": message, "is_assistant": is_assistant}
-        df = df.append(new_entry, ignore_index=True)
-        df.to_excel(client_path, index=False)
-        logger.info(f"Сообщение добавлено в файл клиента {client_code}.")
-    except Exception as e:
-        logger.error(f"Ошибка при добавлении сообщения в файл клиента: {e}")
-        raise
 
 @app.route('/chat', methods=['POST'])
 def chat():
@@ -151,9 +132,6 @@ def chat():
                 max_tokens=150
             )
             reply = response['choices'][0]['message']['content'].strip()
-        except openai.error.InvalidRequestError as e:
-            logger.error(f"Ошибка OpenAI: превышен лимит токенов. Уменьшите контекст.")
-            return jsonify({'error': 'Превышен лимит токенов. Уменьшите контекст.'}), 400
         except openai.error.OpenAIError as e:
             logger.error(f"Ошибка OpenAI: {e}")
             return jsonify({'error': 'Ошибка при обработке запроса OpenAI'}), 500
