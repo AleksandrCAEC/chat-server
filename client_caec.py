@@ -1,7 +1,7 @@
 import os
 import pandas as pd
 from openpyxl import Workbook, load_workbook
-from openpyxl.styles import Alignment, numbers
+from openpyxl.styles import numbers
 import logging
 from datetime import datetime
 from google.oauth2.service_account import Credentials
@@ -110,12 +110,12 @@ def create_client_file(client_code, client_data):
         ws = wb.active
 
         # Записываем заголовки
-        ws.append(["Client", "Assistant", "Client Code", "Name", "Phone", "Email", "Created Date"])
+        ws.append(["Assistant", "Client", "Client Code", "Name", "Phone", "Email", "Created Date"])
 
         # Записываем данные клиента в первую строку
         ws.append([
-            "",  # Client (пока пусто)
             "",  # Assistant (пока пусто)
+            "",  # Client (пока пусто)
             client_data["Client Code"],
             client_data["Name"],
             client_data["Phone"],
@@ -131,11 +131,6 @@ def create_client_file(client_code, client_data):
         # Настраиваем ширину столбцов A и B на 650 единиц
         ws.column_dimensions['A'].width = 650
         ws.column_dimensions['B'].width = 650
-
-        # Включаем перенос текста для столбцов A и B
-        for row in ws.iter_rows(min_row=1, max_row=ws.max_row, min_col=1, max_col=2):
-            for cell in row:
-                cell.alignment = Alignment(wrap_text=True)
 
         # Сохраняем файл в памяти
         wb.save(output)
@@ -163,7 +158,7 @@ def add_message_to_client_file(client_code, message, is_assistant=False):
             wb = Workbook()
             ws = wb.active
             # Записываем заголовки, если файл новый
-            ws.append(["Client", "Assistant", "Client Code", "Name", "Phone", "Email", "Created Date"])
+            ws.append(["Assistant", "Client", "Client Code", "Name", "Phone", "Email", "Created Date"])
 
         # Загружаем данные клиента
         df = load_client_data()
@@ -176,23 +171,18 @@ def add_message_to_client_file(client_code, message, is_assistant=False):
         last_row = ws.max_row
         if is_assistant:
             # Если это ответ ассистента, добавляем его в ту же строку, что и последнее сообщение клиента
-            ws.cell(row=last_row, column=2, value=f"{current_time} - {message}")
+            ws.cell(row=last_row, column=1, value=f"{current_time} - {message}")
         else:
             # Если это новое сообщение клиента, добавляем его в новую строку
             ws.append([
-                f"{current_time} - {message}",  # Client
                 "",  # Assistant (пока пусто)
+                f"{current_time} - {message}",
                 client_data["Client Code"],
                 client_data["Name"],
                 client_data["Phone"],
                 client_data["Email"],
                 client_data["Created Date"]
             ])
-
-        # Включаем перенос текста для столбцов A и B
-        for row in ws.iter_rows(min_row=1, max_row=ws.max_row, min_col=1, max_col=2):
-            for cell in row:
-                cell.alignment = Alignment(wrap_text=True)
 
         # Сохраняем файл
         wb.save(file_name)
