@@ -163,6 +163,29 @@ def chat():
         logger.error(f"❌ Ошибка в /chat: {e}")
         return jsonify({'error': str(e)}), 500
 
+@app.route('/verify-code', methods=['POST'])
+def verify_code():
+    try:
+        data = request.json
+        logger.info(f"Получен запрос на верификацию кода: {data}")
+
+        client_code = data.get('client_code', '')
+        if not client_code:
+            logger.error("Ошибка: Код клиента не может быть пустым")
+            return jsonify({'error': 'Код клиента не может быть пустым'}), 400
+
+        # Верифицируем код клиента
+        client_info = verify_client_code(client_code)
+        if client_info is None:
+            logger.info(f"Клиент с кодом {client_code} не найден.")
+            return jsonify({'error': 'Клиент не найден'}), 404
+
+        logger.info(f"Клиент с кодом {client_code} успешно верифицирован.")
+        return jsonify(client_info), 200
+    except Exception as e:
+        logger.error(f"❌ Ошибка в /verify-code: {e}")
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/')
 def home():
     return jsonify({"status": "Server is running!"}), 200
