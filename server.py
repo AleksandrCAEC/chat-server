@@ -186,6 +186,62 @@ def verify_code():
         logger.error(f"❌ Ошибка в /verify-code: {e}")
         return jsonify({'error': str(e)}), 500
 
+@app.route('/register-client', methods=['POST'])
+def register_client():
+    try:
+        data = request.json
+        logger.info(f"Получен запрос на регистрацию клиента: {data}")
+
+        name = data.get('name', '')
+        phone = data.get('phone', '')
+        email = data.get('email', '')
+
+        if not name or not phone or not email:
+            logger.error("Ошибка: Имя, телефон и email не могут быть пустыми")
+            return jsonify({'error': 'Имя, телефон и email не могут быть пустыми'}), 400
+
+        # Генерация уникального кода
+        unique_code = generate_unique_code()
+
+        # Сохраняем данные клиента
+        client_data = {
+            "Client Code": unique_code,
+            "Name": name,
+            "Phone": phone,
+            "Email": email,
+            "Created Date": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "Last Visit": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "Activity Status": "Active"
+        }
+
+        # Сохраняем данные в файл
+        client_path = f"./CAEC_API_Data/Data_CAEC_Client/Client_{unique_code}.xlsx"
+        df = pd.DataFrame([client_data])
+        df.to_excel(client_path, index=False)
+
+        logger.info(f"Клиент {name} успешно зарегистрирован. Код: {unique_code}")
+        return jsonify({'uniqueCode': unique_code}), 200
+    except Exception as e:
+        logger.error(f"❌ Ошибка в /register-client: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/send-telegram', methods=['POST'])
+def send_telegram():
+    try:
+        data = request.json
+        logger.info(f"Получен запрос на отправку Telegram уведомления: {data}")
+
+        message = data.get('message', '')
+        if not message:
+            logger.error("Ошибка: Сообщение не может быть пустым")
+            return jsonify({'error': 'Сообщение не может быть пустым'}), 400
+
+        send_telegram_notification(message)
+        return jsonify({'status': 'success'}), 200
+    except Exception as e:
+        logger.error(f"❌ Ошибка в /send-telegram: {e}")
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/')
 def home():
     return jsonify({"status": "Server is running!"}), 200
