@@ -128,18 +128,9 @@ def create_client_file(client_code, client_data):
             for cell in row:
                 cell.number_format = numbers.FORMAT_TEXT
 
-        # Настраиваем выравнивание и автоподбор ширины столбцов
-        for col in ws.columns:
-            max_length = 0
-            column = col[0].column_letter  # Получаем букву столбца
-            for cell in col:
-                try:
-                    if len(str(cell.value)) > max_length:
-                        max_length = len(str(cell.value))
-                except:
-                    pass
-            adjusted_width = (max_length + 2) * 1.2  # Подбираем ширину столбца
-            ws.column_dimensions[column].width = adjusted_width
+        # Настраиваем ширину столбцов A и B на 650 единиц
+        ws.column_dimensions['A'].width = 650
+        ws.column_dimensions['B'].width = 650
 
         # Сохраняем файл в памяти
         wb.save(output)
@@ -169,12 +160,29 @@ def add_message_to_client_file(client_code, message, is_assistant=False):
             # Записываем заголовки, если файл новый
             ws.append(["Assistant", "Client", "Client Code", "Name", "Phone", "Email", "Created Date"])
 
-        # Добавляем новое сообщение
-        current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        # Загружаем данные клиента
+        df = load_client_data()
+        client_data = df[df["Client Code"] == client_code].iloc[0].to_dict()
+
+        # Форматируем время
+        current_time = datetime.now().strftime("%d.%m.%y %H:%M")
+
+        # Ищем последнюю строку с сообщением клиента
+        last_row = ws.max_row
         if is_assistant:
-            ws.append([f"{current_time} - {message}", "", "", "", "", "", ""])
+            # Если это ответ ассистента, добавляем его в ту же строку, что и последнее сообщение клиента
+            ws.cell(row=last_row, column=1, value=f"{current_time} - {message}")
         else:
-            ws.append(["", f"{current_time} - {message}", "", "", "", "", ""])
+            # Если это новое сообщение клиента, добавляем его в новую строку
+            ws.append([
+                "",  # Assistant (пока пусто)
+                f"{current_time} - {message}",
+                client_data["Client Code"],
+                client_data["Name"],
+                client_data["Phone"],
+                client_data["Email"],
+                client_data["Created Date"]
+            ])
 
         # Сохраняем файл
         wb.save(file_name)
