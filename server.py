@@ -60,9 +60,14 @@ def load_bible_data():
         logger.error("Файл Bible.xlsx не найден.")
         return None
     try:
-        data = pd.read_excel(bible_path)
-        logger.info(f"Файл Bible.xlsx успешно загружен. Данные: {data.to_dict()}")
-        return data
+        # Загружаем данные из листов FAQ и Answers
+        faq_data = pd.read_excel(bible_path, sheet_name="FAQ")
+        answers_data = pd.read_excel(bible_path, sheet_name="Answers")
+
+        # Объединяем данные в один DataFrame
+        bible_data = pd.merge(faq_data, answers_data, left_index=True, right_index=True)
+        logger.info(f"Файл Bible.xlsx успешно загружен. Данные: {bible_data.to_dict()}")
+        return bible_data
     except Exception as e:
         logger.error(f"Ошибка при чтении Bible.xlsx: {e}")
         return None
@@ -132,7 +137,7 @@ def chat():
         if context["bible"] is not None:
             bible_context = "Данные из Bible.xlsx:\n"
             for _, row in context["bible"].iterrows():
-                bible_context += f"Вопрос: {row['Question']}\nОтвет: {row['Answer']}\n"
+                bible_context += f"Вопрос: {row['FAQ']}\nОтвет: {row['Answers']}\n"
             messages.append({"role": "system", "content": bible_context})
 
         logger.info(f"Запрос к OpenAI с контекстом: {messages}")
