@@ -38,30 +38,54 @@ def get_drive_service():
         logger.error(f"Ошибка инициализации Google Drive API: {e}")
         return None
 
-# Загрузка файла на Google Drive
-def upload_to_google_drive(file_stream, file_name):
+# Поиск файла на Google Drive по имени
+def find_file_id(drive_service, file_name):
+    try:
+        response = drive_service.files().list(
+            q=f"name='{file_name}' and '{GOOGLE_DRIVE_FOLDER_ID}' in parents",
+            fields="files(id)"
+        ).execute()
+        files = response.get("files", [])
+        if files:
+            return files[0]["id"]  # Возвращаем ID первого найденного файла
+        return None
+    except Exception as e:
+        logger.error(f"Ошибка при поиске файла на Google Drive: {e}")
+        return None
+
+# Загрузка или обновление файла на Google Drive
+def upload_or_update_file(file_name, file_stream):
     try:
         drive_service = get_drive_service()
         if not drive_service:
             raise Exception("Google Drive API не инициализирован.")
 
-        file_metadata = {
-            "name": file_name,
-            "parents": [GOOGLE_DRIVE_FOLDER_ID]
-        }
+        # Ищем файл на Google Drive
+        file_id = find_file_id(drive_service, file_name)
 
-        media = MediaIoBaseUpload(file_stream, mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-        file = drive_service.files().create(
-            body=file_metadata,
-            media_body=media,
-            fields="id"
-        ).execute()
-
-        logger.info(f"Файл {file_name} успешно загружен на Google Drive. ID файла: {file.get('id')}")
-        return file.get("id")
+        if file_id:
+            # Если файл существует, обновляем его
+            media = MediaIoBaseUpload(file_stream, mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+            drive_service.files().update(
+                fileId=file_id,
+                media_body=media
+            ).execute()
+            logger.info(f"Файл {file_name} успешно обновлён на Google Drive.")
+        else:
+            # Если файл не существует, создаем новый
+            file_metadata = {
+                "name": file_name,
+                "parents": [GOOGLE_DRIVE_FOLDER_ID]
+            }
+            media = MediaIoBaseUpload(file_stream, mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+            file = drive_service.files().create(
+                body=file_metadata,
+                media_body=media,
+                fields="id"
+            ).execute()
+            logger.info(f"Файл {file_name} успешно создан и загружен на Google Drive. ID файла: {file.get('id')}")
     except Exception as e:
-        logger.error(f"Ошибка загрузки файла на Google Drive: {e}")
-        return None
+        logger.error(f"Ошибка при загрузке/обновлении файла на Google Drive: {e}")
 
 # Функция для загрузки данных из ClientData.xlsx
 def load_client_data():
@@ -121,8 +145,8 @@ def create_client_file(client_code, client_data):
         wb.save(output)
         output.seek(0)
 
-        # Загружаем файл на Google Drive
-        upload_to_google_drive(output, file_name)
+        # Загружаем или обновляем файл на Google Drive
+        upload_or_update_file(file_name, output)
 
         logger.info(f"Файл {file_name} успешно создан и загружен на Google Drive.")
         return file_name
@@ -155,9 +179,9 @@ def add_message_to_client_file(client_code, message, is_assistant=False):
         # Сохраняем файл
         wb.save(file_name)
 
-        # Загружаем файл на Google Drive
+        # Загружаем или обновляем файл на Google Drive
         with open(file_name, "rb") as file_stream:
-            upload_to_google_drive(file_stream, file_name)
+            upload_or_update_file(file_name, file_stream)
 
         logger.info(f"Сообщение добавлено в файл клиента {client_code}.")
     except Exception as e:
