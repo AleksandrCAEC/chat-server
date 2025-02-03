@@ -129,8 +129,8 @@ def create_client_file(client_code, client_data):
                 cell.number_format = numbers.FORMAT_TEXT
 
         # Настраиваем ширину столбцов A и B на 650 единиц
-        ws.column_dimensions['A'].width = 650
-        ws.column_dimensions['B'].width = 650
+        ws.column_dimensions['A'].width = 65  # Ширина столбца A (Client)
+        ws.column_dimensions['B'].width = 65  # Ширина столбца B (Assistant)
 
         # Включаем перенос текста для столбцов A и B
         for row in ws.iter_rows(min_row=1, max_row=ws.max_row, min_col=1, max_col=2):
@@ -165,9 +165,20 @@ def add_message_to_client_file(client_code, message, is_assistant=False):
             # Записываем заголовки, если файл новый
             ws.append(["Client", "Assistant", "Client Code", "Name", "Phone", "Email", "Created Date"])
 
-        # Загружаем данные клиента
-        df = load_client_data()
-        client_data = df[df["Client Code"] == client_code].iloc[0].to_dict()
+            # Загружаем данные клиента
+            df = load_client_data()
+            client_data = df[df["Client Code"] == client_code].iloc[0].to_dict()
+
+            # Записываем данные клиента в первую строку
+            ws.append([
+                "",  # Client (пока пусто)
+                "",  # Assistant (пока пусто)
+                client_data["Client Code"],
+                client_data["Name"],
+                client_data["Phone"],
+                client_data["Email"],
+                client_data["Created Date"]
+            ])
 
         # Форматируем время
         current_time = datetime.now().strftime("%d.%m.%y %H:%M")
@@ -182,11 +193,11 @@ def add_message_to_client_file(client_code, message, is_assistant=False):
             ws.append([
                 f"{current_time} - {message}",  # Client
                 "",  # Assistant (пока пусто)
-                client_data["Client Code"],
-                client_data["Name"],
-                client_data["Phone"],
-                client_data["Email"],
-                client_data["Created Date"]
+                "",  # Client Code (пусто)
+                "",  # Name (пусто)
+                "",  # Phone (пусто)
+                "",  # Email (пусто)
+                ""   # Created Date (пусто)
             ])
 
         # Включаем перенос текста для столбцов A и B
