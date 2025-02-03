@@ -40,4 +40,3 @@ def add_message_to_client_file(client_code, message, is_assistant=False):
         logger.info(f"Сообщение добавлено в файл клиента {client_code}.")
     except Exception as e:
         logger.error(f"Ошибка при добавлении сообщения в файл клиента: {e}")
-        raise
