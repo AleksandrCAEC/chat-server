@@ -60,7 +60,9 @@ def load_bible_data():
         logger.error("Файл Bible.xlsx не найден.")
         return None
     try:
-        return pd.read_excel(bible_path)
+        data = pd.read_excel(bible_path)
+        logger.info(f"Файл Bible.xlsx успешно загружен. Данные: {data.to_dict()}")
+        return data
     except Exception as e:
         logger.error(f"Ошибка при чтении Bible.xlsx: {e}")
         return None
@@ -72,7 +74,9 @@ def load_client_data(client_code):
         logger.info(f"Файл клиента {client_code} не найден. Клиент новый.")
         return None
     try:
-        return pd.read_excel(client_path)
+        data = pd.read_excel(client_path)
+        logger.info(f"Файл клиента {client_code} успешно загружен. Данные: {data.to_dict()}")
+        return data
     except Exception as e:
         logger.error(f"Ошибка при чтении файла клиента {client_code}: {e}")
         return None
@@ -124,12 +128,21 @@ def chat():
             for _, row in context["client_history"].iterrows():
                 messages.append({"role": "assistant" if row["is_assistant"] else "user", "content": row["message"]})
 
+        # Добавляем данные из Bible.xlsx в контекст
+        if context["bible"] is not None:
+            bible_context = "Данные из Bible.xlsx:\n"
+            for _, row in context["bible"].iterrows():
+                bible_context += f"Вопрос: {row['Question']}\nОтвет: {row['Answer']}\n"
+            messages.append({"role": "system", "content": bible_context})
+
+        logger.info(f"Запрос к OpenAI с контекстом: {messages}")
+
         # Запрос к OpenAI
         try:
             response = openai.ChatCompletion.create(
                 model="gpt-3.5-turbo",
                 messages=messages,
-                max_tokens=150
+                max_tokens=500  # Увеличено для более длинных ответов
             )
             reply = response['choices'][0]['message']['content'].strip()
         except openai.error.OpenAIError as e:
