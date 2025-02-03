@@ -43,7 +43,7 @@ def find_file_id(drive_service, file_name):
     try:
         response = drive_service.files().list(
             q=f"name='{file_name}' and '{GOOGLE_DRIVE_FOLDER_ID}' in parents",
-            fields="files(id)"
+            fields="files(id, name)"
         ).execute()
         files = response.get("files", [])
         if files:
