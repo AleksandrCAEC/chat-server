@@ -7,6 +7,7 @@ import logging
 from logging.handlers import RotatingFileHandler
 from datetime import datetime
 import pandas as pd
+import uuid
 
 # Настройка логирования
 def setup_logging():
@@ -58,18 +59,13 @@ def load_bible_data():
     bible_path = "./CAEC_API_Data/BIG_DATA/Bible.xlsx"
     if not os.path.exists(bible_path):
         logger.error("Файл Bible.xlsx не найден.")
+        send_telegram_notification("❌ Ошибка базы данных: Файл Bible.xlsx не найден.")
         return None
     try:
-        # Загружаем данные из листов FAQ и Answers
-        faq_data = pd.read_excel(bible_path, sheet_name="FAQ")
-        answers_data = pd.read_excel(bible_path, sheet_name="Answers")
-
-        # Объединяем данные в один DataFrame
-        bible_data = pd.merge(faq_data, answers_data, left_index=True, right_index=True)
-        logger.info(f"Файл Bible.xlsx успешно загружен. Данные: {bible_data.to_dict()}")
-        return bible_data
+        return pd.read_excel(bible_path)
     except Exception as e:
         logger.error(f"Ошибка при чтении Bible.xlsx: {e}")
+        send_telegram_notification(f"❌ Ошибка при чтении Bible.xlsx: {e}")
         return None
 
 # Загрузка данных клиента
@@ -79,9 +75,7 @@ def load_client_data(client_code):
         logger.info(f"Файл клиента {client_code} не найден. Клиент новый.")
         return None
     try:
-        data = pd.read_excel(client_path)
-        logger.info(f"Файл клиента {client_code} успешно загружен. Данные: {data.to_dict()}")
-        return data
+        return pd.read_excel(client_path)
     except Exception as e:
         logger.error(f"Ошибка при чтении файла клиента {client_code}: {e}")
         return None
@@ -91,7 +85,6 @@ def prepare_assistant_context(client_code):
     # Загружаем данные из Bible.xlsx
     bible_data = load_bible_data()
     if bible_data is None:
-        send_telegram_notification("❌ Ошибка базы данных: Файл Bible.xlsx не найден.")
         return None
 
     # Загружаем данные клиента
@@ -103,6 +96,23 @@ def prepare_assistant_context(client_code):
     # Если клиент существует, загружаем историю переписки
     logger.info("Клиент существует. Ассистент загрузил историю переписки.")
     return {"bible": bible_data, "client_history": client_data}
+
+# Добавление сообщения в файл клиента
+def add_message_to_client_file(client_code, message, is_assistant=False):
+    try:
+        client_path = f"./CAEC_API_Data/Data_CAEC_Client/Client_{client_code}.xlsx"
+        if not os.path.exists(client_path):
+            df = pd.DataFrame(columns=["Timestamp", "Message", "is_assistant"])
+        else:
+            df = pd.read_excel(client_path)
+
+        new_entry = {"Timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"), "Message": message, "is_assistant": is_assistant}
+        df = df.append(new_entry, ignore_index=True)
+        df.to_excel(client_path, index=False)
+        logger.info(f"Сообщение добавлено в файл клиента {client_code}.")
+    except Exception as e:
+        logger.error(f"Ошибка при добавлении сообщения в файл клиента: {e}")
+        raise
 
 @app.route('/chat', methods=['POST'])
 def chat():
@@ -133,23 +143,17 @@ def chat():
             for _, row in context["client_history"].iterrows():
                 messages.append({"role": "assistant" if row["is_assistant"] else "user", "content": row["message"]})
 
-        # Добавляем данные из Bible.xlsx в контекст
-        if context["bible"] is not None:
-            bible_context = "Данные из Bible.xlsx:\n"
-            for _, row in context["bible"].iterrows():
-                bible_context += f"Вопрос: {row['FAQ']}\nОтвет: {row['Answers']}\n"
-            messages.append({"role": "system", "content": bible_context})
-
-        logger.info(f"Запрос к OpenAI с контекстом: {messages}")
-
         # Запрос к OpenAI
         try:
             response = openai.ChatCompletion.create(
                 model="gpt-3.5-turbo",
                 messages=messages,
-                max_tokens=500  # Увеличено для более длинных ответов
+                max_tokens=150
             )
             reply = response['choices'][0]['message']['content'].strip()
+        except openai.error.InvalidRequestError as e:
+            logger.error(f"Ошибка OpenAI: превышен лимит токенов. Уменьшите контекст.")
+            return jsonify({'error': 'Превышен лимит токенов. Уменьшите контекст.'}), 400
         except openai.error.OpenAIError as e:
             logger.error(f"Ошибка OpenAI: {e}")
             return jsonify({'error': 'Ошибка при обработке запроса OpenAI'}), 500
@@ -166,85 +170,6 @@ def chat():
         return jsonify({'reply': reply}), 200
     except Exception as e:
         logger.error(f"❌ Ошибка в /chat: {e}")
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/verify-code', methods=['POST'])
-def verify_code():
-    try:
-        data = request.json
-        logger.info(f"Получен запрос на верификацию кода: {data}")
-
-        client_code = data.get('client_code', '')
-        if not client_code:
-            logger.error("Ошибка: Код клиента не может быть пустым")
-            return jsonify({'error': 'Код клиента не может быть пустым'}), 400
-
-        # Верифицируем код клиента
-        client_info = verify_client_code(client_code)
-        if client_info is None:
-            logger.info(f"Клиент с кодом {client_code} не найден.")
-            return jsonify({'error': 'Клиент не найден'}), 404
-
-        logger.info(f"Клиент с кодом {client_code} успешно верифицирован.")
-        return jsonify(client_info), 200
-    except Exception as e:
-        logger.error(f"❌ Ошибка в /verify-code: {e}")
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/register-client', methods=['POST'])
-def register_client():
-    try:
-        data = request.json
-        logger.info(f"Получен запрос на регистрацию клиента: {data}")
-
-        name = data.get('name', '')
-        phone = data.get('phone', '')
-        email = data.get('email', '')
-
-        if not name or not phone or not email:
-            logger.error("Ошибка: Имя, телефон и email не могут быть пустыми")
-            return jsonify({'error': 'Имя, телефон и email не могут быть пустыми'}), 400
-
-        # Генерация уникального кода
-        unique_code = generate_unique_code()
-
-        # Сохраняем данные клиента
-        client_data = {
-            "Client Code": unique_code,
-            "Name": name,
-            "Phone": phone,
-            "Email": email,
-            "Created Date": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            "Last Visit": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            "Activity Status": "Active"
-        }
-
-        # Сохраняем данные в файл
-        client_path = f"./CAEC_API_Data/Data_CAEC_Client/Client_{unique_code}.xlsx"
-        df = pd.DataFrame([client_data])
-        df.to_excel(client_path, index=False)
-
-        logger.info(f"Клиент {name} успешно зарегистрирован. Код: {unique_code}")
-        return jsonify({'uniqueCode': unique_code}), 200
-    except Exception as e:
-        logger.error(f"❌ Ошибка в /register-client: {e}")
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/send-telegram', methods=['POST'])
-def send_telegram():
-    try:
-        data = request.json
-        logger.info(f"Получен запрос на отправку Telegram уведомления: {data}")
-
-        message = data.get('message', '')
-        if not message:
-            logger.error("Ошибка: Сообщение не может быть пустым")
-            return jsonify({'error': 'Сообщение не может быть пустым'}), 400
-
-        send_telegram_notification(message)
-        return jsonify({'status': 'success'}), 200
-    except Exception as e:
-        logger.error(f"❌ Ошибка в /send-telegram: {e}")
         return jsonify({'error': str(e)}), 500
 
 @app.route('/')
