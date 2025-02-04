@@ -22,21 +22,14 @@ SPREADSHEET_ID = "1eGpB0hiRxXPpYN75-UKyXoar7yh-zne8r8ox-hXrS1I"
 
 # Инициализация Google Sheets API
 def get_sheets_service():
-    try:
-        credentials = Credentials.from_service_account_file(os.getenv("GOOGLE_APPLICATION_CREDENTIALS"))
-        return build('sheets', 'v4', credentials=credentials)
-    except Exception as e:
-        logger.error(f"Ошибка инициализации Google Sheets API: {e}")
-        return None
+    credentials = Credentials.from_service_account_file(os.getenv("GOOGLE_APPLICATION_CREDENTIALS"))
+    return build('sheets', 'v4', credentials=credentials)
 
 # Загрузка данных из Google Sheets
 def load_client_data():
     try:
         logger.info("Загрузка данных из Google Sheets...")
         sheets_service = get_sheets_service()
-        if not sheets_service:
-            raise Exception("Google Sheets API не инициализирован.")
-
         range_name = "Sheet1!A2:G1000"  # Диапазон для всех столбцов
 
         result = sheets_service.spreadsheets().values().get(
@@ -63,23 +56,17 @@ def load_client_data():
 
 # Генерация уникального кода клиента
 def generate_unique_code():
-    try:
-        existing_codes = set(load_client_data()["Client Code"])
-        while True:
-            code = f"CAEC{str(datetime.now().timestamp()).replace('.', '')[-7:]}"
-            if code not in existing_codes:
-                return code
-    except Exception as e:
-        logger.error(f"Ошибка генерации уникального кода: {e}")
-        raise
+    existing_codes = set(load_client_data()["Client Code"])
+    while True:
+        code = f"CAEC{str(datetime.now().timestamp()).replace('.', '')[-7:]}"
+        if code not in existing_codes:
+            return code
 
 # Сохранение изменений в Google Sheets и локальном файле
 def save_client_data(client_code, name, phone, email, created_date, last_visit, activity_status):
     try:
         logger.info("Подключение к Google Sheets...")
         sheets_service = get_sheets_service()
-        if not sheets_service:
-            raise Exception("Google Sheets API не инициализирован.")
 
         # Преобразуем client_code в строковый тип
         values = [[str(client_code), name, phone, email, created_date, last_visit, activity_status]]
@@ -138,95 +125,87 @@ def update_activity_status():
 
 # Регистрация или обновление клиента
 def register_or_update_client(data):
-    try:
-        df = load_client_data()
+    df = load_client_data()
 
-        email = data.get("email")
-        phone = data.get("phone")
-        name = data.get("name", "Unknown")
+    email = data.get("email")
+    phone = data.get("phone")
+    name = data.get("name", "Unknown")
 
-        # Поиск существующего клиента по email или телефону
-        existing_client = df[(df["Email"] == email) | (df["Phone"] == phone)]
+    # Поиск существующего клиента по email или телефону
+    existing_client = df[(df["Email"] == email) | (df["Phone"] == phone)]
 
-        if not existing_client.empty:
-            # Если клиент уже существует, обновляем его данные
-            client_code = existing_client.iloc[0]["Client Code"]
-            created_date = existing_client.iloc[0]["Created Date"]
-            last_visit = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            activity_status = "Active"
-
-            # Проверяем, изменились ли email или телефон
-            if email != existing_client.iloc[0]["Email"] or phone != existing_client.iloc[0]["Phone"]:
-                # Если email или телефон изменились, создаем новую запись с тем же кодом
-                save_client_data(
-                    client_code=client_code,
-                    name=name,
-                    phone=phone,
-                    email=email,
-                    created_date=created_date,
-                    last_visit=last_visit,
-                    activity_status=activity_status
-                )
-            else:
-                # Если данные не изменились, просто обновляем последний визит
-                df.loc[df["Client Code"] == client_code, "Last Visit"] = last_visit
-                df.to_excel("ClientData.xlsx", index=False)
-
-            # Обработка файла клиента
-            handle_client(client_code)  # Вызов функции для создания/обновления файла клиента
-
-            return {
-                "uniqueCode": client_code,
-                "message": f"Добро пожаловать обратно, {name}! Ваш код: {client_code}.",
-                "name": name,
-                "email": email,
-                "phone": phone,
-                "isNewClient": False  # Указываем, что клиент не новый
-            }
-
-        # Регистрация нового клиента
-        client_code = generate_unique_code()
-        created_date = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        last_visit = created_date
+    if not existing_client.empty:
+        # Если клиент уже существует, обновляем его данные
+        client_code = existing_client.iloc[0]["Client Code"]
+        created_date = existing_client.iloc[0]["Created Date"]
+        last_visit = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         activity_status = "Active"
 
-        save_client_data(
-            client_code=client_code,
-            name=name,
-            phone=phone,
-            email=email,
-            created_date=created_date,
-            last_visit=last_visit,
-            activity_status=activity_status
-        )
+        # Проверяем, изменились ли email или телефон
+        if email != existing_client.iloc[0]["Email"] or phone != existing_client.iloc[0]["Phone"]:
+            # Если email или телефон изменились, создаем новую запись с тем же кодом
+            save_client_data(
+                client_code=client_code,
+                name=name,
+                phone=phone,
+                email=email,
+                created_date=created_date,
+                last_visit=last_visit,
+                activity_status=activity_status
+            )
+        else:
+            # Если данные не изменились, просто обновляем последний визит
+            df.loc[df["Client Code"] == client_code, "Last Visit"] = last_visit
+            df.to_excel("ClientData.xlsx", index=False)
 
         # Обработка файла клиента
         handle_client(client_code)  # Вызов функции для создания/обновления файла клиента
 
-        # Обновляем статус активности клиентов
-        update_activity_status()
-
         return {
             "uniqueCode": client_code,
-            "message": f"Добро пожаловать, {name}! Ваш код: {client_code}.",
+            "message": f"Добро пожаловать обратно, {name}! Ваш код: {client_code}.",
             "name": name,
             "email": email,
             "phone": phone,
-            "isNewClient": True  # Указываем, что клиент новый
+            "isNewClient": False  # Указываем, что клиент не новый
         }
-    except Exception as e:
-        logger.error(f"Ошибка при регистрации/обновлении клиента: {e}")
-        raise
+
+    # Регистрация нового клиента
+    client_code = generate_unique_code()
+    created_date = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    last_visit = created_date
+    activity_status = "Active"
+
+    save_client_data(
+        client_code=client_code,
+        name=name,
+        phone=phone,
+        email=email,
+        created_date=created_date,
+        last_visit=last_visit,
+        activity_status=activity_status
+    )
+
+    # Обработка файла клиента
+    handle_client(client_code)  # Вызов функции для создания/обновления файла клиента
+
+    # Обновляем статус активности клиентов
+    update_activity_status()
+
+    return {
+        "uniqueCode": client_code,
+        "message": f"Добро пожаловать, {name}! Ваш код: {client_code}.",
+        "name": name,
+        "email": email,
+        "phone": phone,
+        "isNewClient": True  # Указываем, что клиент новый
+    }
 
 # Верификация кода клиента
 def verify_client_code(code):
-    try:
-        df = load_client_data()
-        code = str(code)  # Преобразуем код к строковому типу
-        client_data = df[df["Client Code"] == code]
-        if not client_data.empty:
-            return client_data.iloc[0].to_dict()
-        return None
-    except Exception as e:
-        logger.error(f"Ошибка при верификации кода клиента: {e}")
-        return None
+    df = load_client_data()
+    code = str(code)  # Преобразуем код к строковому типу
+    client_data = df[df["Client Code"] == code]
+    if not client_data.empty:
+        return client_data.iloc[0].to_dict()
+    return None
