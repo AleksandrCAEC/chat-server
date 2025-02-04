@@ -21,7 +21,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Путь к файлу ClientData.xlsx
-CLIENT_DATA_PATH = "./CAEC_API_Data/BIG_DATA/ClientData.xlsx"
+CLIENT_DATA_PATH = "ClientData.xlsx"
 
 # ID папки на Google Drive
 GOOGLE_DRIVE_FOLDER_ID = "11cQYLDGKlu2Rn_9g8R_4xNA59ikhvJpS"
@@ -60,11 +60,6 @@ def upload_or_update_file(file_name, file_stream):
         if not drive_service:
             raise Exception("Google Drive API не инициализирован.")
 
-        # Проверяем, существует ли файл локально
-        if not os.path.exists(file_name):
-            logger.error(f"Файл {file_name} не найден локально.")
-            return
-
         # Ищем файл на Google Drive
         file_id = find_file_id(drive_service, file_name)
 
@@ -95,31 +90,19 @@ def upload_or_update_file(file_name, file_stream):
 # Функция для загрузки данных из ClientData.xlsx
 def load_client_data():
     try:
-        client_data_path = "./CAEC_API_Data/BIG_DATA/ClientData.xlsx"
-        
-        # Проверяем, существует ли директория
-        os.makedirs(os.path.dirname(client_data_path), exist_ok=True)
-        
-        # Проверяем, существует ли файл
-        if not os.path.exists(client_data_path):
-            logger.info(f"Файл {client_data_path} не найден. Создаем новый файл.")
-            df = pd.DataFrame(columns=["Client Code", "Name", "Phone", "Email", "Created Date", "Last Visit", "Activity Status"])
-            df.to_excel(client_data_path, index=False)
-            logger.info(f"Файл {client_data_path} успешно создан.")
-            return df
-
         logger.info("Загрузка данных из ClientData.xlsx...")
-        df = pd.read_excel(client_data_path)
+        df = pd.read_excel(CLIENT_DATA_PATH)
         logger.info(f"Данные загружены: {df}")
         return df
     except Exception as e:
         logger.error(f"Ошибка загрузки данных из ClientData.xlsx: {e}")
-        return pd.DataFrame(columns=["Client Code", "Name", "Phone", "Email", "Created Date", "Last Visit", "Activity Status"])
+        return pd.DataFrame()
 
 # Функция для создания файла Client_CAECxxxxxxx.xlsx
 def create_client_file(client_code, client_data):
     try:
-        file_name = f"./CAEC_API_Data/Data_CAEC_Client/Client_{client_code}.xlsx"
+        # Убираем дублирование "CAEC" в имени файла
+        file_name = f"Client_{client_code}.xlsx"
 
         # Создаем файл в памяти
         output = BytesIO()
@@ -170,10 +153,7 @@ def create_client_file(client_code, client_data):
 # Функция для добавления сообщения в файл клиента
 def add_message_to_client_file(client_code, message, is_assistant=False):
     try:
-        file_name = f"./CAEC_API_Data/Data_CAEC_Client/Client_{client_code}.xlsx"
-
-        # Создаем директорию, если она не существует
-        os.makedirs(os.path.dirname(file_name), exist_ok=True)
+        file_name = f"Client_{client_code}.xlsx"
 
         # Открываем существующий файл или создаем новый, если он не существует
         if os.path.exists(file_name):
@@ -183,11 +163,47 @@ def add_message_to_client_file(client_code, message, is_assistant=False):
             wb = Workbook()
             ws = wb.active
             # Записываем заголовки, если файл новый
-            ws.append(["Timestamp", "Message", "is_assistant"])
+            ws.append(["Client", "Assistant", "Client Code", "Name", "Phone", "Email", "Created Date"])
 
-        # Добавляем новое сообщение
-        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        ws.append([timestamp, message, is_assistant])
+            # Загружаем данные клиента
+            df = load_client_data()
+            client_data = df[df["Client Code"] == client_code].iloc[0].to_dict()
+
+            # Записываем данные клиента в первую строку
+            ws.append([
+                "",  # Client (пока пусто)
+                "",  # Assistant (пока пусто)
+                client_data["Client Code"],
+                client_data["Name"],
+                client_data["Phone"],
+                client_data["Email"],
+                client_data["Created Date"]
+            ])
+
+        # Форматируем время
+        current_time = datetime.now().strftime("%d.%m.%y %H:%M")
+
+        # Ищем последнюю строку с сообщением клиента
+        last_row = ws.max_row
+        if is_assistant:
+            # Если это ответ ассистента, добавляем его в ту же строку, что и последнее сообщение клиента
+            ws.cell(row=last_row, column=2, value=f"{current_time} - {message}")
+        else:
+            # Если это новое сообщение клиента, добавляем его в новую строку
+            ws.append([
+                f"{current_time} - {message}",  # Client
+                "",  # Assistant (пока пусто)
+                "",  # Client Code (пусто)
+                "",  # Name (пусто)
+                "",  # Phone (пусто)
+                "",  # Email (пусто)
+                ""   # Created Date (пусто)
+            ])
+
+        # Включаем перенос текста для столбцов A и B
+        for row in ws.iter_rows(min_row=1, max_row=ws.max_row, min_col=1, max_col=2):
+            for cell in row:
+                cell.alignment = Alignment(wrap_text=True)
 
         # Сохраняем файл
         wb.save(file_name)
@@ -213,11 +229,7 @@ def handle_client(client_code):
             client_data = client_data.iloc[0].to_dict()
 
             # Создаем файл клиента, если он не существует
-            file_name = f"./CAEC_API_Data/Data_CAEC_Client/Client_{client_code}.xlsx"
-            
-            # Проверяем, существует ли директория
-            os.makedirs(os.path.dirname(file_name), exist_ok=True)
-
+            file_name = f"Client_{client_code}.xlsx"
             if not os.path.exists(file_name):
                 logger.info(f"Создание файла клиента: {file_name}")
                 create_client_file(client_code, client_data)
