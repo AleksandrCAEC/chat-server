@@ -95,19 +95,31 @@ def upload_or_update_file(file_name, file_stream):
 # Функция для загрузки данных из ClientData.xlsx
 def load_client_data():
     try:
+        client_data_path = "./CAEC_API_Data/BIG_DATA/ClientData.xlsx"
+        
+        # Проверяем, существует ли директория
+        os.makedirs(os.path.dirname(client_data_path), exist_ok=True)
+        
+        # Проверяем, существует ли файл
+        if not os.path.exists(client_data_path):
+            logger.info(f"Файл {client_data_path} не найден. Создаем новый файл.")
+            df = pd.DataFrame(columns=["Client Code", "Name", "Phone", "Email", "Created Date", "Last Visit", "Activity Status"])
+            df.to_excel(client_data_path, index=False)
+            logger.info(f"Файл {client_data_path} успешно создан.")
+            return df
+
         logger.info("Загрузка данных из ClientData.xlsx...")
-        df = pd.read_excel(CLIENT_DATA_PATH)
+        df = pd.read_excel(client_data_path)
         logger.info(f"Данные загружены: {df}")
         return df
     except Exception as e:
         logger.error(f"Ошибка загрузки данных из ClientData.xlsx: {e}")
-        return pd.DataFrame()
+        return pd.DataFrame(columns=["Client Code", "Name", "Phone", "Email", "Created Date", "Last Visit", "Activity Status"])
 
 # Функция для создания файла Client_CAECxxxxxxx.xlsx
 def create_client_file(client_code, client_data):
     try:
-        # Убираем дублирование "CAEC" в имени файла
-        file_name = f"Client_{client_code}.xlsx"
+        file_name = f"./CAEC_API_Data/Data_CAEC_Client/Client_{client_code}.xlsx"
 
         # Создаем файл в памяти
         output = BytesIO()
@@ -201,7 +213,11 @@ def handle_client(client_code):
             client_data = client_data.iloc[0].to_dict()
 
             # Создаем файл клиента, если он не существует
-            file_name = f"Client_{client_code}.xlsx"
+            file_name = f"./CAEC_API_Data/Data_CAEC_Client/Client_{client_code}.xlsx"
+            
+            # Проверяем, существует ли директория
+            os.makedirs(os.path.dirname(file_name), exist_ok=True)
+
             if not os.path.exists(file_name):
                 logger.info(f"Создание файла клиента: {file_name}")
                 create_client_file(client_code, client_data)
