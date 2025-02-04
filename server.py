@@ -4,11 +4,13 @@ import os
 import openai
 import requests
 import pandas as pd
-from google.oauth2.service_account import Credentials
-from googleapiclient.discovery import build
+from clientdata import register_or_update_client, verify_client_code
+from client_caec import add_message_to_client_file, load_client_data
 import logging
 from logging.handlers import RotatingFileHandler
 from datetime import datetime
+from google.oauth2.service_account import Credentials
+from googleapiclient.discovery import build
 
 # Настройка логирования
 def setup_logging():
@@ -39,12 +41,36 @@ openai.api_key = os.getenv("OPENAI_API_KEY")
 app = Flask(__name__)
 CORS(app)
 
-# Настройки Google Sheets
+# Путь к файлу Bible.xlsx
+BIBLE_PATH = "./CAEC_API_Data/BIG_DATA/Bible.xlsx"
+
+# ID Google Sheets и имя листа
 SHEET_ID = "1QB3Jv7cL5hNwDKx9rQF6FCrKHW7IHPAqrUg7FIvY7Dk"
-SHEET_NAME = "Bible"  # Имя листа в Google Sheets
+SHEET_NAME = "Bible"
+
+# Загрузка данных из Bible.xlsx (локально или через Google Sheets)
+def load_bible_data():
+    try:
+        # Проверяем, существует ли локальный файл
+        if os.path.exists(BIBLE_PATH):
+            logger.info("Загрузка данных из локального файла Bible.xlsx...")
+            bible_data = pd.read_excel(BIBLE_PATH)
+        else:
+            logger.info("Локальный файл Bible.xlsx не найден. Загрузка данных из Google Sheets...")
+            bible_data = load_bible_data_from_google_sheets()
+
+        if bible_data is None or bible_data.empty:
+            logger.error("Данные из Bible.xlsx не загружены.")
+            return None
+
+        logger.info(f"Данные из Bible.xlsx загружены: {bible_data.head()}")
+        return bible_data
+    except Exception as e:
+        logger.error(f"Ошибка при загрузке данных из Bible.xlsx: {e}")
+        return None
 
 # Загрузка данных из Google Sheets
-def load_bible_data():
+def load_bible_data_from_google_sheets():
     try:
         credentials = Credentials.from_service_account_file(
             os.getenv("GOOGLE_APPLICATION_CREDENTIALS"),
@@ -66,33 +92,18 @@ def load_bible_data():
 
         # Преобразуем данные в DataFrame
         df = pd.DataFrame(values[1:], columns=values[0])
-        logger.info(f"Данные из Google Sheets загружены: {df.head()}")
         return df
     except Exception as e:
         logger.error(f"Ошибка при загрузке данных из Google Sheets: {e}")
         return None
 
-# Загрузка данных клиента
-def load_client_data(client_code):
-    try:
-        file_name = f"./CAEC_API_Data/Data_CAEC_Client/Client_{client_code}.xlsx"
-        if not os.path.exists(file_name):
-            logger.info(f"Файл клиента {client_code} не найден. Клиент новый.")
-            return None
-        df = pd.read_excel(file_name)
-        logger.info(f"Данные клиента {client_code} загружены: {df.head()}")
-        return df
-    except Exception as e:
-        logger.error(f"Ошибка при чтении файла клиента {client_code}: {e}")
-        return None
-
 # Подготовка контекста для ассистента
 def prepare_assistant_context(client_code):
-    # Загружаем данные из Google Sheets
+    # Загружаем данные из Bible.xlsx
     bible_data = load_bible_data()
     if bible_data is None:
-        logger.error("Ошибка загрузки данных из Google Sheets.")
-        send_telegram_notification("❌ Ошибка базы данных: Не удалось загрузить данные из Google Sheets.")
+        logger.error("Файл Bible.xlsx не найден или не загружен.")
+        send_telegram_notification("❌ Ошибка базы данных: Файл Bible.xlsx не найден.")
         return None
 
     # Загружаем данные клиента
@@ -120,6 +131,40 @@ def send_telegram_notification(message):
         logger.info(f"✅ Telegram уведомление отправлено: {response.json()}")
     except Exception as e:
         logger.error(f"❌ Ошибка при отправке Telegram уведомления: {e}")
+
+@app.route('/register-client', methods=['POST'])
+def register_client():
+    try:
+        data = request.json
+        logger.info(f"Получен запрос на регистрацию клиента: {data}")
+
+        result = register_or_update_client(data)
+
+        if result.get("isNewClient", True):
+            send_telegram_notification(f"🆕 Новый пользователь зарегистрирован: {result['name']}, {result['email']}, {result['phone']}, Код: {result['uniqueCode']}")
+        else:
+            send_telegram_notification(f"🔙 Пользователь вернулся: {result['name']}, {result['email']}, {result['phone']}, Код: {result['uniqueCode']}")
+
+        return jsonify(result), 200
+    except Exception as e:
+        logger.error(f"❌ Ошибка в /register-client: {e}")
+        return jsonify({'error': str(e)}), 400
+
+@app.route('/verify-code', methods=['POST'])
+def verify_code():
+    try:
+        data = request.json
+        logger.info(f"Получен запрос на верификацию кода: {data}")
+
+        code = data.get('code', '')
+        client_data = verify_client_code(code)
+        if client_data:
+            send_telegram_notification(f"🔙 Пользователь вернулся: {client_data['Name']}, {client_data['Email']}, {client_data['Phone']}, Код: {code}")
+            return jsonify({'status': 'success', 'clientData': client_data}), 200
+        return jsonify({'status': 'error', 'message': 'Неверный код'}), 404
+    except Exception as e:
+        logger.error(f"❌ Ошибка в /verify-code: {e}")
+        return jsonify({'error': str(e)}), 400
 
 @app.route('/chat', methods=['POST'])
 def chat():
