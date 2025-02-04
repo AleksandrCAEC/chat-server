@@ -92,69 +92,6 @@ def upload_or_update_file(file_name, file_stream):
     except Exception as e:
         logger.error(f"Ошибка при загрузке/обновлении файла на Google Drive: {e}")
 
-# Функция для загрузки данных из ClientData.xlsx
-def load_client_data():
-    try:
-        logger.info("Загрузка данных из ClientData.xlsx...")
-        df = pd.read_excel(CLIENT_DATA_PATH)
-        logger.info(f"Данные загружены: {df}")
-        return df
-    except Exception as e:
-        logger.error(f"Ошибка загрузки данных из ClientData.xlsx: {e}")
-        return pd.DataFrame()
-
-# Функция для создания файла Client_CAECxxxxxxx.xlsx
-def create_client_file(client_code, client_data):
-    try:
-        # Убираем дублирование "CAEC" в имени файла
-        file_name = f"Client_{client_code}.xlsx"
-
-        # Создаем файл в памяти
-        output = BytesIO()
-        wb = Workbook()
-        ws = wb.active
-
-        # Записываем заголовки
-        ws.append(["Client", "Assistant", "Client Code", "Name", "Phone", "Email", "Created Date"])
-
-        # Записываем данные клиента в первую строку
-        ws.append([
-            "",  # Client (пока пусто)
-            "",  # Assistant (пока пусто)
-            client_data["Client Code"],
-            client_data["Name"],
-            client_data["Phone"],
-            client_data["Email"],
-            client_data["Created Date"]
-        ])
-
-        # Устанавливаем формат ячеек как текст
-        for row in ws.iter_rows(min_row=1, max_row=ws.max_row, min_col=1, max_col=ws.max_column):
-            for cell in row:
-                cell.number_format = numbers.FORMAT_TEXT
-
-        # Настраиваем ширину столбцов A и B на 650 единиц
-        ws.column_dimensions['A'].width = 65  # Ширина столбца A (Client)
-        ws.column_dimensions['B'].width = 65  # Ширина столбца B (Assistant)
-
-        # Включаем перенос текста для столбцов A и B
-        for row in ws.iter_rows(min_row=1, max_row=ws.max_row, min_col=1, max_col=2):
-            for cell in row:
-                cell.alignment = Alignment(wrap_text=True)
-
-        # Сохраняем файл в памяти
-        wb.save(output)
-        output.seek(0)
-
-        # Загружаем или обновляем файл на Google Drive
-        upload_or_update_file(file_name, output)
-
-        logger.info(f"Файл {file_name} успешно создан и загружен на Google Drive.")
-        return file_name
-    except Exception as e:
-        logger.error(f"Ошибка при создании файла клиента: {e}")
-        return None
-
 # Функция для добавления сообщения в файл клиента
 def add_message_to_client_file(client_code, message, is_assistant=False):
     try:
@@ -184,43 +121,16 @@ def add_message_to_client_file(client_code, message, is_assistant=False):
     except Exception as e:
         logger.error(f"Ошибка при добавлении сообщения в файл клиента: {e}")
 
-# Функция для поиска клиента по коду и создания/обновления его файла
-def handle_client(client_code):
+# Функция для загрузки данных клиента
+def load_client_data(client_code):
     try:
-        logger.info(f"Обработка клиента с кодом: {client_code}")
-        df = load_client_data()
-
-        # Ищем клиента по коду
-        client_data = df[df["Client Code"] == client_code]
-
-        if not client_data.empty:
-            client_data = client_data.iloc[0].to_dict()
-
-            # Создаем файл клиента, если он не существует
-            file_name = f"Client_{client_code}.xlsx"
-            if not os.path.exists(file_name):
-                logger.info(f"Создание файла клиента: {file_name}")
-                create_client_file(client_code, client_data)
-        else:
-            logger.warning(f"Клиент с кодом {client_code} не найден в ClientData.xlsx.")
+        file_name = f"./CAEC_API_Data/Data_CAEC_Client/Client_{client_code}.xlsx"
+        if not os.path.exists(file_name):
+            logger.info(f"Файл клиента {client_code} не найден. Клиент новый.")
+            return None
+        df = pd.read_excel(file_name)
+        logger.info(f"Данные клиента {client_code} загружены: {df.head()}")
+        return df
     except Exception as e:
-        logger.error(f"Ошибка при обработке клиента: {e}")
-
-# Функция для обработки всех клиентов из ClientData.xlsx
-def handle_all_clients():
-    try:
-        logger.info("Обработка всех клиентов из ClientData.xlsx...")
-        df = load_client_data()
-
-        for _, row in df.iterrows():
-            client_code = row["Client Code"]
-            handle_client(client_code)
-
-        logger.info("Все клиенты обработаны.")
-    except Exception as e:
-        logger.error(f"Ошибка при обработке всех клиентов: {e}")
-
-# Пример использования
-if __name__ == "__main__":
-    # Обработка всех клиентов при запуске
-    handle_all_clients()
+        logger.error(f"Ошибка при чтении файла клиента {client_code}: {e}")
+        return None
