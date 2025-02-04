@@ -3,11 +3,11 @@ from flask_cors import CORS
 import os
 import openai
 import requests
+import pandas as pd
 from clientdata import register_or_update_client, verify_client_code
-from client_caec import add_message_to_client_file
+from client_caec import add_message_to_client_file, load_client_data
 import logging
 from logging.handlers import RotatingFileHandler
-from functools import lru_cache
 from datetime import datetime
 
 # Настройка логирования
@@ -39,18 +39,40 @@ openai.api_key = os.getenv("OPENAI_API_KEY")
 app = Flask(__name__)
 CORS(app)
 
-# Кэширование запросов к OpenAI
-@lru_cache(maxsize=100)
-def get_openai_response(user_message):
-    response = openai.ChatCompletion.create(
-        model="gpt-3.5-turbo",
-        messages=[
-            {"role": "system", "content": "Вы - помощник компании CAEC."},
-            {"role": "user", "content": user_message}
-        ],
-        max_tokens=150
-    )
-    return response['choices'][0]['message']['content'].strip()
+# Путь к файлу Bible.xlsx
+BIBLE_PATH = "./CAEC_API_Data/BIG_DATA/Bible.xlsx"
+
+# Загрузка данных из Bible.xlsx
+def load_bible_data():
+    try:
+        if not os.path.exists(BIBLE_PATH):
+            logger.error(f"Файл {BIBLE_PATH} не найден.")
+            return None
+        bible_data = pd.read_excel(BIBLE_PATH)
+        logger.info(f"Данные из Bible.xlsx загружены: {bible_data.head()}")
+        return bible_data
+    except Exception as e:
+        logger.error(f"Ошибка при чтении Bible.xlsx: {e}")
+        return None
+
+# Подготовка контекста для ассистента
+def prepare_assistant_context(client_code):
+    # Загружаем данные из Bible.xlsx
+    bible_data = load_bible_data()
+    if bible_data is None:
+        logger.error("Файл Bible.xlsx не найден.")
+        send_telegram_notification("❌ Ошибка базы данных: Файл Bible.xlsx не найден.")
+        return None
+
+    # Загружаем данные клиента
+    client_data = load_client_data(client_code)
+    if client_data is None:
+        logger.info("Клиент новый. Ассистент будет общаться максимально информативно.")
+        return {"bible": bible_data, "client_history": None}
+
+    # Если клиент существует, загружаем историю переписки
+    logger.info("Клиент существует. Ассистент загрузил историю переписки.")
+    return {"bible": bible_data, "client_history": client_data}
 
 # Отправка уведомлений в Telegram
 def send_telegram_notification(message):
@@ -115,12 +137,48 @@ def chat():
             logger.error("Ошибка: Сообщение и код клиента не могут быть пустыми")
             return jsonify({'error': 'Сообщение и код клиента не могут быть пустыми'}), 400
 
+        # Подготавливаем контекст для ассистента
+        context = prepare_assistant_context(client_code)
+        if context is None:
+            return jsonify({'error': 'Ошибка базы данных. Обратитесь к менеджеру.'}), 500
+
+        # Формируем сообщение для OpenAI с учетом контекста
+        messages = [
+            {"role": "system", "content": "Вы - помощник компании CAEC."}
+        ]
+
+        # Добавляем данные из Bible.xlsx в контекст
+        if context["bible"] is not None:
+            for _, row in context["bible"].iterrows():
+                messages.append({
+                    "role": "system",
+                    "content": f"Вопрос: {row['FAQ']}\nОтвет: {row['Answers']}"
+                })
+
+        # Добавляем историю переписки, если она есть
+        if context["client_history"] is not None:
+            for _, row in context["client_history"].iterrows():
+                messages.append({
+                    "role": "assistant" if row["is_assistant"] else "user",
+                    "content": row["message"]
+                })
+
+        # Добавляем текущее сообщение пользователя
+        messages.append({"role": "user", "content": user_message})
+
+        # Запрос к OpenAI
         try:
-            reply = get_openai_response(user_message)
+            response = openai.ChatCompletion.create(
+                model="gpt-3.5-turbo",
+                messages=messages,
+                max_tokens=500  # Увеличиваем лимит токенов
+            )
+            reply = response['choices'][0]['message']['content'].strip()
         except openai.error.OpenAIError as e:
             logger.error(f"Ошибка OpenAI: {e}")
             return jsonify({'error': 'Ошибка при обработке запроса OpenAI'}), 500
 
+        # Сохраняем сообщение в файл клиента
         try:
             add_message_to_client_file(client_code, user_message, is_assistant=False)
             add_message_to_client_file(client_code, reply, is_assistant=True)
