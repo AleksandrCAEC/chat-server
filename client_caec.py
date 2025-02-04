@@ -21,7 +21,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Путь к файлу ClientData.xlsx
-CLIENT_DATA_PATH = "ClientData.xlsx"
+CLIENT_DATA_PATH = "./CAEC_API_Data/BIG_DATA/ClientData.xlsx"
 
 # ID папки на Google Drive
 GOOGLE_DRIVE_FOLDER_ID = "11cQYLDGKlu2Rn_9g8R_4xNA59ikhvJpS"
@@ -59,6 +59,11 @@ def upload_or_update_file(file_name, file_stream):
         drive_service = get_drive_service()
         if not drive_service:
             raise Exception("Google Drive API не инициализирован.")
+
+        # Проверяем, существует ли файл локально
+        if not os.path.exists(file_name):
+            logger.error(f"Файл {file_name} не найден локально.")
+            return
 
         # Ищем файл на Google Drive
         file_id = find_file_id(drive_service, file_name)
@@ -153,7 +158,10 @@ def create_client_file(client_code, client_data):
 # Функция для добавления сообщения в файл клиента
 def add_message_to_client_file(client_code, message, is_assistant=False):
     try:
-        file_name = f"Client_{client_code}.xlsx"
+        file_name = f"./CAEC_API_Data/Data_CAEC_Client/Client_{client_code}.xlsx"
+
+        # Создаем директорию, если она не существует
+        os.makedirs(os.path.dirname(file_name), exist_ok=True)
 
         # Открываем существующий файл или создаем новый, если он не существует
         if os.path.exists(file_name):
@@ -163,54 +171,14 @@ def add_message_to_client_file(client_code, message, is_assistant=False):
             wb = Workbook()
             ws = wb.active
             # Записываем заголовки, если файл новый
-            ws.append(["Client", "Assistant", "Client Code", "Name", "Phone", "Email", "Created Date"])
+            ws.append(["Timestamp", "Message", "is_assistant"])
 
-            # Загружаем данные клиента
-            df = load_client_data()
-            client_data = df[df["Client Code"] == client_code].iloc[0].to_dict()
-
-            # Записываем данные клиента в первую строку
-            ws.append([
-                "",  # Client (пока пусто)
-                "",  # Assistant (пока пусто)
-                client_data["Client Code"],
-                client_data["Name"],
-                client_data["Phone"],
-                client_data["Email"],
-                client_data["Created Date"]
-            ])
-
-        # Форматируем время
-        current_time = datetime.now().strftime("%d.%m.%y %H:%M")
-
-        # Ищем последнюю строку с сообщением клиента
-        last_row = ws.max_row
-        if is_assistant:
-            # Если это ответ ассистента, добавляем его в ту же строку, что и последнее сообщение клиента
-            ws.cell(row=last_row, column=2, value=f"{current_time} - {message}")
-        else:
-            # Если это новое сообщение клиента, добавляем его в новую строку
-            ws.append([
-                f"{current_time} - {message}",  # Client
-                "",  # Assistant (пока пусто)
-                "",  # Client Code (пусто)
-                "",  # Name (пусто)
-                "",  # Phone (пусто)
-                "",  # Email (пусто)
-                ""   # Created Date (пусто)
-            ])
-
-        # Включаем перенос текста для столбцов A и B
-        for row in ws.iter_rows(min_row=1, max_row=ws.max_row, min_col=1, max_col=2):
-            for cell in row:
-                cell.alignment = Alignment(wrap_text=True)
+        # Добавляем новое сообщение
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        ws.append([timestamp, message, is_assistant])
 
         # Сохраняем файл
         wb.save(file_name)
-
-        # Загружаем или обновляем файл на Google Drive
-        with open(file_name, "rb") as file_stream:
-            upload_or_update_file(file_name, file_stream)
 
         logger.info(f"Сообщение добавлено в файл клиента {client_code}.")
     except Exception as e:
