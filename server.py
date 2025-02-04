@@ -95,25 +95,6 @@ def prepare_assistant_context(client_code):
     logger.info("Клиент существует. Ассистент загрузил историю переписки.")
     return {"bible": bible_data, "client_history": client_data}
 
-# Эндпоинт для верификации кода клиента
-@app.route('/verify-code', methods=['POST', 'OPTIONS'])
-def verify_code():
-    if request.method == 'OPTIONS':
-        # Обработка CORS preflight
-        return jsonify({'status': 'success'}), 200
-
-    data = request.json
-    code = data.get('code', '')
-
-    if not code:
-        return jsonify({'status': 'error', 'message': 'Code is required'}), 400
-
-    client_data = verify_client_code(code)
-    if client_data:
-        return jsonify({'status': 'success', 'clientData': client_data}), 200
-    else:
-        return jsonify({'status': 'error', 'message': 'Invalid code'}), 404
-
 @app.route('/chat', methods=['POST'])
 def chat():
     try:
