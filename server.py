@@ -3,33 +3,10 @@ from flask_cors import CORS
 import os
 import openai
 import requests
-import pandas as pd
 from clientdata import register_or_update_client, verify_client_code
-from client_caec import add_message_to_client_file, load_client_data
+from client_caec import add_message_to_client_file  # Импорт функции для добавления сообщения
 import logging
-from logging.handlers import RotatingFileHandler
 from datetime import datetime
-from google.oauth2.service_account import Credentials
-from googleapiclient.discovery import build
-
-# Настройка логирования
-def setup_logging():
-    logger = logging.getLogger(__name__)
-    logger.setLevel(logging.INFO)
-
-    formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
-
-    file_handler = RotatingFileHandler("server.log", maxBytes=1024 * 1024, backupCount=5)
-    file_handler.setFormatter(formatter)
-    logger.addHandler(file_handler)
-
-    console_handler = logging.StreamHandler()
-    console_handler.setFormatter(formatter)
-    logger.addHandler(console_handler)
-
-    return logger
-
-logger = setup_logging()
 
 # Указание пути к файлу service_account_json
 os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = "/etc/secrets/service_account_json"
@@ -41,95 +18,34 @@ openai.api_key = os.getenv("OPENAI_API_KEY")
 app = Flask(__name__)
 CORS(app)
 
-# Путь к файлу Bible.xlsx
-BIBLE_PATH = "./CAEC_API_Data/BIG_DATA/Bible.xlsx"
-
-# ID Google Sheets и имя листа
-SHEET_ID = "1QB3Jv7cL5hNwDKx9rQF6FCrKHW7IHPAqrUg7FIvY7Dk"
-SHEET_NAME = "Bible"
-
-# Загрузка данных из Bible.xlsx (локально или через Google Sheets)
-def load_bible_data():
-    try:
-        # Проверяем, существует ли локальный файл
-        if os.path.exists(BIBLE_PATH):
-            logger.info("Загрузка данных из локального файла Bible.xlsx...")
-            bible_data = pd.read_excel(BIBLE_PATH)
-        else:
-            logger.info("Локальный файл Bible.xlsx не найден. Загрузка данных из Google Sheets...")
-            bible_data = load_bible_data_from_google_sheets()
-
-        if bible_data is None or bible_data.empty:
-            logger.error("Данные из Bible.xlsx не загружены.")
-            return None
-
-        logger.info(f"Данные из Bible.xlsx загружены: {bible_data.head()}")
-        return bible_data
-    except Exception as e:
-        logger.error(f"Ошибка при загрузке данных из Bible.xlsx: {e}")
-        return None
-
-# Загрузка данных из Google Sheets
-def load_bible_data_from_google_sheets():
-    try:
-        credentials = Credentials.from_service_account_file(
-            os.getenv("GOOGLE_APPLICATION_CREDENTIALS"),
-            scopes=["https://www.googleapis.com/auth/spreadsheets.readonly"]
-        )
-        service = build("sheets", "v4", credentials=credentials)
-        sheet = service.spreadsheets()
-
-        # Получаем данные из листа
-        result = sheet.values().get(
-            spreadsheetId=SHEET_ID,
-            range=f"{SHEET_NAME}!A:C"  # Диапазон столбцов A, B, C
-        ).execute()
-
-        values = result.get("values", [])
-        if not values:
-            logger.error("Данные в Google Sheets не найдены.")
-            return None
-
-        # Преобразуем данные в DataFrame
-        df = pd.DataFrame(values[1:], columns=values[0])
-        return df
-    except Exception as e:
-        logger.error(f"Ошибка при загрузке данных из Google Sheets: {e}")
-        return None
-
-# Подготовка контекста для ассистента
-def prepare_assistant_context(client_code):
-    # Загружаем данные из Bible.xlsx
-    bible_data = load_bible_data()
-    if bible_data is None:
-        logger.error("Файл Bible.xlsx не найден или не загружен.")
-        send_telegram_notification("❌ Ошибка базы данных: Файл Bible.xlsx не найден.")
-        return None
-
-    # Загружаем данные клиента
-    client_data = load_client_data(client_code)
-    if client_data is None:
-        logger.info("Клиент новый. Ассистент будет общаться максимально информативно.")
-        return {"bible": bible_data, "client_history": None}
-
-    # Если клиент существует, загружаем историю переписки
-    logger.info("Клиент существует. Ассистент загрузил историю переписки.")
-    return {"bible": bible_data, "client_history": client_data}
+# Настройка логирования
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    handlers=[
+        logging.FileHandler("server.log"),  # Логи будут записываться в файл server.log
+        logging.StreamHandler()  # Логи также будут выводиться в консоль
+    ]
+)
+logger = logging.getLogger(__name__)
 
 # Отправка уведомлений в Telegram
 def send_telegram_notification(message):
-    try:
-        telegram_bot_token = os.getenv("TELEGRAM_BOT_TOKEN")
-        telegram_chat_id = os.getenv("TELEGRAM_CHAT_ID")
-        if not telegram_bot_token or not telegram_chat_id:
-            raise ValueError("Переменные окружения TELEGRAM_BOT_TOKEN и TELEGRAM_CHAT_ID не настроены.")
+    telegram_bot_token = os.getenv("TELEGRAM_BOT_TOKEN")
+    telegram_chat_id = os.getenv("TELEGRAM_CHAT_ID")
 
-        url = f"https://api.telegram.org/bot{telegram_bot_token}/sendMessage"
-        payload = {"chat_id": telegram_chat_id, "text": message, "parse_mode": "HTML"}
+    if not telegram_bot_token or not telegram_chat_id:
+        logger.error("Переменные окружения TELEGRAM_BOT_TOKEN и TELEGRAM_CHAT_ID не настроены.")
+        return
+
+    url = f"https://api.telegram.org/bot{telegram_bot_token}/sendMessage"
+    payload = {"chat_id": telegram_chat_id, "text": message, "parse_mode": "HTML"}
+    
+    try:
         response = requests.post(url, json=payload)
         response.raise_for_status()
         logger.info(f"✅ Telegram уведомление отправлено: {response.json()}")
-    except Exception as e:
+    except requests.exceptions.RequestException as e:
         logger.error(f"❌ Ошибка при отправке Telegram уведомления: {e}")
 
 @app.route('/register-client', methods=['POST'])
@@ -140,6 +56,7 @@ def register_client():
 
         result = register_or_update_client(data)
 
+        # Отправляем уведомление в Telegram в зависимости от того, новый клиент или нет
         if result.get("isNewClient", True):
             send_telegram_notification(f"🆕 Новый пользователь зарегистрирован: {result['name']}, {result['email']}, {result['phone']}, Код: {result['uniqueCode']}")
         else:
@@ -159,6 +76,7 @@ def verify_code():
         code = data.get('code', '')
         client_data = verify_client_code(code)
         if client_data:
+            # Отправляем уведомление в Telegram о возвращении клиента
             send_telegram_notification(f"🔙 Пользователь вернулся: {client_data['Name']}, {client_data['Email']}, {client_data['Phone']}, Код: {code}")
             return jsonify({'status': 'success', 'clientData': client_data}), 200
         return jsonify({'status': 'error', 'message': 'Неверный код'}), 404
@@ -173,60 +91,30 @@ def chat():
         logger.info(f"Получен запрос на чат: {data}")
 
         user_message = data.get('message', '')
-        client_code = data.get('client_code', '')
+        client_code = data.get('client_code', '')  # Получаем код клиента из запроса
 
         if not user_message or not client_code:
             logger.error("Ошибка: Сообщение и код клиента не могут быть пустыми")
             return jsonify({'error': 'Сообщение и код клиента не могут быть пустыми'}), 400
 
-        # Подготавливаем контекст для ассистента
-        context = prepare_assistant_context(client_code)
-        if context is None:
-            return jsonify({'error': 'Ошибка базы данных. Обратитесь к менеджеру.'}), 500
+        # Используем метод ChatCompletion.create, который принимает параметр messages
+        response = openai.ChatCompletion.create(
+            model="gpt-3.5-turbo",
+            messages=[
+                {"role": "system", "content": "Вы - помощник компании CAEC."},
+                {"role": "user", "content": user_message}
+            ],
+            max_tokens=150
+        )
 
-        # Формируем сообщение для OpenAI с учетом контекста
-        messages = [
-            {"role": "system", "content": "Вы - помощник компании CAEC."}
-        ]
+        # Извлекаем ответ
+        reply = response['choices'][0]['message']['content'].strip()
 
-        # Добавляем данные из Bible.xlsx в контекст
-        if context["bible"] is not None:
-            for _, row in context["bible"].iterrows():
-                messages.append({
-                    "role": "system",
-                    "content": f"Вопрос: {row['FAQ']}\nОтвет: {row['Answers']}"
-                })
+        # Добавляем сообщение пользователя в файл клиента
+        add_message_to_client_file(client_code, user_message, is_assistant=False)
 
-        # Добавляем историю переписки, если она есть
-        if context["client_history"] is not None:
-            for _, row in context["client_history"].iterrows():
-                messages.append({
-                    "role": "assistant" if row["is_assistant"] else "user",
-                    "content": row["message"]
-                })
-
-        # Добавляем текущее сообщение пользователя
-        messages.append({"role": "user", "content": user_message})
-
-        # Запрос к OpenAI
-        try:
-            response = openai.ChatCompletion.create(
-                model="gpt-3.5-turbo",
-                messages=messages,
-                max_tokens=500  # Увеличиваем лимит токенов
-            )
-            reply = response['choices'][0]['message']['content'].strip()
-        except openai.error.OpenAIError as e:
-            logger.error(f"Ошибка OpenAI: {e}")
-            return jsonify({'error': 'Ошибка при обработке запроса OpenAI'}), 500
-
-        # Сохраняем сообщение в файл клиента
-        try:
-            add_message_to_client_file(client_code, user_message, is_assistant=False)
-            add_message_to_client_file(client_code, reply, is_assistant=True)
-        except Exception as e:
-            logger.error(f"Ошибка при записи в файл: {e}")
-            return jsonify({'error': 'Ошибка при сохранении сообщения'}), 500
+        # Добавляем ответ ассистента в файл клиента
+        add_message_to_client_file(client_code, reply, is_assistant=True)
 
         logger.info(f"Ответ от OpenAI: {reply}")
         return jsonify({'reply': reply}), 200
