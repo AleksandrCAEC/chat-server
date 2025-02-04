@@ -1,258 +1,296 @@
-import os
-import pandas as pd
-from openpyxl import Workbook, load_workbook
-from openpyxl.styles import Alignment, numbers
-import logging
-from datetime import datetime
-from google.oauth2.service_account import Credentials
-from googleapiclient.discovery import build
-from googleapiclient.http import MediaIoBaseUpload
-from io import BytesIO
+<script>
+document.addEventListener("DOMContentLoaded", function () {
+    const chatHeader = document.getElementById("chat-header");
+    const chatBody = document.getElementById("chat-body");
+    const chatMessages = document.getElementById("chat-messages");
+    const chatInput = document.getElementById("chat-input");
+    const chatSend = document.getElementById("chat-send");
+    const registerBtn = document.getElementById("register-btn");
+    const nameInput = document.getElementById("name-input");
+    const phoneInput = document.getElementById("phone-input");
+    const emailInput = document.getElementById("email-input");
+    const codeInput = document.getElementById("code-input");
+    const chatFeedback = document.getElementById("chat-feedback");
+    const registrationForm = document.getElementById("registration-form");
+    const messageForm = document.getElementById("message-form");
+    const languageSelection = document.getElementById("language-selection");
+    const englishBtn = document.getElementById("english-btn");
+    const russianBtn = document.getElementById("russian-btn");
+    const serverUrl = "https://chat-server-704864345614.us-central1.run.app";
 
-# Настройка логирования
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    handlers=[
-        logging.FileHandler("client_caec.log"),
-        logging.StreamHandler()
-    ]
-)
-logger = logging.getLogger(__name__)
+    // Элементы подсказок под полями
+    const phoneHint = document.getElementById("phone-hint");
+    const emailHint = document.getElementById("email-hint");
+    const codeHint = document.getElementById("code-hint");
 
-# Путь к файлу ClientData.xlsx
-CLIENT_DATA_PATH = "ClientData.xlsx"
+    let selectedLanguage = ""; // Для хранения выбранного языка
+    let uniqueCode = ""; // Для хранения уникального кода клиента
 
-# ID папки на Google Drive
-GOOGLE_DRIVE_FOLDER_ID = "11cQYLDGKlu2Rn_9g8R_4xNA59ikhvJpS"
+    // Переключение отображения чата
+    chatHeader.addEventListener("click", () => {
+        chatBody.style.display = chatBody.style.display === "none" ? "block" : "none";
+    });
 
-# Инициализация Google Drive API
-def get_drive_service():
-    try:
-        credentials = Credentials.from_service_account_file(
-            os.getenv("GOOGLE_APPLICATION_CREDENTIALS"),
-            scopes=["https://www.googleapis.com/auth/drive"]
-        )
-        return build("drive", "v3", credentials=credentials)
-    except Exception as e:
-        logger.error(f"Ошибка инициализации Google Drive API: {e}")
-        return None
+    // Выбор языка (английский)
+    englishBtn.addEventListener("click", () => {
+        selectedLanguage = "en";
+        languageSelection.style.display = "none";
+        registrationForm.style.display = "block";
 
-# Поиск файла на Google Drive по имени
-def find_file_id(drive_service, file_name):
-    try:
-        response = drive_service.files().list(
-            q=f"name='{file_name}' and '{GOOGLE_DRIVE_FOLDER_ID}' in parents",
-            fields="files(id, name)"
-        ).execute()
-        files = response.get("files", [])
-        if files:
-            return files[0]["id"]  # Возвращаем ID первого найденного файла
-        return None
-    except Exception as e:
-        logger.error(f"Ошибка при поиске файла на Google Drive: {e}")
-        return None
+        // Устанавливаем placeholder'ы и значения по умолчанию
+        nameInput.placeholder = "Enter your name";
+        phoneInput.placeholder = "Your phone";
+        emailInput.placeholder = "Your e-mail";
+        codeInput.placeholder = "CAEC unique code";
+        registerBtn.textContent = "REGISTER";
+        chatInput.placeholder = "Enter your message...";
+        chatSend.textContent = "SEND";
 
-# Загрузка или обновление файла на Google Drive
-def upload_or_update_file(file_name, file_stream):
-    try:
-        drive_service = get_drive_service()
-        if not drive_service:
-            raise Exception("Google Drive API не инициализирован.")
+        // Устанавливаем подсказки под полями для английской версии
+        phoneHint.innerText = "Enter your phone number with international code";
+        emailHint.innerText = "Enter your e-mail";
+        codeHint.innerText = "If you already have a unique CAEC code, enter it for simplified login.";
 
-        # Ищем файл на Google Drive
-        file_id = find_file_id(drive_service, file_name)
+        // Предустанавливаем символы для облегчения ввода
+        phoneInput.value = '+';
+        emailInput.value = '@';
+    });
 
-        if file_id:
-            # Если файл существует, обновляем его
-            media = MediaIoBaseUpload(file_stream, mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-            drive_service.files().update(
-                fileId=file_id,
-                media_body=media
-            ).execute()
-            logger.info(f"Файл {file_name} успешно обновлён на Google Drive.")
-        else:
-            # Если файл не существует, создаем новый
-            file_metadata = {
-                "name": file_name,
-                "parents": [GOOGLE_DRIVE_FOLDER_ID]
+    // Выбор языка (русский)
+    russianBtn.addEventListener("click", () => {
+        selectedLanguage = "ru";
+        languageSelection.style.display = "none";
+        registrationForm.style.display = "block";
+
+        // Устанавливаем placeholder'ы и значения по умолчанию
+        nameInput.placeholder = "Введите ваше имя";
+        phoneInput.placeholder = "Ваш телефон";
+        emailInput.placeholder = "Ваш e-mail";
+        codeInput.placeholder = "Уникальный код CAEC";
+        registerBtn.textContent = "ЗАРЕГИСТРИРОВАТЬСЯ";
+        chatInput.placeholder = "Введите сообщение...";
+        chatSend.textContent = "ОТПРАВИТЬ";
+
+        // Устанавливаем подсказки под полями для русской версии
+        phoneHint.innerText = "Укажите номер телефона с международным кодом";
+        emailHint.innerText = "Укажите Ваш e-mail";
+        codeHint.innerText = "Если у вас уже есть уникальный код CAEC, укажите его для упрощения входа.";
+
+        // Предустанавливаем символы для облегчения ввода
+        phoneInput.value = '+';
+        emailInput.value = '@';
+    });
+
+    // Регистрация клиента
+    registerBtn.addEventListener("click", () => {
+        const name = nameInput.value.trim();
+        const phone = phoneInput.value.trim();
+        const email = emailInput.value.trim();
+        const code = codeInput.value.trim();
+
+        // Проверка на пустые поля
+        if (!code && (!name || !phone || !email)) {
+            showError(
+                selectedLanguage === "en"
+                    ? "Please fill out all required fields for registration."
+                    : "Заполните все необходимые поля для регистрации."
+            );
+            return;
+        }
+
+        // Проверка валидации
+        if (!code) {
+            if (!phone.startsWith("+")) {
+                showError(
+                    selectedLanguage === "en"
+                        ? "Phone number must start with +."
+                        : "Номер телефона должен начинаться с +."
+                );
+                return;
             }
-            media = MediaIoBaseUpload(file_stream, mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-            file = drive_service.files().create(
-                body=file_metadata,
-                media_body=media,
-                fields="id"
-            ).execute()
-            logger.info(f"Файл {file_name} успешно создан и загружен на Google Drive. ID файла: {file.get('id')}")
-    except Exception as e:
-        logger.error(f"Ошибка при загрузке/обновлении файла на Google Drive: {e}")
 
-# Функция для загрузки данных из ClientData.xlsx
-def load_client_data():
-    try:
-        logger.info("Загрузка данных из ClientData.xlsx...")
-        df = pd.read_excel(CLIENT_DATA_PATH)
-        logger.info(f"Данные загружены: {df}")
-        return df
-    except Exception as e:
-        logger.error(f"Ошибка загрузки данных из ClientData.xlsx: {e}")
-        return pd.DataFrame()
+            if (!email.includes("@")) {
+                showError(
+                    selectedLanguage === "en"
+                        ? "Email must contain @."
+                        : "Email должен содержать @."
+                );
+                return;
+            }
+        }
 
-# Функция для создания файла Client_CAECxxxxxxx.xlsx
-def create_client_file(client_code, client_data):
-    try:
-        # Убираем дублирование "CAEC" в имени файла
-        file_name = f"Client_{client_code}.xlsx"
+        // Блокируем кнопку и меняем текст
+        registerBtn.disabled = true;
+        registerBtn.textContent = selectedLanguage === "en" ? "Please wait..." : "ПОДОЖДИТЕ...";
 
-        # Создаем файл в памяти
-        output = BytesIO()
-        wb = Workbook()
-        ws = wb.active
+        if (code) {
+            // Вход по коду
+            fetch(`${serverUrl}/verify-code`, {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                },
+                body: JSON.stringify({ code }),
+            })
+                .then((response) => response.json())
+                .then((data) => {
+                    if (data.status === "success") {
+                        const userData = data.clientData;
+                        uniqueCode = code;
+                        sendTelegramNotification(
+                            `Returning user logged in:\nName: ${userData.Name}\nPhone: ${userData.Phone}\nEmail: ${userData.Email}\nCode: ${code}`
+                        );
 
-        # Записываем заголовки
-        ws.append(["Client", "Assistant", "Client Code", "Name", "Phone", "Email", "Created Date"])
+                        showMessageForm();
+                        appendMessage(
+                            "CAEC",
+                            selectedLanguage === "en"
+                                ? `Dear, ${userData.Name}, hello. Thank you for returning.<br><br>How can we assist you?`
+                                : `Уважаемый, ${userData.Name}, здравствуйте. Спасибо, что вернулись.<br><br>Чем можем быть полезны?`
+                        );
+                    } else {
+                        showError(
+                            selectedLanguage === "en"
+                                ? "Invalid code. Please try again."
+                                : "Неверный код. Проверьте и попробуйте снова."
+                        );
+                    }
+                })
+                .catch(() =>
+                    showError(
+                        selectedLanguage === "en"
+                            ? "Connection error."
+                            : "Ошибка соединения с сервером."
+                    )
+                )
+                .finally(() => {
+                    registerBtn.disabled = false;
+                    registerBtn.textContent = selectedLanguage === "en" ? "REGISTER" : "ЗАРЕГИСТРИРОВАТЬСЯ";
+                });
+        } else {
+            // Регистрация нового клиента
+            fetch(`${serverUrl}/register-client`, {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                },
+                body: JSON.stringify({ name, phone, email }),
+            })
+                .then((response) => response.json())
+                .then((data) => {
+                    if (data.uniqueCode) {
+                        uniqueCode = data.uniqueCode;
+                        sendTelegramNotification(
+                            `New user registered:\nName: ${name}\nPhone: ${phone}\nEmail: ${email}\nCode: ${uniqueCode}`
+                        );
 
-        # Записываем данные клиента в первую строку
-        ws.append([
-            "",  # Client (пока пусто)
-            "",  # Assistant (пока пусто)
-            client_data["Client Code"],
-            client_data["Name"],
-            client_data["Phone"],
-            client_data["Email"],
-            client_data["Created Date"]
-        ])
+                        showMessageForm();
+                        appendMessage(
+                            "CAEC",
+                            selectedLanguage === "en"
+                                ? `Dear, ${name}, you are registered in the customer database of CAEC GmbH. Assigned code: <strong>${uniqueCode}</strong>. Please remember this code for re-login to save the fine-tuned communication settings and your needs in the future. Thank you.<br><br>How can we assist you?`
+                                : `Уважаемый, ${name}, вы зарегистрированы в клиентской базе данных компании CAEC GmbH. Присвоенный код: <strong>${uniqueCode}</strong>. Пожалуйста, запомните этот код для повторного входа в систему, чтобы сохранить тонкие настройки на коммуникацию и ваши потребности в будущем. Спасибо.<br><br>Чем можем быть полезны?`
+                        );
+                    } else {
+                        showError(
+                            data.message ||
+                                (selectedLanguage === "en"
+                                    ? "Registration error."
+                                    : "Ошибка регистрации.")
+                        );
+                    }
+                })
+                .catch((error) => {
+                    console.error("Ошибка регистрации:", error);
+                    showError(
+                        selectedLanguage === "en"
+                            ? "Connection error."
+                            : "Ошибка соединения с сервером."
+                    );
+                })
+                .finally(() => {
+                    registerBtn.disabled = false;
+                    registerBtn.textContent = selectedLanguage === "en" ? "REGISTER" : "ЗАРЕГИСТРИРОВАТЬСЯ";
+                });
+        }
+    });
 
-        # Устанавливаем формат ячеек как текст
-        for row in ws.iter_rows(min_row=1, max_row=ws.max_row, min_col=1, max_col=ws.max_column):
-            for cell in row:
-                cell.number_format = numbers.FORMAT_TEXT
+    function sendTelegramNotification(message) {
+        fetch(`${serverUrl}/send-telegram`, {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+            },
+            body: JSON.stringify({ message }),
+        }).catch((error) => console.error("Ошибка Telegram:", error));
+    }
 
-        # Настраиваем ширину столбцов A и B на 650 единиц
-        ws.column_dimensions['A'].width = 65  # Ширина столбца A (Client)
-        ws.column_dimensions['B'].width = 65  # Ширина столбца B (Assistant)
+    function showMessageForm() {
+        registrationForm.style.display = "none";
+        messageForm.style.display = "block";
+        chatMessages.style.display = "block";
+    }
 
-        # Включаем перенос текста для столбцов A и B
-        for row in ws.iter_rows(min_row=1, max_row=ws.max_row, min_col=1, max_col=2):
-            for cell in row:
-                cell.alignment = Alignment(wrap_text=True)
+    chatSend.addEventListener("click", () => sendMessage());
+    chatInput.addEventListener("keypress", (event) => {
+        if (event.key === "Enter") {
+            event.preventDefault();
+            sendMessage();
+        }
+    });
 
-        # Сохраняем файл в памяти
-        wb.save(output)
-        output.seek(0)
+    function sendMessage() {
+        const userMessage = chatInput.value.trim();
+        if (!userMessage) return;
 
-        # Загружаем или обновляем файл на Google Drive
-        upload_or_update_file(file_name, output)
+        chatSend.disabled = true;
+        chatSend.textContent = selectedLanguage === "en" ? "Please wait..." : "ПОДОЖДИТЕ...";
 
-        logger.info(f"Файл {file_name} успешно создан и загружен на Google Drive.")
-        return file_name
-    except Exception as e:
-        logger.error(f"Ошибка при создании файла клиента: {e}")
-        return None
+        appendMessage(selectedLanguage === "en" ? "You" : "Вы", userMessage);
+        chatInput.value = "";
 
-# Функция для добавления сообщения в файл клиента
-def add_message_to_client_file(client_code, message, is_assistant=False):
-    try:
-        file_name = f"Client_{client_code}.xlsx"
+        fetch(`${serverUrl}/chat`, {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+            },
+            body: JSON.stringify({ message: userMessage, client_code: uniqueCode }),
+        })
+            .then((response) => response.json())
+            .then((data) => {
+                appendMessage(
+                    "CAEC",
+                    data.reply || (selectedLanguage === "en" ? "Error retrieving response." : "Ошибка получения ответа.")
+                );
+            })
+            .catch((error) => {
+                console.error("Ошибка отправки сообщения:", error);
+                showError(
+                    selectedLanguage === "en"
+                        ? "Connection error."
+                        : "Ошибка соединения с сервером."
+                );
+            })
+            .finally(() => {
+                chatSend.disabled = false;
+                chatSend.textContent = selectedLanguage === "en" ? "SEND" : "ОТПРАВИТЬ";
+            });
+    }
 
-        # Открываем существующий файл или создаем новый, если он не существует
-        if os.path.exists(file_name):
-            wb = load_workbook(file_name)
-            ws = wb.active
-        else:
-            wb = Workbook()
-            ws = wb.active
-            # Записываем заголовки, если файл новый
-            ws.append(["Client", "Assistant", "Client Code", "Name", "Phone", "Email", "Created Date"])
+    function appendMessage(sender, message) {
+        const messageElement = document.createElement("div");
+        messageElement.style.marginBottom = "10px";
+        messageElement.innerHTML = `<strong>${sender}:</strong> ${message}`;
+        chatMessages.appendChild(messageElement);
+        chatMessages.scrollTop = chatMessages.scrollHeight;
+    }
 
-            # Загружаем данные клиента
-            df = load_client_data()
-            client_data = df[df["Client Code"] == client_code].iloc[0].to_dict()
-
-            # Записываем данные клиента в первую строку
-            ws.append([
-                "",  # Client (пока пусто)
-                "",  # Assistant (пока пусто)
-                client_data["Client Code"],
-                client_data["Name"],
-                client_data["Phone"],
-                client_data["Email"],
-                client_data["Created Date"]
-            ])
-
-        # Форматируем время
-        current_time = datetime.now().strftime("%d.%m.%y %H:%M")
-
-        # Ищем последнюю строку с сообщением клиента
-        last_row = ws.max_row
-        if is_assistant:
-            # Если это ответ ассистента, добавляем его в ту же строку, что и последнее сообщение клиента
-            ws.cell(row=last_row, column=2, value=f"{current_time} - {message}")
-        else:
-            # Если это новое сообщение клиента, добавляем его в новую строку
-            ws.append([
-                f"{current_time} - {message}",  # Client
-                "",  # Assistant (пока пусто)
-                "",  # Client Code (пусто)
-                "",  # Name (пусто)
-                "",  # Phone (пусто)
-                "",  # Email (пусто)
-                ""   # Created Date (пусто)
-            ])
-
-        # Включаем перенос текста для столбцов A и B
-        for row in ws.iter_rows(min_row=1, max_row=ws.max_row, min_col=1, max_col=2):
-            for cell in row:
-                cell.alignment = Alignment(wrap_text=True)
-
-        # Сохраняем файл
-        wb.save(file_name)
-
-        # Загружаем или обновляем файл на Google Drive
-        with open(file_name, "rb") as file_stream:
-            upload_or_update_file(file_name, file_stream)
-
-        logger.info(f"Сообщение добавлено в файл клиента {client_code}.")
-    except Exception as e:
-        logger.error(f"Ошибка при добавлении сообщения в файл клиента: {e}")
-
-# Функция для поиска клиента по коду и создания/обновления его файла
-def handle_client(client_code):
-    try:
-        logger.info(f"Обработка клиента с кодом: {client_code}")
-        df = load_client_data()
-
-        # Ищем клиента по коду
-        client_data = df[df["Client Code"] == client_code]
-
-        if not client_data.empty:
-            client_data = client_data.iloc[0].to_dict()
-
-            # Создаем файл клиента, если он не существует
-            file_name = f"Client_{client_code}.xlsx"
-            if not os.path.exists(file_name):
-                logger.info(f"Создание файла клиента: {file_name}")
-                create_client_file(client_code, client_data)
-        else:
-            logger.warning(f"Клиент с кодом {client_code} не найден в ClientData.xlsx.")
-    except Exception as e:
-        logger.error(f"Ошибка при обработке клиента: {e}")
-
-# Функция для обработки всех клиентов из ClientData.xlsx
-def handle_all_clients():
-    try:
-        logger.info("Обработка всех клиентов из ClientData.xlsx...")
-        df = load_client_data()
-
-        for _, row in df.iterrows():
-            client_code = row["Client Code"]
-            handle_client(client_code)
-
-        logger.info("Все клиенты обработаны.")
-    except Exception as e:
-        logger.error(f"Ошибка при обработке всех клиентов: {e}")
-
-# Пример использования
-if __name__ == "__main__":
-    # Обработка всех клиентов при запуске
-    handle_all_clients()
+    function showError(message) {
+        chatFeedback.style.display = "block";
+        chatFeedback.textContent = message;
+        setTimeout(() => {
+            chatFeedback.style.display = "none";
+        }, 3000);
+    }
+});
+</script>
