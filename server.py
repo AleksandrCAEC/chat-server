@@ -4,7 +4,7 @@ import os
 import openai
 import requests
 from clientdata import register_or_update_client, verify_client_code
-from client_caec import add_message_to_client_file  # Импорт функции для добавления сообщения
+from client_caec import add_message_to_client_file, load_bible_data  # Импорт функции для добавления сообщения и загрузки Bible.xlsx
 import logging
 from datetime import datetime
 
@@ -97,7 +97,20 @@ def chat():
             logger.error("Ошибка: Сообщение и код клиента не могут быть пустыми")
             return jsonify({'error': 'Сообщение и код клиента не могут быть пустыми'}), 400
 
-        # Используем метод ChatCompletion.create, который принимает параметр messages
+        # Загружаем данные из Bible.xlsx
+        bible_data = load_bible_data()
+        if bible_data.empty:
+            send_telegram_notification("❌ Ошибка: Файл Bible.xlsx не найден или пуст.")
+            return jsonify({'error': 'Файл Bible.xlsx не найден или пуст.'}), 404
+
+        # Поиск ответа в Bible.xlsx
+        matched_row = bible_data[bible_data["FAQ"].str.contains(user_message, case=False, na=False)]
+        if not matched_row.empty:
+            reply = matched_row.iloc[0]["Answers"]
+            logger.info(f"Ответ найден в Bible.xlsx: {reply}")
+            return jsonify({'reply': reply}), 200
+
+        # Если ответ не найден в Bible.xlsx, используем OpenAI
         response = openai.ChatCompletion.create(
             model="gpt-3.5-turbo",
             messages=[
@@ -107,13 +120,10 @@ def chat():
             max_tokens=150
         )
 
-        # Извлекаем ответ
         reply = response['choices'][0]['message']['content'].strip()
 
-        # Добавляем сообщение пользователя в файл клиента
+        # Добавляем сообщение в файл клиента
         add_message_to_client_file(client_code, user_message, is_assistant=False)
-
-        # Добавляем ответ ассистента в файл клиента
         add_message_to_client_file(client_code, reply, is_assistant=True)
 
         logger.info(f"Ответ от OpenAI: {reply}")
