@@ -6,6 +6,7 @@ from googleapiclient.http import MediaIoBaseUpload
 from io import BytesIO
 import logging
 from datetime import datetime
+from clientdata import load_client_data  # Импорт функции для загрузки данных клиентов
 
 # Настройка логирования
 logging.basicConfig(
