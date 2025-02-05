@@ -1,232 +1,256 @@
 import os
+import pandas as pd
 from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
-import pandas as pd
-from datetime import datetime, timedelta
+from googleapiclient.http import MediaIoBaseUpload
+from io import BytesIO
 import logging
-from client_caec import handle_client  # Импорт функции для обработки файла клиента
+from datetime import datetime
 
 # Настройка логирования
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     handlers=[
-        logging.FileHandler("clientdata.log"),
+        logging.FileHandler("client_caec.log"),
         logging.StreamHandler()
     ]
 )
 logger = logging.getLogger(__name__)
 
-# Идентификатор Google Sheets таблицы
-SPREADSHEET_ID = "1eGpB0hiRxXPpYN75-UKyXoar7yh-zne8r8ox-hXrS1I"
+# Путь к файлу ClientData.xlsx
+CLIENT_DATA_PATH = "ClientData.xlsx"
 
-# Инициализация Google Sheets API
-def get_sheets_service():
+# ID папки на Google Drive
+GOOGLE_DRIVE_FOLDER_ID = "11cQYLDGKlu2Rn_9g8R_4xNA59ikhvJpS"
+
+# Инициализация Google Drive API
+def get_drive_service():
     try:
-        credentials = Credentials.from_service_account_file(os.getenv("GOOGLE_APPLICATION_CREDENTIALS"))
-        return build('sheets', 'v4', credentials=credentials)
+        credentials = Credentials.from_service_account_file(
+            os.getenv("GOOGLE_APPLICATION_CREDENTIALS"),
+            scopes=["https://www.googleapis.com/auth/drive"]
+        )
+        return build("drive", "v3", credentials=credentials)
     except Exception as e:
-        logger.error(f"Ошибка инициализации Google Sheets API: {e}")
+        logger.error(f"Ошибка инициализации Google Drive API: {e}")
         return None
 
-# Загрузка данных из Google Sheets
+# Поиск файла на Google Drive по имени
+def find_file_id(drive_service, file_name):
+    try:
+        response = drive_service.files().list(
+            q=f"name='{file_name}' and '{GOOGLE_DRIVE_FOLDER_ID}' in parents",
+            fields="files(id, name)"
+        ).execute()
+        files = response.get("files", [])
+        if files:
+            return files[0]["id"]  # Возвращаем ID первого найденного файла
+        return None
+    except Exception as e:
+        logger.error(f"Ошибка при поиске файла на Google Drive: {e}")
+        return None
+
+# Загрузка или обновление файла на Google Drive
+def upload_or_update_file(file_name, file_stream):
+    try:
+        drive_service = get_drive_service()
+        if not drive_service:
+            raise Exception("Google Drive API не инициализирован.")
+
+        # Ищем файл на Google Drive
+        file_id = find_file_id(drive_service, file_name)
+
+        if file_id:
+            # Если файл существует, обновляем его
+            media = MediaIoBaseUpload(file_stream, mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+            drive_service.files().update(
+                fileId=file_id,
+                media_body=media
+            ).execute()
+            logger.info(f"Файл {file_name} успешно обновлён на Google Drive.")
+        else:
+            # Если файл не существует, создаем новый
+            file_metadata = {
+                "name": file_name,
+                "parents": [GOOGLE_DRIVE_FOLDER_ID]
+            }
+            media = MediaIoBaseUpload(file_stream, mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+            file = drive_service.files().create(
+                body=file_metadata,
+                media_body=media,
+                fields="id"
+            ).execute()
+            logger.info(f"Файл {file_name} успешно создан и загружен на Google Drive. ID файла: {file.get('id')}")
+    except Exception as e:
+        logger.error(f"Ошибка при загрузке/обновлении файла на Google Drive: {e}")
+
+# Функция для загрузки данных из ClientData.xlsx
 def load_client_data():
     try:
-        logger.info("Загрузка данных из Google Sheets...")
-        sheets_service = get_sheets_service()
-        if not sheets_service:
-            raise Exception("Google Sheets API не инициализирован.")
-
-        range_name = "Sheet1!A2:G1000"  # Диапазон для всех столбцов
-
-        result = sheets_service.spreadsheets().values().get(
-            spreadsheetId=SPREADSHEET_ID,
-            range=range_name
-        ).execute()
-
-        values = result.get('values', [])
-        if not values:
-            logger.info("Данные не найдены.")
-            return pd.DataFrame(columns=["Client Code", "Name", "Phone", "Email", "Created Date", "Last Visit", "Activity Status"])
-
-        # Преобразуем данные в DataFrame
-        df = pd.DataFrame(values, columns=["Client Code", "Name", "Phone", "Email", "Created Date", "Last Visit", "Activity Status"])
-        
-        # Преобразуем столбец "Client Code" в строковый тип
-        df["Client Code"] = df["Client Code"].astype(str)
-        
-        logger.info(f"Загружены данные: {df}")
+        logger.info("Загрузка данных из ClientData.xlsx...")
+        df = pd.read_excel(CLIENT_DATA_PATH)
+        logger.info(f"Данные загружены: {df}")
         return df
     except Exception as e:
-        logger.error(f"Ошибка загрузки данных: {e}")
-        return pd.DataFrame(columns=["Client Code", "Name", "Phone", "Email", "Created Date", "Last Visit", "Activity Status"])
+        logger.error(f"Ошибка загрузки данных из ClientData.xlsx: {e}")
+        return pd.DataFrame()
 
-# Генерация уникального кода клиента
-def generate_unique_code():
+# Функция для создания файла Client_CAECxxxxxxx.xlsx
+def create_client_file(client_code, client_data):
     try:
-        existing_codes = set(load_client_data()["Client Code"])
-        while True:
-            code = f"CAEC{str(datetime.now().timestamp()).replace('.', '')[-7:]}"
-            if code not in existing_codes:
-                return code
+        # Убираем дублирование "CAEC" в имени файла
+        file_name = f"Client_{client_code}.xlsx"
+
+        # Создаем файл в памяти
+        output = BytesIO()
+        wb = Workbook()
+        ws = wb.active
+
+        # Записываем заголовки
+        ws.append(["Client", "Assistant", "Client Code", "Name", "Phone", "Email", "Created Date"])
+
+        # Записываем данные клиента в первую строку
+        ws.append([
+            "",  # Client (пока пусто)
+            "",  # Assistant (пока пусто)
+            client_data["Client Code"],
+            client_data["Name"],
+            client_data["Phone"],
+            client_data["Email"],
+            client_data["Created Date"]
+        ])
+
+        # Устанавливаем формат ячеек как текст
+        for row in ws.iter_rows(min_row=1, max_row=ws.max_row, min_col=1, max_col=ws.max_column):
+            for cell in row:
+                cell.number_format = numbers.FORMAT_TEXT
+
+        # Настраиваем ширину столбцов A и B на 650 единиц
+        ws.column_dimensions['A'].width = 65  # Ширина столбца A (Client)
+        ws.column_dimensions['B'].width = 65  # Ширина столбца B (Assistant)
+
+        # Включаем перенос текста для столбцов A и B
+        for row in ws.iter_rows(min_row=1, max_row=ws.max_row, min_col=1, max_col=2):
+            for cell in row:
+                cell.alignment = Alignment(wrap_text=True)
+
+        # Сохраняем файл в памяти
+        wb.save(output)
+        output.seek(0)
+
+        # Загружаем или обновляем файл на Google Drive
+        upload_or_update_file(file_name, output)
+
+        logger.info(f"Файл {file_name} успешно создан и загружен на Google Drive.")
+        return file_name
     except Exception as e:
-        logger.error(f"Ошибка генерации уникального кода: {e}")
-        raise
+        logger.error(f"Ошибка при создании файла клиента: {e}")
+        return None
 
-# Сохранение изменений в Google Sheets и локальном файле
-def save_client_data(client_code, name, phone, email, created_date, last_visit, activity_status):
+# Функция для добавления сообщения в файл клиента
+def add_message_to_client_file(client_code, message, is_assistant=False):
     try:
-        logger.info("Подключение к Google Sheets...")
-        sheets_service = get_sheets_service()
-        if not sheets_service:
-            raise Exception("Google Sheets API не инициализирован.")
+        file_name = f"Client_{client_code}.xlsx"
 
-        # Преобразуем client_code в строковый тип
-        values = [[str(client_code), name, phone, email, created_date, last_visit, activity_status]]
-        body = {'values': values}
+        # Открываем существующий файл или создаем новый, если он не существует
+        if os.path.exists(file_name):
+            wb = load_workbook(file_name)
+            ws = wb.active
+        else:
+            wb = Workbook()
+            ws = wb.active
+            # Записываем заголовки, если файл новый
+            ws.append(["Client", "Assistant", "Client Code", "Name", "Phone", "Email", "Created Date"])
 
-        logger.info(f"Отправка данных в Google Sheets: {values}")
+            # Загружаем данные клиента
+            df = load_client_data()
+            client_data = df[df["Client Code"] == client_code].iloc[0].to_dict()
 
-        response = sheets_service.spreadsheets().values().append(
-            spreadsheetId=SPREADSHEET_ID,
-            range="Sheet1!A2:G2",  # Диапазон для добавления новой строки
-            valueInputOption="RAW",
-            body=body
-        ).execute()
+            # Записываем данные клиента в первую строку
+            ws.append([
+                "",  # Client (пока пусто)
+                "",  # Assistant (пока пусто)
+                client_data["Client Code"],
+                client_data["Name"],
+                client_data["Phone"],
+                client_data["Email"],
+                client_data["Created Date"]
+            ])
 
-        logger.info(f"Ответ от Google API: {response}")
+        # Форматируем время
+        current_time = datetime.now().strftime("%d.%m.%y %H:%M")
+
+        # Ищем последнюю строку с сообщением клиента
+        last_row = ws.max_row
+        if is_assistant:
+            # Если это ответ ассистента, добавляем его в ту же строку, что и последнее сообщение клиента
+            ws.cell(row=last_row, column=2, value=f"{current_time} - {message}")
+        else:
+            # Если это новое сообщение клиента, добавляем его в новую строку
+            ws.append([
+                f"{current_time} - {message}",  # Client
+                "",  # Assistant (пока пусто)
+                "",  # Client Code (пусто)
+                "",  # Name (пусто)
+                "",  # Phone (пусто)
+                "",  # Email (пусто)
+                ""   # Created Date (пусто)
+            ])
+
+        # Включаем перенос текста для столбцов A и B
+        for row in ws.iter_rows(min_row=1, max_row=ws.max_row, min_col=1, max_col=2):
+            for cell in row:
+                cell.alignment = Alignment(wrap_text=True)
+
+        # Сохраняем файл
+        wb.save(file_name)
+
+        # Загружаем или обновляем файл на Google Drive
+        with open(file_name, "rb") as file_stream:
+            upload_or_update_file(file_name, file_stream)
+
+        logger.info(f"Сообщение добавлено в файл клиента {client_code}.")
     except Exception as e:
-        logger.error(f"Ошибка записи в Google Sheets: {e}")
-        raise
+        logger.error(f"Ошибка при добавлении сообщения в файл клиента: {e}")
 
-    # Сохранение в локальный файл ClientData.xlsx
+# Функция для поиска клиента по коду и создания/обновления его файла
+def handle_client(client_code):
     try:
+        logger.info(f"Обработка клиента с кодом: {client_code}")
         df = load_client_data()
-        new_data = pd.DataFrame([{
-            "Client Code": str(client_code),
-            "Name": name,
-            "Phone": phone,
-            "Email": email,
-            "Created Date": created_date,
-            "Last Visit": last_visit,
-            "Activity Status": activity_status
-        }])
-        df = pd.concat([df, new_data], ignore_index=True)
-        df.to_excel("ClientData.xlsx", index=False)
-        logger.info(f"Данные сохранены в ClientData.xlsx: {client_code}, {name}, {phone}, {email}")
-    except Exception as e:
-        logger.error(f"Ошибка сохранения в локальный файл: {e}")
 
-# Обновление статуса активности клиентов
-def update_activity_status():
-    try:
-        df = load_client_data()
-        current_date = datetime.now()
-        one_year_ago = current_date - timedelta(days=365)
+        # Ищем клиента по коду
+        client_data = df[df["Client Code"] == client_code]
 
-        # Обновляем статус для клиентов, которые не активны более года
-        df.loc[(pd.to_datetime(df["Last Visit"]) < one_year_ago), "Activity Status"] = "Not Active"
-
-        # Сортируем таблицу: неактивные клиенты на первых строках
-        df = df.sort_values(by=["Activity Status"], ascending=True)
-
-        # Сохраняем обновленные данные
-        df.to_excel("ClientData.xlsx", index=False)
-        logger.info("Статус активности клиентов обновлен.")
-    except Exception as e:
-        logger.error(f"Ошибка при обновлении статуса активности: {e}")
-
-# Регистрация или обновление клиента
-def register_or_update_client(data):
-    try:
-        df = load_client_data()
-
-        email = data.get("email")
-        phone = data.get("phone")
-        name = data.get("name", "Unknown")
-
-        # Поиск существующего клиента по email или телефону
-        existing_client = df[(df["Email"] == email) | (df["Phone"] == phone)]
-
-        if not existing_client.empty:
-            # Если клиент уже существует, обновляем его данные
-            client_code = existing_client.iloc[0]["Client Code"]
-            created_date = existing_client.iloc[0]["Created Date"]
-            last_visit = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            activity_status = "Active"
-
-            # Проверяем, изменились ли email или телефон
-            if email != existing_client.iloc[0]["Email"] or phone != existing_client.iloc[0]["Phone"]:
-                # Если email или телефон изменились, создаем новую запись с тем же кодом
-                save_client_data(
-                    client_code=client_code,
-                    name=name,
-                    phone=phone,
-                    email=email,
-                    created_date=created_date,
-                    last_visit=last_visit,
-                    activity_status=activity_status
-                )
-            else:
-                # Если данные не изменились, просто обновляем последний визит
-                df.loc[df["Client Code"] == client_code, "Last Visit"] = last_visit
-                df.to_excel("ClientData.xlsx", index=False)
-
-            # Обработка файла клиента
-            handle_client(client_code)  # Вызов функции для создания/обновления файла клиента
-
-            return {
-                "uniqueCode": client_code,
-                "message": f"Добро пожаловать обратно, {name}! Ваш код: {client_code}.",
-                "name": name,
-                "email": email,
-                "phone": phone,
-                "isNewClient": False  # Указываем, что клиент не новый
-            }
-
-        # Регистрация нового клиента
-        client_code = generate_unique_code()
-        created_date = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        last_visit = created_date
-        activity_status = "Active"
-
-        save_client_data(
-            client_code=client_code,
-            name=name,
-            phone=phone,
-            email=email,
-            created_date=created_date,
-            last_visit=last_visit,
-            activity_status=activity_status
-        )
-
-        # Обработка файла клиента
-        handle_client(client_code)  # Вызов функции для создания/обновления файла клиента
-
-        # Обновляем статус активности клиентов
-        update_activity_status()
-
-        return {
-            "uniqueCode": client_code,
-            "message": f"Добро пожаловать, {name}! Ваш код: {client_code}.",
-            "name": name,
-            "email": email,
-            "phone": phone,
-            "isNewClient": True  # Указываем, что клиент новый
-        }
-    except Exception as e:
-        logger.error(f"Ошибка при регистрации/обновлении клиента: {e}")
-        raise
-
-# Верификация кода клиента
-def verify_client_code(code):
-    try:
-        df = load_client_data()
-        code = str(code)  # Преобразуем код к строковому типу
-        client_data = df[df["Client Code"] == code]
         if not client_data.empty:
-            return client_data.iloc[0].to_dict()
-        return None
+            client_data = client_data.iloc[0].to_dict()
+
+            # Создаем файл клиента, если он не существует
+            file_name = f"Client_{client_code}.xlsx"
+            if not os.path.exists(file_name):
+                logger.info(f"Создание файла клиента: {file_name}")
+                create_client_file(client_code, client_data)
+        else:
+            logger.warning(f"Клиент с кодом {client_code} не найден в ClientData.xlsx.")
     except Exception as e:
-        logger.error(f"Ошибка при верификации кода клиента: {e}")
-        return None
+        logger.error(f"Ошибка при обработке клиента: {e}")
+
+# Функция для обработки всех клиентов из ClientData.xlsx
+def handle_all_clients():
+    try:
+        logger.info("Обработка всех клиентов из ClientData.xlsx...")
+        df = load_client_data()
+
+        for _, row in df.iterrows():
+            client_code = row["Client Code"]
+            handle_client(client_code)
+
+        logger.info("Все клиенты обработаны.")
+    except Exception as e:
+        logger.error(f"Ошибка при обработке всех клиентов: {e}")
+
+# Пример использования
+if __name__ == "__main__":
+    # Обработка всех клиентов при запуске
+    handle_all_clients()
