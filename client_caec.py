@@ -1,3 +1,4 @@
+# client_caec.py
 import os
 import pandas as pd
 from google.oauth2.service_account import Credentials
@@ -6,7 +7,7 @@ from googleapiclient.http import MediaIoBaseUpload
 from io import BytesIO
 import logging
 from datetime import datetime
-from clientdata import load_client_data  # Импорт функции для загрузки данных клиентов
+from utils import load_client_data  # Импорт из нового модуля
 
 # Настройка логирования
 logging.basicConfig(
