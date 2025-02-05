@@ -1,10 +1,9 @@
+# clientdata.py
 import os
-from google.oauth2.service_account import Credentials
-from googleapiclient.discovery import build
 import pandas as pd
 from datetime import datetime, timedelta
 import logging
-from client_caec import handle_client  # Импорт функции для обработки файла клиента
+from utils import load_client_data  # Импорт из нового модуля
 
 # Настройка логирования
 logging.basicConfig(
