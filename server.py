@@ -5,7 +5,8 @@ import os
 import openai
 import requests
 from clientdata import register_or_update_client, verify_client_code
-from client_caec import add_message_to_client_file, load_bible_data  # Импорт функции для добавления сообщения и загрузки Bible.xlsx
+from client_caec import add_message_to_client_file
+from utils import load_bible_data  # Импорт из нового модуля
 import logging
 from datetime import datetime
 
