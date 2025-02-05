@@ -25,7 +25,7 @@ def get_sheets_service():
         logger.error(f"Ошибка инициализации Google Sheets API: {e}")
         return None
 
-# Загрузка данных из Google Sheets
+# Загрузка данных из Google Sheets (ClientData.xlsx)
 def load_client_data():
     try:
         logger.info("Загрузка данных из Google Sheets...")
@@ -59,3 +59,34 @@ def load_client_data():
     except Exception as e:
         logger.error(f"Ошибка загрузки данных: {e}")
         return pd.DataFrame(columns=["Client Code", "Name", "Phone", "Email", "Created Date", "Last Visit", "Activity Status"])
+
+# Загрузка данных из Google Sheets (Bible.xlsx)
+def load_bible_data():
+    try:
+        logger.info("Загрузка данных из Bible.xlsx...")
+        sheets_service = get_sheets_service()
+        if not sheets_service:
+            raise Exception("Google Sheets API не инициализирован.")
+
+        # Идентификатор таблицы Bible.xlsx
+        SPREADSHEET_ID = "1QB3Jv7cL5hNwDKx9rQF6FCrKHW7IHPAqrUg7FIvY7Dk"
+        range_name = "Bible!A2:C1000"  # Диапазон для всех столбцов
+
+        # Загрузка данных
+        result = sheets_service.spreadsheets().values().get(
+            spreadsheetId=SPREADSHEET_ID,
+            range=range_name
+        ).execute()
+
+        values = result.get('values', [])
+        if not values:
+            logger.info("Данные в Bible.xlsx не найдены.")
+            return pd.DataFrame(columns=["FAQ", "Answers", "Verification"])
+
+        # Преобразуем данные в DataFrame
+        df = pd.DataFrame(values, columns=["FAQ", "Answers", "Verification"])
+        logger.info(f"Данные из Bible.xlsx загружены: {df}")
+        return df
+    except Exception as e:
+        logger.error(f"Ошибка загрузки данных из Bible.xlsx: {e}")
+        return pd.DataFrame(columns=["FAQ", "Answers", "Verification"])
