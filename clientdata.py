@@ -21,6 +21,11 @@ logger = logging.getLogger(__name__)
 # Константа для локального файла ClientData.xlsx
 CLIENT_DATA_PATH = "./CAEC_API_Data/BIG_DATA/ClientData.xlsx"
 
+# Если директория для CLIENT_DATA_PATH не существует, создаём её
+data_dir = os.path.dirname(CLIENT_DATA_PATH)
+if not os.path.exists(data_dir):
+    os.makedirs(data_dir, exist_ok=True)
+
 # Идентификатор Google Sheets таблицы
 SPREADSHEET_ID = "1eGpB0hiRxXPpYN75-UKyXoar7yh-zne8r8ox-hXrS1I"
 
@@ -98,7 +103,7 @@ def save_client_data(client_code, name, phone, email, created_date, last_visit, 
             "Activity Status": activity_status
         }])
         df = pd.concat([df, new_data], ignore_index=True)
-        # Приводим все данные к строковому типу для сохранения в формате «Обычный текст»
+        # Приводим все данные к строковому типу для сохранения в формате "Обычный текст"
         df.astype(str).to_excel(CLIENT_DATA_PATH, index=False)
         logger.info(f"Данные сохранены в ClientData.xlsx: {client_code}, {name}, {phone}, {email}")
     except Exception as e:
