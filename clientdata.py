@@ -1,22 +1,24 @@
-# clientdata.py
 import os
+from google.oauth2.service_account import Credentials
+from googleapiclient.discovery import build
 import pandas as pd
-from google.oauth2.service_account import Credentials  # Добавлен импорт
-from googleapiclient.discovery import build  # Добавлен импорт
 from datetime import datetime, timedelta
 import logging
-from utils import load_client_data  # Импорт из нового модуля
+from client_caec import handle_client  # Импорт функции для обработки файла клиента
 
 # Настройка логирования
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     handlers=[
-        logging.FileHandler("clientdata.log"),
+        logging.FileHandler("app.log"),
         logging.StreamHandler()
     ]
 )
 logger = logging.getLogger(__name__)
+
+# Идентификатор Google Sheets таблицы
+SPREADSHEET_ID = "1eGpB0hiRxXPpYN75-UKyXoar7yh-zne8r8ox-hXrS1I"
 
 # Инициализация Google Sheets API
 def get_sheets_service():
@@ -26,9 +28,6 @@ def get_sheets_service():
     except Exception as e:
         logger.error(f"Ошибка инициализации Google Sheets API: {e}")
         return None
-
-# Идентификатор Google Sheets таблицы
-SPREADSHEET_ID = "1eGpB0hiRxXPpYN75-UKyXoar7yh-zne8r8ox-hXrS1I"
 
 # Загрузка данных из Google Sheets
 def load_client_data():
