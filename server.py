@@ -54,7 +54,7 @@ def prepare_chat_context(client_code):
     """
     messages = []
 
-    # Чтение Bible.xlsx
+    # Чтение Bible.xlsx через Google Sheets API
     bible_df = load_bible_data()
     if bible_df is None:
         raise Exception("Bible.xlsx не найден или недоступен.")
@@ -93,8 +93,6 @@ def prepare_chat_context(client_code):
             logger.error(f"Ошибка при чтении файла клиента {client_file_path}: {e}")
 
     return messages
-
-import pandas as pd  # Для проверки значений (pd.notna)
 
 @app.route('/register-client', methods=['POST'])
 def register_client():
