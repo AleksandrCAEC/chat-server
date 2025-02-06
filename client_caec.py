@@ -9,6 +9,7 @@ from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseUpload
 from io import BytesIO
+from clientdata import CLIENT_DATA_PATH  # Импортируем путь к ClientData.xlsx
 
 logging.basicConfig(
     level=logging.INFO,
@@ -23,7 +24,7 @@ logger = logging.getLogger(__name__)
 # Константа для директории файлов клиента
 CLIENT_FILES_DIR = "./CAEC_API_Data/BIG_DATA/Data_CAEC_client/"
 
-# Если директория не существует, создаём её
+# Если директория для файлов клиента не существует, создаём её
 if not os.path.exists(CLIENT_FILES_DIR):
     os.makedirs(CLIENT_FILES_DIR, exist_ok=True)
 
@@ -84,18 +85,18 @@ def upload_or_update_file(file_name, file_stream):
         logger.error(f"Ошибка при загрузке/обновлении файла на Google Drive: {e}")
 
 def load_client_data():
-    # Если локальный файл не найден, пробуем создать его, загрузив данные через Google Sheets
-    if not os.path.exists("ClientData.xlsx"):
+    # Используем CLIENT_DATA_PATH из clientdata.py
+    if not os.path.exists(CLIENT_DATA_PATH):
         try:
             from clientdata import load_client_data as load_from_gs
             df = load_from_gs()
-            df.astype(str).to_excel("ClientData.xlsx", index=False)
+            df.astype(str).to_excel(CLIENT_DATA_PATH, index=False)
             return df
         except Exception as e:
             logger.error(f"Ошибка создания ClientData.xlsx: {e}")
             return pd.DataFrame()
     try:
-        df = pd.read_excel("ClientData.xlsx")
+        df = pd.read_excel(CLIENT_DATA_PATH)
         return df
     except Exception as e:
         logger.error(f"Ошибка загрузки данных из ClientData.xlsx: {e}")
