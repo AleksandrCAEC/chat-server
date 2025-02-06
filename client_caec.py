@@ -9,7 +9,7 @@ from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseUpload
 from io import BytesIO
-from config import CLIENT_DATA_PATH  # Импортируем путь к ClientData.xlsx из config
+from config import CLIENT_DATA_PATH  # Импортируем путь к ClientData.xlsx
 
 logging.basicConfig(
     level=logging.INFO,
@@ -24,7 +24,6 @@ logger = logging.getLogger(__name__)
 # Константа для директории файлов клиента
 CLIENT_FILES_DIR = "./CAEC_API_Data/BIG_DATA/Data_CAEC_client/"
 
-# Если директория для файлов клиента не существует, создаём её
 if not os.path.exists(CLIENT_FILES_DIR):
     os.makedirs(CLIENT_FILES_DIR, exist_ok=True)
 
