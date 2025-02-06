@@ -5,9 +5,8 @@ from googleapiclient.discovery import build
 import pandas as pd
 from datetime import datetime, timedelta
 import logging
-from client_caec import handle_client  # Функция для обработки файла клиента
+from config import CLIENT_DATA_PATH  # Импортируем путь из config
 
-# Настройка логирования
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
@@ -18,15 +17,11 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Константа для локального файла ClientData.xlsx
-CLIENT_DATA_PATH = "./CAEC_API_Data/BIG_DATA/ClientData.xlsx"
-
 # Если директория для CLIENT_DATA_PATH не существует, создаём её
 data_dir = os.path.dirname(CLIENT_DATA_PATH)
 if not os.path.exists(data_dir):
     os.makedirs(data_dir, exist_ok=True)
 
-# Идентификатор Google Sheets таблицы
 SPREADSHEET_ID = "1eGpB0hiRxXPpYN75-UKyXoar7yh-zne8r8ox-hXrS1I"
 
 def get_sheets_service():
@@ -103,7 +98,6 @@ def save_client_data(client_code, name, phone, email, created_date, last_visit, 
             "Activity Status": activity_status
         }])
         df = pd.concat([df, new_data], ignore_index=True)
-        # Приводим все данные к строковому типу для сохранения в формате "Обычный текст"
         df.astype(str).to_excel(CLIENT_DATA_PATH, index=False)
         logger.info(f"Данные сохранены в ClientData.xlsx: {client_code}, {name}, {phone}, {email}")
     except Exception as e:
@@ -115,7 +109,6 @@ def update_activity_status():
         current_date = datetime.now()
         one_year_ago = current_date - timedelta(days=365)
         df.loc[(pd.to_datetime(df["Last Visit"]) < one_year_ago), "Activity Status"] = "Not Active"
-        # Сортировка так, чтобы "Not Active" (неактивные) были в начале
         df = df.sort_values(by=["Activity Status"], ascending=False)
         df.astype(str).to_excel(CLIENT_DATA_PATH, index=False)
         logger.info("Статус активности клиентов обновлен.")
@@ -159,6 +152,8 @@ def register_or_update_client(data):
             else:
                 df.loc[df["Client Code"] == client_code, "Last Visit"] = last_visit
                 df.astype(str).to_excel(CLIENT_DATA_PATH, index=False)
+            # Локальный импорт для избежания круговой зависимости
+            from client_caec import handle_client
             handle_client(client_code)
             return {
                 "uniqueCode": client_code,
@@ -181,6 +176,7 @@ def register_or_update_client(data):
             last_visit=last_visit,
             activity_status=activity_status
         )
+        from client_caec import handle_client
         handle_client(client_code)
         update_activity_status()
         return {
