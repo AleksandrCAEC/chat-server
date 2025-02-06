@@ -23,6 +23,10 @@ logger = logging.getLogger(__name__)
 # Константа для директории файлов клиента
 CLIENT_FILES_DIR = "./CAEC_API_Data/BIG_DATA/Data_CAEC_client/"
 
+# Если директория не существует, создаём её
+if not os.path.exists(CLIENT_FILES_DIR):
+    os.makedirs(CLIENT_FILES_DIR, exist_ok=True)
+
 # ID папки на Google Drive
 GOOGLE_DRIVE_FOLDER_ID = "11cQYLDGKlu2Rn_9g8R_4xNA59ikhvJpS"
 
@@ -80,10 +84,18 @@ def upload_or_update_file(file_name, file_stream):
         logger.error(f"Ошибка при загрузке/обновлении файла на Google Drive: {e}")
 
 def load_client_data():
+    # Если локальный файл не найден, пробуем создать его, загрузив данные через Google Sheets
+    if not os.path.exists("ClientData.xlsx"):
+        try:
+            from clientdata import load_client_data as load_from_gs
+            df = load_from_gs()
+            df.astype(str).to_excel("ClientData.xlsx", index=False)
+            return df
+        except Exception as e:
+            logger.error(f"Ошибка создания ClientData.xlsx: {e}")
+            return pd.DataFrame()
     try:
-        logger.info("Загрузка данных из ClientData.xlsx...")
         df = pd.read_excel("ClientData.xlsx")
-        logger.info(f"Данные загружены: {df}")
         return df
     except Exception as e:
         logger.error(f"Ошибка загрузки данных из ClientData.xlsx: {e}")
@@ -106,7 +118,7 @@ def create_client_file(client_code, client_data):
             client_data["Email"],
             client_data["Created Date"]
         ])
-        # Принудительно устанавливаем формат всех ячеек как текст
+        # Явно устанавливаем формат всех ячеек как текст
         for row in ws.iter_rows(min_row=1, max_row=ws.max_row):
             for cell in row:
                 cell.number_format = numbers.FORMAT_TEXT
@@ -137,8 +149,10 @@ def add_message_to_client_file(client_code, message, is_assistant=False):
             wb = Workbook()
             ws = wb.active
             ws.append(["Client", "Assistant", "Client Code", "Name", "Phone", "Email", "Created Date"])
-            df = load_client_data()
-            client_data = df[df["Client Code"] == client_code].iloc[0].to_dict()
+            from clientdata import verify_client_code
+            client_data = verify_client_code(client_code)
+            if not client_data:
+                raise Exception(f"Данные клиента {client_code} не найдены.")
             ws.append([
                 "",  
                 "",  
@@ -154,7 +168,7 @@ def add_message_to_client_file(client_code, message, is_assistant=False):
             ws.append(["", f"{current_time} - {message}", "", "", "", "", ""])
         else:
             ws.append([f"{current_time} - {message}", "", "", "", "", "", ""])
-        # Обходим все ячейки и принудительно устанавливаем формат как текст
+        # Принудительно задаём текстовый формат для всех ячеек
         for row in ws.iter_rows(min_row=1, max_row=ws.max_row):
             for cell in row:
                 cell.number_format = numbers.FORMAT_TEXT
