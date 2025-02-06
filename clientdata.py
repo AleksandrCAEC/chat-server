@@ -98,7 +98,8 @@ def save_client_data(client_code, name, phone, email, created_date, last_visit, 
             "Activity Status": activity_status
         }])
         df = pd.concat([df, new_data], ignore_index=True)
-        df.to_excel(CLIENT_DATA_PATH, index=False)
+        # Приводим все данные к строковому типу для сохранения в формате «Обычный текст»
+        df.astype(str).to_excel(CLIENT_DATA_PATH, index=False)
         logger.info(f"Данные сохранены в ClientData.xlsx: {client_code}, {name}, {phone}, {email}")
     except Exception as e:
         logger.error(f"Ошибка сохранения в локальный файл: {e}")
@@ -111,7 +112,7 @@ def update_activity_status():
         df.loc[(pd.to_datetime(df["Last Visit"]) < one_year_ago), "Activity Status"] = "Not Active"
         # Сортировка так, чтобы "Not Active" (неактивные) были в начале
         df = df.sort_values(by=["Activity Status"], ascending=False)
-        df.to_excel(CLIENT_DATA_PATH, index=False)
+        df.astype(str).to_excel(CLIENT_DATA_PATH, index=False)
         logger.info("Статус активности клиентов обновлен.")
     except Exception as e:
         logger.error(f"Ошибка при обновлении статуса активности: {e}")
@@ -121,7 +122,7 @@ def update_last_visit(client_code):
         df = load_client_data()
         last_visit = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         df.loc[df["Client Code"] == client_code, "Last Visit"] = last_visit
-        df.to_excel(CLIENT_DATA_PATH, index=False)
+        df.astype(str).to_excel(CLIENT_DATA_PATH, index=False)
         logger.info(f"Last Visit обновлён для клиента {client_code}")
         return True
     except Exception as e:
@@ -152,7 +153,7 @@ def register_or_update_client(data):
                 )
             else:
                 df.loc[df["Client Code"] == client_code, "Last Visit"] = last_visit
-                df.to_excel(CLIENT_DATA_PATH, index=False)
+                df.astype(str).to_excel(CLIENT_DATA_PATH, index=False)
             handle_client(client_code)
             return {
                 "uniqueCode": client_code,
