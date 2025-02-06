@@ -148,19 +148,11 @@ def add_message_to_client_file(client_code, message, is_assistant=False):
                 client_data["Created Date"]
             ])
         current_time = datetime.now().strftime("%d.%m.%y %H:%M")
-        last_row = ws.max_row
+        # Вместо обновления последней строки – всегда добавляем новую строку
         if is_assistant:
-            ws.cell(row=last_row, column=2, value=f"{current_time} - {message}")
+            ws.append(["", f"{current_time} - {message}", "", "", "", "", ""])
         else:
-            ws.append([
-                f"{current_time} - {message}",
-                "",
-                "",
-                "",
-                "",
-                "",
-                ""
-            ])
+            ws.append([f"{current_time} - {message}", "", "", "", "", "", ""])
         for row in ws.iter_rows(min_row=1, max_row=ws.max_row, min_col=1, max_col=2):
             for cell in row:
                 cell.alignment = Alignment(wrap_text=True)
