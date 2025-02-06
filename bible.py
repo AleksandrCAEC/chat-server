@@ -19,7 +19,7 @@ def load_bible_data():
     """
     Загружает данные из файла Bible.xlsx через Google Sheets.
     Идентификатор таблицы: 1QB3Jv7cL5hNwDKx9rQF6FCrKHW7IHPAqrUg7FIvY7Dk
-    Диапазон: "Bible!A:C" (предполагается, что первая строка – заголовки: FAQ, Answers, Verification)
+    Диапазон: "Bible!A:C" (первая строка – заголовки: FAQ, Answers, Verification)
     """
     bible_spreadsheet_id = "1QB3Jv7cL5hNwDKx9rQF6FCrKHW7IHPAqrUg7FIvY7Dk"
     sheets_service = get_sheets_service()
@@ -36,7 +36,7 @@ def load_bible_data():
         if not values:
             logger.info("Нет данных в таблице Bible.")
             return pd.DataFrame(columns=["FAQ", "Answers", "Verification"])
-        # Предполагается, что первая строка – заголовки
+        # Первая строка – заголовки
         df = pd.DataFrame(values[1:], columns=values[0])
         logger.info(f"Данные Bible успешно загружены: {df.shape[0]} записей.")
         return df
