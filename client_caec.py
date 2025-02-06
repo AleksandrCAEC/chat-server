@@ -106,7 +106,8 @@ def create_client_file(client_code, client_data):
             client_data["Email"],
             client_data["Created Date"]
         ])
-        for row in ws.iter_rows(min_row=1, max_row=ws.max_row, min_col=1, max_col=ws.max_column):
+        # Принудительно устанавливаем формат всех ячеек как текст
+        for row in ws.iter_rows(min_row=1, max_row=ws.max_row):
             for cell in row:
                 cell.number_format = numbers.FORMAT_TEXT
         ws.column_dimensions['A'].width = 65
@@ -148,11 +149,15 @@ def add_message_to_client_file(client_code, message, is_assistant=False):
                 client_data["Created Date"]
             ])
         current_time = datetime.now().strftime("%d.%m.%y %H:%M")
-        # Вместо обновления последней строки – всегда добавляем новую строку
+        # Всегда добавляем новую строку для нового сообщения
         if is_assistant:
             ws.append(["", f"{current_time} - {message}", "", "", "", "", ""])
         else:
             ws.append([f"{current_time} - {message}", "", "", "", "", "", ""])
+        # Обходим все ячейки и принудительно устанавливаем формат как текст
+        for row in ws.iter_rows(min_row=1, max_row=ws.max_row):
+            for cell in row:
+                cell.number_format = numbers.FORMAT_TEXT
         for row in ws.iter_rows(min_row=1, max_row=ws.max_row, min_col=1, max_col=2):
             for cell in row:
                 cell.alignment = Alignment(wrap_text=True)
