@@ -5,7 +5,7 @@ from googleapiclient.discovery import build
 import pandas as pd
 from datetime import datetime, timedelta
 import logging
-from config import CLIENT_DATA_PATH  # Импортируем путь из config
+from config import CLIENT_DATA_PATH  # Используем общий путь из config
 
 logging.basicConfig(
     level=logging.INFO,
@@ -98,6 +98,7 @@ def save_client_data(client_code, name, phone, email, created_date, last_visit, 
             "Activity Status": activity_status
         }])
         df = pd.concat([df, new_data], ignore_index=True)
+        # Приводим все данные к строковому типу для сохранения в формате "Обычный текст"
         df.astype(str).to_excel(CLIENT_DATA_PATH, index=False)
         logger.info(f"Данные сохранены в ClientData.xlsx: {client_code}, {name}, {phone}, {email}")
     except Exception as e:
@@ -109,6 +110,7 @@ def update_activity_status():
         current_date = datetime.now()
         one_year_ago = current_date - timedelta(days=365)
         df.loc[(pd.to_datetime(df["Last Visit"]) < one_year_ago), "Activity Status"] = "Not Active"
+        # Сортировка так, чтобы "Not Active" были в начале
         df = df.sort_values(by=["Activity Status"], ascending=False)
         df.astype(str).to_excel(CLIENT_DATA_PATH, index=False)
         logger.info("Статус активности клиентов обновлен.")
