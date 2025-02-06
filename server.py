@@ -6,9 +6,9 @@ import openai
 import requests
 import logging
 from datetime import datetime
-from clientdata import register_or_update_client, verify_client_code
+from clientdata import register_or_update_client, verify_client_code, update_last_visit, update_activity_status
 from client_caec import add_message_to_client_file  # Функция для работы с историей переписки
-from bible import load_bible_data  # Новый модуль для работы с Bible.xlsx
+from bible import load_bible_data  # Модуль для работы с Bible.xlsx
 
 # Установка пути к файлу service_account_json
 os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = "/etc/secrets/service_account_json"
@@ -60,7 +60,7 @@ def prepare_chat_context(client_code):
         raise Exception("Bible.xlsx не найден или недоступен.")
 
     bible_context = "Информация о компании (FAQ):\n"
-    # Проходим по всем записям и объединяем FAQ и ответы
+    # Объединяем FAQ и ответы из Bible.xlsx
     for index, row in bible_df.iterrows():
         faq = row.get("FAQ", "")
         answer = row.get("Answers", "")
@@ -73,7 +73,7 @@ def prepare_chat_context(client_code):
     }
     messages.append(system_message)
 
-    # Попытка загрузить историю переписки клиента из файла
+    # Загрузка истории переписки клиента из файла, если он существует
     import openpyxl
     from client_caec import CLIENT_FILES_DIR
     client_file_path = os.path.join(CLIENT_FILES_DIR, f"Client_{client_code}.xlsx")
@@ -141,6 +141,12 @@ def chat():
             logger.error("Ошибка: Сообщение и код клиента не могут быть пустыми")
             return jsonify({'error': 'Сообщение и код клиента не могут быть пустыми'}), 400
 
+        # Обновляем дату последнего визита для клиента
+        update_last_visit(client_code)
+        # Опционально: обновляем статус активности (перемещая неактивных клиентов наверх)
+        update_activity_status()
+
+        # Подготавливаем контекст для чата
         try:
             messages = prepare_chat_context(client_code)
         except Exception as e:
@@ -159,7 +165,7 @@ def chat():
 
         reply = response['choices'][0]['message']['content'].strip()
 
-        # Логирование переписки в файле клиента
+        # Сохраняем переписку в файле клиента
         add_message_to_client_file(client_code, user_message, is_assistant=False)
         add_message_to_client_file(client_code, reply, is_assistant=True)
 
