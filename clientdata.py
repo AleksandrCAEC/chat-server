@@ -109,11 +109,24 @@ def update_activity_status():
         current_date = datetime.now()
         one_year_ago = current_date - timedelta(days=365)
         df.loc[(pd.to_datetime(df["Last Visit"]) < one_year_ago), "Activity Status"] = "Not Active"
-        df = df.sort_values(by=["Activity Status"], ascending=True)
+        # Сортировка так, чтобы "Not Active" (неактивные) были в начале
+        df = df.sort_values(by=["Activity Status"], ascending=False)
         df.to_excel(CLIENT_DATA_PATH, index=False)
         logger.info("Статус активности клиентов обновлен.")
     except Exception as e:
         logger.error(f"Ошибка при обновлении статуса активности: {e}")
+
+def update_last_visit(client_code):
+    try:
+        df = load_client_data()
+        last_visit = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        df.loc[df["Client Code"] == client_code, "Last Visit"] = last_visit
+        df.to_excel(CLIENT_DATA_PATH, index=False)
+        logger.info(f"Last Visit обновлён для клиента {client_code}")
+        return True
+    except Exception as e:
+        logger.error(f"Ошибка обновления Last Visit для клиента {client_code}: {e}")
+        return False
 
 def register_or_update_client(data):
     try:
