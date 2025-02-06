@@ -9,7 +9,7 @@ from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseUpload
 from io import BytesIO
-from clientdata import CLIENT_DATA_PATH  # Импортируем путь к ClientData.xlsx
+from config import CLIENT_DATA_PATH  # Импортируем путь к ClientData.xlsx из config
 
 logging.basicConfig(
     level=logging.INFO,
@@ -28,7 +28,6 @@ CLIENT_FILES_DIR = "./CAEC_API_Data/BIG_DATA/Data_CAEC_client/"
 if not os.path.exists(CLIENT_FILES_DIR):
     os.makedirs(CLIENT_FILES_DIR, exist_ok=True)
 
-# ID папки на Google Drive
 GOOGLE_DRIVE_FOLDER_ID = "11cQYLDGKlu2Rn_9g8R_4xNA59ikhvJpS"
 
 def get_drive_service():
@@ -85,7 +84,6 @@ def upload_or_update_file(file_name, file_stream):
         logger.error(f"Ошибка при загрузке/обновлении файла на Google Drive: {e}")
 
 def load_client_data():
-    # Используем CLIENT_DATA_PATH из clientdata.py
     if not os.path.exists(CLIENT_DATA_PATH):
         try:
             from clientdata import load_client_data as load_from_gs
@@ -119,7 +117,6 @@ def create_client_file(client_code, client_data):
             client_data["Email"],
             client_data["Created Date"]
         ])
-        # Явно устанавливаем формат всех ячеек как текст
         for row in ws.iter_rows(min_row=1, max_row=ws.max_row):
             for cell in row:
                 cell.number_format = numbers.FORMAT_TEXT
@@ -164,12 +161,10 @@ def add_message_to_client_file(client_code, message, is_assistant=False):
                 client_data["Created Date"]
             ])
         current_time = datetime.now().strftime("%d.%m.%y %H:%M")
-        # Всегда добавляем новую строку для нового сообщения
         if is_assistant:
             ws.append(["", f"{current_time} - {message}", "", "", "", "", ""])
         else:
             ws.append([f"{current_time} - {message}", "", "", "", "", "", ""])
-        # Принудительно задаём текстовый формат для всех ячеек
         for row in ws.iter_rows(min_row=1, max_row=ws.max_row):
             for cell in row:
                 cell.number_format = numbers.FORMAT_TEXT
