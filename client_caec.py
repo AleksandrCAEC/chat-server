@@ -11,6 +11,7 @@ from googleapiclient.http import MediaIoBaseUpload, MediaIoBaseDownload
 from io import BytesIO
 from config import CLIENT_DATA_PATH  # Импортируем путь к ClientData.xlsx
 
+# Настройка логирования
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
@@ -21,11 +22,29 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# Функция для отправки уведомлений через Telegram
+def send_notification(message):
+    try:
+        import requests
+        telegram_bot_token = os.getenv("TELEGRAM_BOT_TOKEN")
+        telegram_chat_id = os.getenv("TELEGRAM_CHAT_ID")
+        if telegram_bot_token and telegram_chat_id:
+            url = f"https://api.telegram.org/bot{telegram_bot_token}/sendMessage"
+            payload = {"chat_id": telegram_chat_id, "text": message, "parse_mode": "HTML"}
+            requests.post(url, json=payload)
+    except Exception as ex:
+        logger.error(f"Ошибка при отправке уведомления: {ex}")
+
 # Константа для директории файлов клиента
 CLIENT_FILES_DIR = "./CAEC_API_Data/BIG_DATA/Data_CAEC_client/"
 
 if not os.path.exists(CLIENT_FILES_DIR):
-    os.makedirs(CLIENT_FILES_DIR, exist_ok=True)
+    try:
+        os.makedirs(CLIENT_FILES_DIR, exist_ok=True)
+        logger.info(f"Директория {CLIENT_FILES_DIR} создана.")
+    except Exception as e:
+        logger.error(f"Ошибка при создании директории {CLIENT_FILES_DIR}: {e}")
+        send_notification(f"Ошибка при создании директории {CLIENT_FILES_DIR}: {e}")
 
 GOOGLE_DRIVE_FOLDER_ID = "11cQYLDGKlu2Rn_9g8R_4xNA59ikhvJpS"
 
@@ -38,6 +57,7 @@ def get_drive_service():
         return build("drive", "v3", credentials=credentials)
     except Exception as e:
         logger.error(f"Ошибка инициализации Google Drive API: {e}")
+        send_notification(f"Ошибка инициализации Google Drive API: {e}")
         return None
 
 def find_file_id(drive_service, file_name):
@@ -52,6 +72,7 @@ def find_file_id(drive_service, file_name):
         return None
     except Exception as e:
         logger.error(f"Ошибка при поиске файла на Google Drive: {e}")
+        send_notification(f"Ошибка при поиске файла {file_name} на Google Drive: {e}")
         return None
 
 def upload_or_update_file(file_name, file_stream):
@@ -80,7 +101,8 @@ def upload_or_update_file(file_name, file_stream):
             ).execute()
             logger.info(f"Файл {file_name} успешно создан и загружен на Google Drive. ID файла: {file.get('id')}")
     except Exception as e:
-        logger.error(f"Ошибка при загрузке/обновлении файла на Google Drive: {e}")
+        logger.error(f"Ошибка при загрузке/обновлении файла {file_name} на Google Drive: {e}")
+        send_notification(f"Ошибка при загрузке/обновлении файла {file_name} на Google Drive: {e}")
 
 def download_client_file(file_name, local_path):
     """
@@ -108,6 +130,7 @@ def download_client_file(file_name, local_path):
             return False
     except Exception as e:
         logger.error(f"Ошибка при скачивании файла {file_name} с Google Drive: {e}")
+        send_notification(f"Ошибка при скачивании файла {file_name} с Google Drive: {e}")
         return False
 
 def load_client_data():
@@ -119,12 +142,14 @@ def load_client_data():
             return df
         except Exception as e:
             logger.error(f"Ошибка создания ClientData.xlsx: {e}")
+            send_notification(f"Ошибка создания ClientData.xlsx: {e}")
             return pd.DataFrame()
     try:
         df = pd.read_excel(CLIENT_DATA_PATH)
         return df
     except Exception as e:
         logger.error(f"Ошибка загрузки данных из ClientData.xlsx: {e}")
+        send_notification(f"Ошибка загрузки данных из ClientData.xlsx: {e}")
         return pd.DataFrame()
 
 def create_client_file(client_code, client_data):
@@ -163,13 +188,14 @@ def create_client_file(client_code, client_data):
         return file_name
     except Exception as e:
         logger.error(f"Ошибка при создании файла клиента: {e}")
+        send_notification(f"Ошибка при создании файла клиента {client_code}: {e}")
         return None
 
 def add_message_to_client_file(client_code, message, is_assistant=False):
     """
     Добавляет новое сообщение в файл клиента Client_CAECxxxxxxx.xlsx.
     Если файл существует, данные дописываются в конец.
-    Если возникает ошибка записи, создается временный файл Temp_Client_CAECxxxxxxx.xlsx.
+    При ошибке записи создается временный файл Temp_Client_CAECxxxxxxx.xlsx и отправляется уведомление.
     """
     try:
         file_name = f"Client_{client_code}.xlsx"
@@ -183,7 +209,6 @@ def add_message_to_client_file(client_code, message, is_assistant=False):
                 if not client_data:
                     raise Exception(f"Данные клиента {client_code} не найдены.")
                 create_client_file(client_code, client_data)
-        # Загружаем существующий файл
         wb = load_workbook(file_path)
         ws = wb.active
         current_time = datetime.now().strftime("%d.%m.%y %H:%M")
@@ -192,7 +217,6 @@ def add_message_to_client_file(client_code, message, is_assistant=False):
         else:
             new_row = [f"{current_time} - {message}", "", "", "", "", "", ""]
         ws.append(new_row)
-        # Устанавливаем формат ячеек для новой строки
         for row in ws.iter_rows(min_row=ws.max_row, max_row=ws.max_row):
             for cell in row:
                 cell.number_format = numbers.FORMAT_TEXT
@@ -203,10 +227,10 @@ def add_message_to_client_file(client_code, message, is_assistant=False):
         logger.info(f"Сообщение добавлено в файл клиента {client_code}.")
     except Exception as e:
         logger.error(f"Ошибка при добавлении сообщения в файл клиента {client_code}: {e}")
+        send_notification(f"Ошибка при добавлении сообщения в файл клиента {client_code}: {e}")
         try:
             temp_file_name = f"Temp_Client_{client_code}.xlsx"
             temp_file_path = os.path.join(CLIENT_FILES_DIR, temp_file_name)
-            # Если оригинальный файл существует, копируем его содержимое
             if os.path.exists(file_path):
                 wb_temp = load_workbook(file_path)
             else:
@@ -222,8 +246,10 @@ def add_message_to_client_file(client_code, message, is_assistant=False):
             ws_temp.append(new_row)
             wb_temp.save(temp_file_path)
             logger.error(f"Создан временный файл {temp_file_name} для клиента {client_code} из-за ошибки записи.")
+            send_notification(f"Временный файл {temp_file_name} создан для клиента {client_code} из-за ошибки записи.")
         except Exception as e2:
             logger.error(f"Ошибка при создании временного файла для клиента {client_code}: {e2}")
+            send_notification(f"Ошибка при создании временного файла для клиента {client_code}: {e2}")
 
 def handle_client(client_code):
     try:
@@ -232,7 +258,6 @@ def handle_client(client_code):
         client_data = df[df["Client Code"] == client_code]
         file_name = f"Client_{client_code}.xlsx"
         file_path = os.path.join(CLIENT_FILES_DIR, file_name)
-        # Если файл не существует локально, пытаемся скачать его с Google Drive
         if not os.path.exists(file_path):
             if not download_client_file(file_name, file_path):
                 logger.info(f"Файл клиента {file_name} не найден локально и не удалось скачать с Google Drive. Создаем новый файл.")
@@ -244,6 +269,7 @@ def handle_client(client_code):
             logger.info(f"Файл клиента {file_name} уже существует локально.")
     except Exception as e:
         logger.error(f"Ошибка при обработке клиента: {e}")
+        send_notification(f"Ошибка при обработке клиента {client_code}: {e}")
 
 def handle_all_clients():
     try:
@@ -255,6 +281,7 @@ def handle_all_clients():
         logger.info("Все клиенты обработаны.")
     except Exception as e:
         logger.error(f"Ошибка при обработке всех клиентов: {e}")
+        send_notification(f"Ошибка при обработке всех клиентов: {e}")
 
 if __name__ == "__main__":
     handle_all_clients()
