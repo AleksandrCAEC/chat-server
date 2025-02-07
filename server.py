@@ -8,7 +8,7 @@ import requests
 from datetime import datetime
 from clientdata import register_or_update_client, verify_client_code, update_last_visit, update_activity_status
 from client_caec import add_message_to_client_file
-from bible import load_bible_data
+from bible import load_bible_data, save_bible_pair  # Предполагаем, что функция save_bible_pair реализована
 from flask_cors import CORS
 
 # Импорты для Telegram Bot (python-telegram-bot v20+)
@@ -177,7 +177,7 @@ def home():
 ##############################################
 # Интеграция Telegram Bot для команды /bible
 ##############################################
-# Получаем TELEGRAM_BOT_TOKEN (уже использован выше) для создания приложения Telegram
+# Получаем TELEGRAM_BOT_TOKEN из переменных окружения (уже использовался выше)
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 if not TELEGRAM_BOT_TOKEN:
     logger.error("Переменная окружения TELEGRAM_BOT_TOKEN не задана!")
@@ -196,6 +196,8 @@ async def ask_action(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         context.user_data['action'] = 'add'
         await update.message.reply_text("Введите новый вопрос:")
         return BIBLE_ASK_QUESTION
+    elif action == "cancel":
+        return await cancel_bible(update, context)
     else:
         await update.message.reply_text("Неверное значение. Введите 'add' или 'cancel'.")
         return BIBLE_ASK_ACTION
@@ -210,7 +212,11 @@ async def ask_answer(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     answer = update.message.text.strip()
     question = context.user_data.get('question')
     logger.info(f"Сохраняем пару: Вопрос: {question} | Ответ: {answer}")
-    # Здесь можно добавить вызов функции сохранения пары в Bible.xlsx с Verification = "Check"
+    # Вызываем функцию сохранения пары в Bible.xlsx с отметкой "Check"
+    try:
+        save_bible_pair(question, answer)
+    except Exception as e:
+        logger.error(f"Ошибка сохранения пары в Bible.xlsx: {e}")
     await update.message.reply_text("Пара вопрос-ответ сохранена с отметкой 'Check'.")
     return ConversationHandler.END
 
@@ -221,11 +227,11 @@ async def cancel_bible(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
 bible_conv_handler = ConversationHandler(
     entry_points=[CommandHandler("bible", bible_start)],
     states={
-        BIBLE_ASK_ACTION: [MessageHandler(filters.TEXT & ~filters.COMMAND, ask_action)],
+        BIBLE_ASK_ACTION: [MessageHandler(filters.TEXT & filters.Regex(r'^(?i)(add|cancel)$'), ask_action)],
         BIBLE_ASK_QUESTION: [MessageHandler(filters.TEXT & ~filters.COMMAND, ask_question)],
         BIBLE_ASK_ANSWER: [MessageHandler(filters.TEXT & ~filters.COMMAND, ask_answer)],
     },
-    fallbacks=[CommandHandler("cancel", cancel_bible)]
+    fallbacks=[MessageHandler(filters.TEXT & filters.Regex(r'^(?i)cancel$'), cancel_bible)]
 )
 
 # Создаем приложение Telegram через ApplicationBuilder и добавляем обработчик
@@ -253,16 +259,14 @@ def telegram_webhook_test():
 ##############################################
 # Основной блок запуска
 ##############################################
-global_loop = None  # Объявляем глобальный цикл
-
+global_loop = asyncio.new_event_loop()
+asyncio.set_event_loop(global_loop)
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 8080))
     WEBHOOK_URL = os.getenv("WEBHOOK_URL")
     if not WEBHOOK_URL:
         logger.error("Переменная окружения WEBHOOK_URL не задана!")
         exit(1)
-    global_loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(global_loop)
     global_loop.run_until_complete(application.initialize())
     global_loop.run_until_complete(bot.set_webhook(WEBHOOK_URL))
     logger.info(f"Webhook установлен на {WEBHOOK_URL}")
