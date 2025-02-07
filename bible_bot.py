@@ -12,6 +12,13 @@ app = Flask(__name__)
 def webhook_test():
     return "Webhook endpoint is active", 200
 
+# Маршрут для проверки доступных путей
+@app.route('/routes', methods=['GET'])
+def list_routes():
+    routes = [str(rule) for rule in app.url_map.iter_rules()]
+    logging.info(f"Available routes: {routes}")
+    return {"available_routes": routes}, 200
+
 # Инициализируем бота и диспетчера
 TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 if not TOKEN:
@@ -21,7 +28,6 @@ bot = Bot(TOKEN)
 dispatcher = Dispatcher(bot, None, workers=0)
 
 # Пример обработки команды /bible через ConversationHandler
-# Состояния для ConversationHandler
 ASK_ACTION, ASK_QUESTION, ASK_ANSWER = range(3)
 
 def bible_start(update: Update, context: CallbackContext) -> int:
@@ -49,8 +55,6 @@ def ask_question(update: Update, context: CallbackContext) -> int:
 def ask_answer(update: Update, context: CallbackContext) -> int:
     answer = update.message.text.strip()
     question = context.user_data.get('question')
-    # Здесь можно вызвать функцию для сохранения данных в Bible.xlsx,
-    # например, save_bible_pair(question, answer)
     logging.info(f"Сохраняем пару: Вопрос: {question} | Ответ: {answer}")
     update.message.reply_text("Пара вопрос-ответ сохранена с отметкой 'Check'.")
     return ConversationHandler.END
@@ -87,4 +91,5 @@ if __name__ == '__main__':
         exit(1)
     bot.setWebhook(WEBHOOK_URL)
     logging.info(f"Webhook установлен на {WEBHOOK_URL}")
+    logging.info("Flask-сервер запущен")
     app.run(host='0.0.0.0', port=PORT)
