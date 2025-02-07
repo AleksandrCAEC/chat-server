@@ -5,7 +5,7 @@ from googleapiclient.discovery import build
 import pandas as pd
 from datetime import datetime, timedelta
 import logging
-from config import CLIENT_DATA_PATH, CLIENT_FILES_DIR  # Импортируем оба пути из config
+from config import CLIENT_DATA_PATH, CLIENT_FILES_DIR  # Импортируем константы из config.py
 
 logging.basicConfig(
     level=logging.INFO,
