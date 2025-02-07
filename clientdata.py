@@ -5,9 +5,7 @@ from googleapiclient.discovery import build
 import pandas as pd
 from datetime import datetime, timedelta
 import logging
-from config import CLIENT_DATA_PATH  # CLIENT_DATA_PATH определён в config.py
-# Если константа CLIENT_FILES_DIR нужна, импортируйте её из config:
-from config import CLIENT_FILES_DIR
+from config import CLIENT_DATA_PATH, CLIENT_FILES_DIR  # Импортируем оба пути из config
 
 logging.basicConfig(
     level=logging.INFO,
@@ -111,7 +109,6 @@ def update_activity_status():
         current_date = datetime.now()
         one_year_ago = current_date - timedelta(days=365)
         df["Client Code"] = df["Client Code"].astype(str)
-        # Обновляем статус для клиентов, у которых Last Visit меньше, чем год назад
         df.loc[pd.to_datetime(df["Last Visit"]) < one_year_ago, "Activity Status"] = "Not Active"
         df = df.sort_values(by=["Activity Status"], ascending=False)
         df.astype(str).to_excel(CLIENT_DATA_PATH, index=False)
