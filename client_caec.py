@@ -1,307 +1,224 @@
-# client_caec.py
+# clientdata.py
 import os
-import pandas as pd
-from datetime import datetime
-from openpyxl import Workbook, load_workbook
-from openpyxl.styles import Alignment, numbers
-import logging
 from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
-from googleapiclient.http import MediaIoBaseUpload, MediaIoBaseDownload
-from io import BytesIO
-from config import CLIENT_DATA_PATH  # Импортируем путь к ClientData.xlsx
+import pandas as pd
+from datetime import datetime, timedelta
+import logging
+from config import CLIENT_DATA_PATH  # Используем общий путь из config
 
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     handlers=[
-        logging.FileHandler("client_caec.log"),
+        logging.FileHandler("app.log"),
         logging.StreamHandler()
     ]
 )
 logger = logging.getLogger(__name__)
 
-# Функция для отправки уведомлений через Telegram
-def send_notification(message):
-    try:
-        import requests
-        telegram_bot_token = os.getenv("TELEGRAM_BOT_TOKEN")
-        telegram_chat_id = os.getenv("TELEGRAM_CHAT_ID")
-        if telegram_bot_token and telegram_chat_id:
-            url = f"https://api.telegram.org/bot{telegram_bot_token}/sendMessage"
-            payload = {"chat_id": telegram_chat_id, "text": message, "parse_mode": "HTML"}
-            requests.post(url, json=payload)
-    except Exception as ex:
-        logger.error(f"Ошибка при отправке уведомления: {ex}")
+# Если директория для CLIENT_DATA_PATH не существует, создаём её
+data_dir = os.path.dirname(CLIENT_DATA_PATH)
+if not os.path.exists(data_dir):
+    os.makedirs(data_dir, exist_ok=True)
 
-# Константа для директории файлов клиента
-CLIENT_FILES_DIR = "./CAEC_API_Data/BIG_DATA/Data_CAEC_client/"
+SPREADSHEET_ID = "1eGpB0hiRxXPpYN75-UKyXoar7yh-zne8r8ox-hXrS1I"
 
-if not os.path.exists(CLIENT_FILES_DIR):
+def get_sheets_service():
     try:
-        os.makedirs(CLIENT_FILES_DIR, exist_ok=True)
-        logger.info(f"Директория {CLIENT_FILES_DIR} создана.")
+        credentials = Credentials.from_service_account_file(os.getenv("GOOGLE_APPLICATION_CREDENTIALS"))
+        return build('sheets', 'v4', credentials=credentials)
     except Exception as e:
-        logger.error(f"Ошибка при создании директории {CLIENT_FILES_DIR}: {e}")
-        send_notification(f"Ошибка при создании директории {CLIENT_FILES_DIR}: {e}")
-
-# Идентификатор папки на Google Drive (если используется)
-GOOGLE_DRIVE_FOLDER_ID = "11cQYLDGKlu2Rn_9g8R_4xNA59ikhvJpS"
-
-def get_drive_service():
-    try:
-        credentials = Credentials.from_service_account_file(
-            os.getenv("GOOGLE_APPLICATION_CREDENTIALS"),
-            scopes=["https://www.googleapis.com/auth/drive"]
-        )
-        return build("drive", "v3", credentials=credentials)
-    except Exception as e:
-        logger.error(f"Ошибка инициализации Google Drive API: {e}")
-        send_notification(f"Ошибка инициализации Google Drive API: {e}")
+        logger.error(f"Ошибка инициализации Google Sheets API: {e}")
         return None
-
-def find_file_id(drive_service, file_name):
-    try:
-        response = drive_service.files().list(
-            q=f"name='{file_name}' and '{GOOGLE_DRIVE_FOLDER_ID}' in parents",
-            fields="files(id, name)"
-        ).execute()
-        files = response.get("files", [])
-        if files:
-            return files[0]["id"]
-        return None
-    except Exception as e:
-        logger.error(f"Ошибка при поиске файла на Google Drive: {e}")
-        send_notification(f"Ошибка при поиске файла {file_name} на Google Drive: {e}")
-        return None
-
-def upload_or_update_file(file_name, file_stream):
-    try:
-        drive_service = get_drive_service()
-        if not drive_service:
-            raise Exception("Google Drive API не инициализирован.")
-        file_id = find_file_id(drive_service, file_name)
-        if file_id:
-            media = MediaIoBaseUpload(file_stream, mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-            drive_service.files().update(
-                fileId=file_id,
-                media_body=media
-            ).execute()
-            logger.info(f"Файл {file_name} успешно обновлён на Google Drive.")
-        else:
-            file_metadata = {
-                "name": file_name,
-                "parents": [GOOGLE_DRIVE_FOLDER_ID]
-            }
-            media = MediaIoBaseUpload(file_stream, mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-            file = drive_service.files().create(
-                body=file_metadata,
-                media_body=media,
-                fields="id"
-            ).execute()
-            logger.info(f"Файл {file_name} успешно создан и загружен на Google Drive. ID файла: {file.get('id')}")
-    except Exception as e:
-        logger.error(f"Ошибка при загрузке/обновлении файла {file_name} на Google Drive: {e}")
-        send_notification(f"Ошибка при загрузке/обновлении файла {file_name} на Google Drive: {e}")
-
-def download_client_file(file_name, local_path):
-    """
-    Пытается скачать файл с Google Drive и сохранить его по local_path.
-    Возвращает True, если скачивание успешно, иначе False.
-    """
-    try:
-        drive_service = get_drive_service()
-        file_id = find_file_id(drive_service, file_name)
-        if file_id:
-            from googleapiclient.http import MediaIoBaseDownload
-            fh = BytesIO()
-            request = drive_service.files().get_media(fileId=file_id)
-            downloader = MediaIoBaseDownload(fh, request)
-            done = False
-            while not done:
-                status, done = downloader.next_chunk()
-                logger.info(f"Скачивание {int(status.progress() * 100)}% завершено.")
-            with open(local_path, "wb") as f:
-                f.write(fh.getvalue())
-            logger.info(f"Файл {file_name} скачан с Google Drive и сохранён в {local_path}.")
-            return True
-        else:
-            logger.info(f"Файл {file_name} не найден на Google Drive.")
-            return False
-    except Exception as e:
-        logger.error(f"Ошибка при скачивании файла {file_name} с Google Drive: {e}")
-        send_notification(f"Ошибка при скачивании файла {file_name} с Google Drive: {e}")
-        return False
 
 def load_client_data():
-    if not os.path.exists(CLIENT_DATA_PATH):
-        try:
-            from clientdata import load_client_data as load_from_gs
-            df = load_from_gs()
-            df.astype(str).to_excel(CLIENT_DATA_PATH, index=False)
-            return df
-        except Exception as e:
-            logger.error(f"Ошибка создания ClientData.xlsx: {e}")
-            send_notification(f"Ошибка создания ClientData.xlsx: {e}")
-            return pd.DataFrame()
     try:
-        df = pd.read_excel(CLIENT_DATA_PATH)
+        logger.info("Загрузка данных из Google Sheets...")
+        sheets_service = get_sheets_service()
+        if not sheets_service:
+            raise Exception("Google Sheets API не инициализирован.")
+        range_name = "Sheet1!A2:G1000"
+        result = sheets_service.spreadsheets().values().get(
+            spreadsheetId=SPREADSHEET_ID,
+            range=range_name
+        ).execute()
+        values = result.get('values', [])
+        if not values:
+            logger.info("Данные не найдены.")
+            return pd.DataFrame(columns=["Client Code", "Name", "Phone", "Email", "Created Date", "Last Visit", "Activity Status"])
+        df = pd.DataFrame(values, columns=["Client Code", "Name", "Phone", "Email", "Created Date", "Last Visit", "Activity Status"])
+        df["Client Code"] = df["Client Code"].astype(str)
+        logger.info(f"Загружены данные: {df}")
         return df
     except Exception as e:
-        logger.error(f"Ошибка загрузки данных из ClientData.xlsx: {e}")
-        send_notification(f"Ошибка загрузки данных из ClientData.xlsx: {e}")
-        return pd.DataFrame()
+        logger.error(f"Ошибка загрузки данных: {e}")
+        return pd.DataFrame(columns=["Client Code", "Name", "Phone", "Email", "Created Date", "Last Visit", "Activity Status"])
 
-def create_client_file(client_code, client_data):
+def generate_unique_code():
     try:
-        file_name = f"Client_{client_code}.xlsx"
-        # Создаем файл через Google Sheets API
-        sheets_service = get_sheets_service()
-        # Подготавливаем данные: заголовки и начальные данные клиента
-        values = [
-            ["Client", "Assistant", "Client Code", "Name", "Phone", "Email", "Created Date"],
-            ["", "", client_data["Client Code"], client_data["Name"], client_data["Phone"], client_data["Email"], client_data["Created Date"]]
-        ]
-        body = {
-            "properties": {
-                "title": file_name
-            },
-            "sheets": [
-                {
-                    "data": [
-                        {
-                            "startRow": 0,
-                            "startColumn": 0,
-                            "rowData": [{"values": [{"userEnteredValue": {"stringValue": cell}} for cell in row]} for row in values]
-                        }
-                    ]
-                }
-            ]
-        }
-        result = sheets_service.spreadsheets().create(body=body, fields="spreadsheetId").execute()
-        spreadsheet_id = result.get("spreadsheetId")
-        logger.info(f"Создан файл клиента {file_name} с spreadsheetId: {spreadsheet_id}")
-        # Перемещаем файл в нужную папку через Drive API
-        drive_service = get_drive_service()
-        drive_service.files().update(
-            fileId=spreadsheet_id,
-            addParents=GOOGLE_DRIVE_FOLDER_ID,
-            fields="id, parents"
-        ).execute()
-        return spreadsheet_id
+        existing_codes = set(load_client_data()["Client Code"])
+        while True:
+            code = f"CAEC{str(datetime.now().timestamp()).replace('.', '')[-7:]}"
+            if code not in existing_codes:
+                return code
     except Exception as e:
-        logger.error(f"Ошибка при создании файла клиента {file_name}: {e}")
-        send_notification(f"Ошибка при создании файла клиента {client_code}: {e}")
+        logger.error(f"Ошибка генерации уникального кода: {e}")
         raise
 
-def add_message_to_client_file(client_code, message, is_assistant=False):
-    """
-    Добавляет новое сообщение в Google Sheets файл клиента Client_{client_code}.xlsx.
-    Если файл уже существует, данные дописываются в конец.
-    Если возникает ошибка записи, создаётся временный файл Temp_Client_{client_code}.xlsx,
-    и отправляется уведомление через Telegram.
-    """
+def save_client_data(client_code, name, phone, email, created_date, last_visit, activity_status):
     try:
+        logger.info("Подключение к Google Sheets...")
         sheets_service = get_sheets_service()
-        spreadsheet_id = find_client_file_id(client_code)
-        if not spreadsheet_id:
-            # Если файл не найден на Google Drive, создаём его
-            from clientdata import verify_client_code
-            client_data = verify_client_code(client_code)
-            if not client_data:
-                raise Exception(f"Данные клиента {client_code} не найдены.")
-            spreadsheet_id = create_client_file(client_code, client_data)
-        current_time = datetime.now().strftime("%d.%m.%y %H:%M")
-        if is_assistant:
-            new_row = [ "", f"{current_time} - {message}", "", "", "", "", "" ]
-        else:
-            new_row = [ f"{current_time} - {message}", "", "", "", "", "", "" ]
-        body = {"values": [new_row]}
-        result = sheets_service.spreadsheets().values().append(
-            spreadsheetId=spreadsheet_id,
-            range="Sheet1!A:G",
+        if not sheets_service:
+            raise Exception("Google Sheets API не инициализирован.")
+        values = [[str(client_code), name, phone, email, created_date, last_visit, activity_status]]
+        body = {'values': values}
+        logger.info(f"Отправка данных в Google Sheets: {values}")
+        response = sheets_service.spreadsheets().values().append(
+            spreadsheetId=SPREADSHEET_ID,
+            range="Sheet1!A2:G2",
             valueInputOption="RAW",
-            insertDataOption="INSERT_ROWS",
             body=body
         ).execute()
-        logger.info(f"Сообщение добавлено в файл клиента {client_code}. Ответ API: {result}")
+        logger.info(f"Ответ от Google API: {response}")
     except Exception as e:
-        logger.error(f"Ошибка при добавлении сообщения в файл клиента {client_code}: {e}")
-        send_notification(f"Ошибка при добавлении сообщения в файл клиента {client_code}: {e}")
-        try:
-            temp_file_name = f"Temp_Client_{client_code}.xlsx"
-            # Создаем временный файл через создание нового Google Sheets файла
-            from clientdata import verify_client_code
-            client_data = verify_client_code(client_code)
-            if not client_data:
-                raise Exception(f"Данные клиента {client_code} не найдены.")
-            temp_spreadsheet_id = create_client_file(f"Temp_{client_code}", client_data)
-            body = {"values": [new_row]}
-            result = sheets_service.spreadsheets().values().append(
-                spreadsheetId=temp_spreadsheet_id,
-                range="Sheet1!A:G",
-                valueInputOption="RAW",
-                insertDataOption="INSERT_ROWS",
-                body=body
-            ).execute()
-            logger.error(f"Временный файл для клиента {client_code} создан. Ответ API: {result}")
-            send_notification(f"Временный файл для клиента {client_code} создан из-за ошибки записи.")
-        except Exception as e2:
-            logger.error(f"Ошибка при создании временного файла для клиента {client_code}: {e2}")
-            send_notification(f"Ошибка при создании временного файла для клиента {client_code}: {e2}")
-            raise
-
-def find_client_file_id(client_code):
-    """
-    Ищет Google Sheets файл клиента по имени, который содержит "Client_{client_code}".
-    Возвращает spreadsheetId, если файл найден, иначе None.
-    """
-    file_name_fragment = f"Client_{client_code}"
-    drive_service = get_drive_service()
-    try:
-        query = f"name contains '{file_name_fragment}' and '{GOOGLE_DRIVE_FOLDER_ID}' in parents and mimeType='application/vnd.google-apps.spreadsheet'"
-        response = drive_service.files().list(q=query, fields="files(id, name)").execute()
-        files = response.get("files", [])
-        if files:
-            logger.info(f"Найден файл для клиента {client_code}: {files[0]['name']}")
-            return files[0]["id"]
-        logger.info(f"Файл для клиента {client_code} не найден на Google Drive.")
-        return None
-    except Exception as e:
-        logger.error(f"Ошибка при поиске файла для клиента {client_code}: {e}")
-        send_notification(f"Ошибка при поиске файла для клиента {client_code}: {e}")
+        logger.error(f"Ошибка записи в Google Sheets: {e}")
         raise
 
-def handle_client(client_code):
     try:
-        logger.info(f"Обработка клиента с кодом: {client_code}")
         df = load_client_data()
-        client_data = df[df["Client Code"] == client_code]
-        if client_data.empty:
-            logger.warning(f"Клиент с кодом {client_code} не найден в ClientData.xlsx.")
-            send_notification(f"Клиент с кодом {client_code} не найден в ClientData.xlsx.")
+        new_data = pd.DataFrame([{
+            "Client Code": str(client_code),
+            "Name": name,
+            "Phone": phone,
+            "Email": email,
+            "Created Date": created_date,
+            "Last Visit": last_visit,
+            "Activity Status": activity_status
+        }])
+        df = pd.concat([df, new_data], ignore_index=True)
+        df.astype(str).to_excel(CLIENT_DATA_PATH, index=False)
+        logger.info(f"Данные сохранены в ClientData.xlsx: {client_code}, {name}, {phone}, {email}")
+    except Exception as e:
+        logger.error(f"Ошибка сохранения в локальный файл: {e}")
+
+def update_activity_status():
+    try:
+        df = load_client_data()
+        current_date = datetime.now()
+        one_year_ago = current_date - timedelta(days=365)
+        df["Client Code"] = df["Client Code"].astype(str)
+        # Обновляем статус для клиентов, у которых Last Visit меньше, чем год назад
+        df.loc[pd.to_datetime(df["Last Visit"]) < one_year_ago, "Activity Status"] = "Not Active"
+        # Сортировка: "Not Active" могут быть в начале или конце – измените по необходимости
+        df = df.sort_values(by=["Activity Status"], ascending=False)
+        df.astype(str).to_excel(CLIENT_DATA_PATH, index=False)
+        logger.info("Статус активности клиентов обновлен.")
+    except Exception as e:
+        logger.error(f"Ошибка при обновлении статуса активности: {e}")
+
+def update_last_visit(client_code):
+    try:
+        df = load_client_data()
+        last_visit = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        df["Client Code"] = df["Client Code"].astype(str)
+        # Обновляем только те строки, где Client Code совпадает
+        mask = df["Client Code"] == str(client_code)
+        if mask.sum() == 0:
+            logger.warning(f"Клиент с кодом {client_code} не найден для обновления Last Visit.")
         else:
-            spreadsheet_id = find_client_file_id(client_code)
-            if not spreadsheet_id:
-                logger.info(f"Файл для клиента {client_code} не найден на Google Drive. Создаем новый файл.")
-                spreadsheet_id = create_client_file(client_code, client_data.iloc[0].to_dict())
-            else:
-                logger.info(f"Файл для клиента {client_code} найден на Google Drive.")
+            df.loc[mask, "Last Visit"] = last_visit
+            df.astype(str).to_excel(CLIENT_DATA_PATH, index=False)
+            logger.info(f"Last Visit обновлён для клиента {client_code}: {last_visit}")
+        return True
     except Exception as e:
-        logger.error(f"Ошибка при обработке клиента {client_code}: {e}")
-        send_notification(f"Ошибка при обработке клиента {client_code}: {e}")
+        logger.error(f"Ошибка обновления Last Visit для клиента {client_code}: {e}")
+        try:
+            from client_caec import send_notification
+            send_notification(f"Ошибка обновления Last Visit для клиента {client_code}: {e}")
+        except Exception as ex:
+            logger.error(f"Ошибка отправки уведомления об обновлении Last Visit: {ex}")
+        return False
 
-def handle_all_clients():
+def register_or_update_client(data):
     try:
-        logger.info("Обработка всех клиентов из ClientData.xlsx...")
         df = load_client_data()
-        for _, row in df.iterrows():
-            client_code = row["Client Code"]
+        email = data.get("email")
+        phone = data.get("phone")
+        name = data.get("name", "Unknown")
+        existing_client = df[(df["Email"] == email) | (df["Phone"] == phone)]
+        if not existing_client.empty:
+            client_code = existing_client.iloc[0]["Client Code"]
+            created_date = existing_client.iloc[0]["Created Date"]
+            last_visit = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            activity_status = "Active"
+            if email != existing_client.iloc[0]["Email"] or phone != existing_client.iloc[0]["Phone"]:
+                save_client_data(
+                    client_code=client_code,
+                    name=name,
+                    phone=phone,
+                    email=email,
+                    created_date=created_date,
+                    last_visit=last_visit,
+                    activity_status=activity_status
+                )
+            else:
+                df.loc[df["Client Code"] == str(client_code), "Last Visit"] = last_visit
+                df.astype(str).to_excel(CLIENT_DATA_PATH, index=False)
+            # Локальный импорт для избежания круговой зависимости
+            try:
+                from client_caec import handle_client
+                handle_client(client_code)
+            except Exception as e_import:
+                logger.error(f"Ошибка импорта handle_client: {e_import}")
+            return {
+                "uniqueCode": client_code,
+                "message": f"Добро пожаловать обратно, {name}! Ваш код: {client_code}.",
+                "name": name,
+                "email": email,
+                "phone": phone,
+                "isNewClient": False
+            }
+        client_code = generate_unique_code()
+        created_date = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        last_visit = created_date
+        activity_status = "Active"
+        save_client_data(
+            client_code=client_code,
+            name=name,
+            phone=phone,
+            email=email,
+            created_date=created_date,
+            last_visit=last_visit,
+            activity_status=activity_status
+        )
+        try:
+            from client_caec import handle_client
             handle_client(client_code)
-        logger.info("Все клиенты обработаны.")
+        except Exception as e_import:
+            logger.error(f"Ошибка импорта handle_client при регистрации нового клиента: {e_import}")
+        update_activity_status()
+        return {
+            "uniqueCode": client_code,
+            "message": f"Добро пожаловать, {name}! Ваш код: {client_code}.",
+            "name": name,
+            "email": email,
+            "phone": phone,
+            "isNewClient": True
+        }
     except Exception as e:
-        logger.error(f"Ошибка при обработке всех клиентов: {e}")
-        send_notification(f"Ошибка при обработке всех клиентов: {e}")
+        logger.error(f"Ошибка при регистрации/обновлении клиента: {e}")
+        raise
 
-if __name__ == "__main__":
-    handle_all_clients()
+def verify_client_code(code):
+    try:
+        df = load_client_data()
+        code = str(code)
+        client_data = df[df["Client Code"] == code]
+        if not client_data.empty:
+            return client_data.iloc[0].to_dict()
+        return None
+    except Exception as e:
+        logger.error(f"Ошибка при верификации кода клиента: {e}")
+        return None
