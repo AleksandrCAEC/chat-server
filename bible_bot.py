@@ -1,34 +1,36 @@
+# bible_bot.py
 import os
 import logging
+from flask import Blueprint, request
 from telegram import Update, Bot
-from telegram.ext import Dispatcher, CommandHandler, MessageHandler, Filters, ConversationHandler, CallbackContext
-from flask import Flask, request
+from telegram.ext import (
+    Dispatcher,
+    CommandHandler,
+    MessageHandler,
+    Filters,
+    ConversationHandler,
+    CallbackContext
+)
 
-# Инициализация Flask-приложения
-app = Flask(__name__)
+# Создаем blueprint
+bible_bp = Blueprint('bible', __name__)
 
-# Добавляем тестовый маршрут для проверки
-@app.route('/webhook_test', methods=['GET'])
-def webhook_test():
-    return "Webhook endpoint is active", 200
+# Настройка логирования
+logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
+logger = logging.getLogger(__name__)
 
-# Маршрут для проверки доступных путей
-@app.route('/routes', methods=['GET'])
-def list_routes():
-    routes = [str(rule) for rule in app.url_map.iter_rules()]
-    logging.info(f"Available routes: {routes}")
-    return {"available_routes": routes}, 200
+# Состояния для ConversationHandler
+ASK_ACTION, ASK_QUESTION, ASK_ANSWER = range(3)
 
 # Инициализируем бота и диспетчера
 TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 if not TOKEN:
-    logging.error("Переменная окружения TELEGRAM_BOT_TOKEN не задана!")
-    exit(1)
+    logger.error("Переменная окружения TELEGRAM_BOT_TOKEN не задана!")
+    raise Exception("TELEGRAM_BOT_TOKEN не задан")
 bot = Bot(TOKEN)
 dispatcher = Dispatcher(bot, None, workers=0)
 
-# Пример обработки команды /bible через ConversationHandler
-ASK_ACTION, ASK_QUESTION, ASK_ANSWER = range(3)
+# Обработчики для команды /bible
 
 def bible_start(update: Update, context: CallbackContext) -> int:
     update.message.reply_text(
@@ -55,7 +57,8 @@ def ask_question(update: Update, context: CallbackContext) -> int:
 def ask_answer(update: Update, context: CallbackContext) -> int:
     answer = update.message.text.strip()
     question = context.user_data.get('question')
-    logging.info(f"Сохраняем пару: Вопрос: {question} | Ответ: {answer}")
+    # Здесь необходимо добавить сохранение пары (question, answer) в Bible.xlsx с Verification="Check"
+    logger.info(f"Сохраняем пару: Вопрос: {question} | Ответ: {answer}")
     update.message.reply_text("Пара вопрос-ответ сохранена с отметкой 'Check'.")
     return ConversationHandler.END
 
@@ -63,7 +66,6 @@ def cancel(update: Update, context: CallbackContext) -> int:
     update.message.reply_text("Операция отменена.")
     return ConversationHandler.END
 
-# Регистрируем ConversationHandler
 conv_handler = ConversationHandler(
     entry_points=[CommandHandler('bible', bible_start)],
     states={
@@ -75,21 +77,14 @@ conv_handler = ConversationHandler(
 )
 dispatcher.add_handler(conv_handler)
 
-# Определяем маршрут для вебхука
-@app.route('/webhook', methods=['POST'])
+# Маршрут для вебхука, по которому Telegram будет отправлять обновления
+@bible_bp.route('/webhook', methods=['POST'])
 def webhook_handler():
     update = Update.de_json(request.get_json(force=True), bot)
     dispatcher.process_update(update)
     return 'OK', 200
 
-# Основной блок запуска
-if __name__ == '__main__':
-    PORT = int(os.getenv("PORT", "8080"))
-    WEBHOOK_URL = os.getenv("WEBHOOK_URL")
-    if not WEBHOOK_URL:
-        logging.error("Переменная окружения WEBHOOK_URL не задана!")
-        exit(1)
-    bot.setWebhook(WEBHOOK_URL)
-    logging.info(f"Webhook установлен на {WEBHOOK_URL}")
-    logging.info("Flask-сервер запущен")
-    app.run(host='0.0.0.0', port=PORT)
+# Тестовый маршрут, чтобы проверить, что Flask-приложение работает
+@bible_bp.route('/webhook_test', methods=['GET'])
+def webhook_test():
+    return "Webhook endpoint is active", 200
