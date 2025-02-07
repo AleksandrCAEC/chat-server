@@ -24,6 +24,7 @@ logger = logging.getLogger(__name__)
 # Константа для директории файлов клиента
 CLIENT_FILES_DIR = "./CAEC_API_Data/BIG_DATA/Data_CAEC_client/"
 
+# Если директория для файлов клиента не существует, создаём её
 if not os.path.exists(CLIENT_FILES_DIR):
     os.makedirs(CLIENT_FILES_DIR, exist_ok=True)
 
@@ -106,7 +107,9 @@ def create_client_file(client_code, client_data):
         output = BytesIO()
         wb = Workbook()
         ws = wb.active
+        # Записываем заголовки
         ws.append(["Client", "Assistant", "Client Code", "Name", "Phone", "Email", "Created Date"])
+        # Записываем начальные данные клиента
         ws.append([
             "",  
             "",  
@@ -116,6 +119,7 @@ def create_client_file(client_code, client_data):
             client_data["Email"],
             client_data["Created Date"]
         ])
+        # Устанавливаем формат ячеек как текст
         for row in ws.iter_rows(min_row=1, max_row=ws.max_row):
             for cell in row:
                 cell.number_format = numbers.FORMAT_TEXT
@@ -139,10 +143,12 @@ def add_message_to_client_file(client_code, message, is_assistant=False):
     try:
         file_name = f"Client_{client_code}.xlsx"
         file_path = os.path.join(CLIENT_FILES_DIR, file_name)
+        # Если файл существует, открываем его, иначе создаём новый
         if os.path.exists(file_path):
             wb = load_workbook(file_path)
             ws = wb.active
         else:
+            # Если файла нет, создаем его один раз с заголовками и начальными данными
             wb = Workbook()
             ws = wb.active
             ws.append(["Client", "Assistant", "Client Code", "Name", "Phone", "Email", "Created Date"])
@@ -160,10 +166,12 @@ def add_message_to_client_file(client_code, message, is_assistant=False):
                 client_data["Created Date"]
             ])
         current_time = datetime.now().strftime("%d.%m.%y %H:%M")
+        # Добавляем новую строку с сообщением; предыдущие строки остаются нетронутыми
         if is_assistant:
             ws.append(["", f"{current_time} - {message}", "", "", "", "", ""])
         else:
             ws.append([f"{current_time} - {message}", "", "", "", "", "", ""])
+        # Принудительно задаём формат ячеек как текст
         for row in ws.iter_rows(min_row=1, max_row=ws.max_row):
             for cell in row:
                 cell.number_format = numbers.FORMAT_TEXT
@@ -186,6 +194,7 @@ def handle_client(client_code):
             client_data = client_data.iloc[0].to_dict()
             file_name = f"Client_{client_code}.xlsx"
             file_path = os.path.join(CLIENT_FILES_DIR, file_name)
+            # Если файл не существует, создаем его; иначе ничего не делаем (чтобы сохранить историю)
             if not os.path.exists(file_path):
                 logger.info(f"Создание файла клиента: {file_name}")
                 create_client_file(client_code, client_data)
