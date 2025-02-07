@@ -8,7 +8,7 @@ import requests
 from datetime import datetime
 from clientdata import register_or_update_client, verify_client_code, update_last_visit, update_activity_status
 from client_caec import add_message_to_client_file
-from bible import load_bible_data, save_bible_pair  # Предполагаем, что функция save_bible_pair реализована
+from bible import load_bible_data, save_bible_pair  # Функция save_bible_pair должна быть реализована в bible.py
 from flask_cors import CORS
 
 # Импорты для Telegram Bot (python-telegram-bot v20+)
@@ -48,11 +48,15 @@ logger.info("Текущие переменные окружения:")
 pprint.pprint(dict(os.environ))
 
 ###############################################
-# Тестовый маршрут для проверки работы Flask
+# Тестовые маршруты для проверки работы Flask
 ###############################################
 @app.route('/test', methods=['GET'])
 def test():
     return "Test route works", 200
+
+@app.route('/webhook_test', methods=['GET'])
+def telegram_webhook_test():
+    return "Webhook endpoint is active", 200
 
 ###############################################
 # Основные серверные эндпоинты (регистрация, чат и т.д.)
@@ -212,7 +216,6 @@ async def ask_answer(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     answer = update.message.text.strip()
     question = context.user_data.get('question')
     logger.info(f"Сохраняем пару: Вопрос: {question} | Ответ: {answer}")
-    # Вызываем функцию сохранения пары в Bible.xlsx с отметкой "Check"
     try:
         save_bible_pair(question, answer)
     except Exception as e:
@@ -227,11 +230,11 @@ async def cancel_bible(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
 bible_conv_handler = ConversationHandler(
     entry_points=[CommandHandler("bible", bible_start)],
     states={
-        BIBLE_ASK_ACTION: [MessageHandler(filters.TEXT & filters.Regex(r'^(?i)(add|cancel)$'), ask_action)],
+        BIBLE_ASK_ACTION: [MessageHandler(filters.TEXT & filters.Regex(r'(?i)^(add|cancel)$'), ask_action)],
         BIBLE_ASK_QUESTION: [MessageHandler(filters.TEXT & ~filters.COMMAND, ask_question)],
         BIBLE_ASK_ANSWER: [MessageHandler(filters.TEXT & ~filters.COMMAND, ask_answer)],
     },
-    fallbacks=[MessageHandler(filters.TEXT & filters.Regex(r'^(?i)cancel$'), cancel_bible)]
+    fallbacks=[MessageHandler(filters.TEXT & filters.Regex(r'(?i)^cancel$'), cancel_bible)]
 )
 
 # Создаем приложение Telegram через ApplicationBuilder и добавляем обработчик
@@ -250,11 +253,6 @@ def telegram_webhook():
     except Exception as e:
         logger.error(f"Ошибка обработки Telegram update: {e}")
         return jsonify({'error': str(e)}), 500
-
-# Тестовый маршрут для проверки работы вебхука Telegram (GET)
-@app.route('/webhook_test', methods=['GET'])
-def telegram_webhook_test():
-    return "Webhook endpoint is active", 200
 
 ##############################################
 # Основной блок запуска
