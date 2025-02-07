@@ -6,13 +6,20 @@ from openpyxl.styles import Alignment, numbers
 import logging
 
 logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
 
-# Формируем абсолютный путь к файлу Bible.xlsx, относительно рабочей директории
-BIBLE_FILE_PATH = os.path.join(os.getcwd(), "CAEC_API_Data", "BIG_DATA", "Bible.xlsx")
+# Определяем путь к файлу Bible.xlsx относительно текущего рабочего каталога.
+# Добавляем вывод os.getcwd(), чтобы убедиться, что путь соответствует ожиданиям.
+current_dir = os.getcwd()
+logger.info(f"Текущий рабочий каталог: {current_dir}")
+
+# Формируем абсолютный путь к файлу Bible.xlsx
+BIBLE_FILE_PATH = os.path.join(current_dir, "CAEC_API_Data", "BIG_DATA", "Bible.xlsx")
+logger.info(f"Путь к Bible.xlsx: {BIBLE_FILE_PATH}")
 
 def ensure_bible_file():
     """
-    Проверяет наличие файла Bible.xlsx и создаёт его, если отсутствует, с нужными заголовками.
+    Проверяет наличие файла Bible.xlsx и создаёт его с заголовками, если отсутствует.
     """
     directory = os.path.dirname(BIBLE_FILE_PATH)
     if not os.path.exists(directory):
@@ -42,6 +49,7 @@ def load_bible_data():
     try:
         ensure_bible_file()
         df = pd.read_excel(BIBLE_FILE_PATH)
+        logger.info(f"Bible.xlsx загружен. Количество записей: {len(df)}")
         return df
     except Exception as e:
         logger.error(f"Ошибка при загрузке Bible.xlsx: {e}")
@@ -50,7 +58,7 @@ def load_bible_data():
 def save_bible_pair(question, answer):
     """
     Добавляет новую строку в Bible.xlsx с вопросом, ответом и статусом "Check".
-    После сохранения открывает файл и логирует количество строк для отладки.
+    После сохранения логирует количество строк.
     
     :param question: Текст вопроса.
     :param answer: Текст ответа.
@@ -60,14 +68,16 @@ def save_bible_pair(question, answer):
         ensure_bible_file()
         wb = load_workbook(BIBLE_FILE_PATH)
         ws = wb.active
+        # Добавляем новую строку с вопросом, ответом и статусом "Check"
         ws.append([question, answer, "Check"])
         wb.save(BIBLE_FILE_PATH)
         logger.info(f"Новая пара добавлена: FAQ='{question}', Answers='{answer}', Verification='Check'")
-        # Дополнительная проверка: открыть файл повторно и посчитать количество строк
+        
+        # Повторно открываем файл и считаем число строк для проверки
         wb2 = load_workbook(BIBLE_FILE_PATH)
         ws2 = wb2.active
         row_count = ws2.max_row
-        logger.info(f"После сохранения в Bible.xlsx, количество строк: {row_count}")
+        logger.info(f"После сохранения, количество строк в Bible.xlsx: {row_count}")
     except Exception as e:
         logger.error(f"Ошибка при сохранении пары в Bible.xlsx: {e}")
         raise
