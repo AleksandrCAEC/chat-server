@@ -7,7 +7,7 @@ import logging
 from datetime import datetime
 from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
-from googleapiclient.http import MediaIoBaseUpload
+from googleapiclient.http import MediaIoBaseUpload, MediaIoBaseDownload
 from io import BytesIO
 from config import CLIENT_DATA_PATH  # Импортируем путь к ClientData.xlsx
 
@@ -82,6 +82,34 @@ def upload_or_update_file(file_name, file_stream):
     except Exception as e:
         logger.error(f"Ошибка при загрузке/обновлении файла на Google Drive: {e}")
 
+def download_client_file(file_name, local_path):
+    """
+    Пытается скачать файл с Google Drive и сохранить его по local_path.
+    Возвращает True, если скачивание успешно, иначе False.
+    """
+    try:
+        drive_service = get_drive_service()
+        file_id = find_file_id(drive_service, file_name)
+        if file_id:
+            from googleapiclient.http import MediaIoBaseDownload
+            fh = BytesIO()
+            request = drive_service.files().get_media(fileId=file_id)
+            downloader = MediaIoBaseDownload(fh, request)
+            done = False
+            while not done:
+                status, done = downloader.next_chunk()
+                logger.info(f"Скачивание {int(status.progress() * 100)}% завершено.")
+            with open(local_path, "wb") as f:
+                f.write(fh.getvalue())
+            logger.info(f"Файл {file_name} скачан с Google Drive и сохранён в {local_path}.")
+            return True
+        else:
+            logger.info(f"Файл {file_name} не найден на Google Drive.")
+            return False
+    except Exception as e:
+        logger.error(f"Ошибка при скачивании файла {file_name} с Google Drive: {e}")
+        return False
+
 def load_client_data():
     if not os.path.exists(CLIENT_DATA_PATH):
         try:
@@ -118,7 +146,6 @@ def create_client_file(client_code, client_data):
             client_data["Email"],
             client_data["Created Date"]
         ])
-        # Задаем формат всех ячеек как текст
         for row in ws.iter_rows(min_row=1, max_row=ws.max_row):
             for cell in row:
                 cell.number_format = numbers.FORMAT_TEXT
@@ -142,31 +169,30 @@ def add_message_to_client_file(client_code, message, is_assistant=False):
     """
     Добавляет новое сообщение в файл клиента Client_CAECxxxxxxx.xlsx.
     Если файл существует, данные дописываются в конец.
-    В случае ошибки записи оригинального файла, создаётся временный файл Temp_Client_CAECxxxxxxx.xlsx.
+    Если возникает ошибка записи, создается временный файл Temp_Client_CAECxxxxxxx.xlsx.
     """
     try:
         file_name = f"Client_{client_code}.xlsx"
         file_path = os.path.join(CLIENT_FILES_DIR, file_name)
-        # Если файл существует, открываем его; если нет, создаём его один раз
-        if os.path.exists(file_path):
-            wb = load_workbook(file_path)
-            ws = wb.active
-        else:
-            wb = Workbook()
-            ws = wb.active
-            ws.append(["Client", "Assistant", "Client Code", "Name", "Phone", "Email", "Created Date"])
-            from clientdata import verify_client_code
-            client_data = verify_client_code(client_code)
-            if not client_data:
-                raise Exception(f"Данные клиента {client_code} не найдены.")
-            ws.append(["", "", client_data["Client Code"], client_data["Name"], client_data["Phone"], client_data["Email"], client_data["Created Date"]])
+        # Если файл не существует локально, пытаемся скачать его с Google Drive
+        if not os.path.exists(file_path):
+            if not download_client_file(file_name, file_path):
+                # Если скачать не удалось, создаем новый файл с заголовками и начальными данными
+                from clientdata import verify_client_code
+                client_data = verify_client_code(client_code)
+                if not client_data:
+                    raise Exception(f"Данные клиента {client_code} не найдены.")
+                create_client_file(client_code, client_data)
+        # Загружаем существующий файл
+        wb = load_workbook(file_path)
+        ws = wb.active
         current_time = datetime.now().strftime("%d.%m.%y %H:%M")
         if is_assistant:
             new_row = ["", f"{current_time} - {message}", "", "", "", "", ""]
         else:
             new_row = [f"{current_time} - {message}", "", "", "", "", "", ""]
         ws.append(new_row)
-        # Устанавливаем формат для новой строки
+        # Устанавливаем формат ячеек для новой строки
         for row in ws.iter_rows(min_row=ws.max_row, max_row=ws.max_row):
             for cell in row:
                 cell.number_format = numbers.FORMAT_TEXT
@@ -177,14 +203,12 @@ def add_message_to_client_file(client_code, message, is_assistant=False):
         logger.info(f"Сообщение добавлено в файл клиента {client_code}.")
     except Exception as e:
         logger.error(f"Ошибка при добавлении сообщения в файл клиента {client_code}: {e}")
-        # При ошибке не перезаписываем оригинальный файл, а создаем временный файл
         try:
             temp_file_name = f"Temp_Client_{client_code}.xlsx"
             temp_file_path = os.path.join(CLIENT_FILES_DIR, temp_file_name)
             # Если оригинальный файл существует, копируем его содержимое
             if os.path.exists(file_path):
                 wb_temp = load_workbook(file_path)
-                ws_temp = wb_temp.active
             else:
                 wb_temp = Workbook()
                 ws_temp = wb_temp.active
@@ -194,8 +218,43 @@ def add_message_to_client_file(client_code, message, is_assistant=False):
                 if not client_data:
                     raise Exception(f"Данные клиента {client_code} не найдены.")
                 ws_temp.append(["", "", client_data["Client Code"], client_data["Name"], client_data["Phone"], client_data["Email"], client_data["Created Date"]])
+            ws_temp = wb_temp.active
             ws_temp.append(new_row)
             wb_temp.save(temp_file_path)
             logger.error(f"Создан временный файл {temp_file_name} для клиента {client_code} из-за ошибки записи.")
         except Exception as e2:
             logger.error(f"Ошибка при создании временного файла для клиента {client_code}: {e2}")
+
+def handle_client(client_code):
+    try:
+        logger.info(f"Обработка клиента с кодом: {client_code}")
+        df = load_client_data()
+        client_data = df[df["Client Code"] == client_code]
+        file_name = f"Client_{client_code}.xlsx"
+        file_path = os.path.join(CLIENT_FILES_DIR, file_name)
+        # Если файл не существует локально, пытаемся скачать его с Google Drive
+        if not os.path.exists(file_path):
+            if not download_client_file(file_name, file_path):
+                logger.info(f"Файл клиента {file_name} не найден локально и не удалось скачать с Google Drive. Создаем новый файл.")
+                if not client_data.empty:
+                    create_client_file(client_code, client_data.iloc[0].to_dict())
+                else:
+                    logger.warning(f"Клиент с кодом {client_code} не найден в ClientData.xlsx.")
+        else:
+            logger.info(f"Файл клиента {file_name} уже существует локально.")
+    except Exception as e:
+        logger.error(f"Ошибка при обработке клиента: {e}")
+
+def handle_all_clients():
+    try:
+        logger.info("Обработка всех клиентов из ClientData.xlsx...")
+        df = load_client_data()
+        for _, row in df.iterrows():
+            client_code = row["Client Code"]
+            handle_client(client_code)
+        logger.info("Все клиенты обработаны.")
+    except Exception as e:
+        logger.error(f"Ошибка при обработке всех клиентов: {e}")
+
+if __name__ == "__main__":
+    handle_all_clients()
