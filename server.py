@@ -177,7 +177,7 @@ def home():
 ##############################################
 # Интеграция Telegram Bot для команды /bible
 ##############################################
-# Получаем TELEGRAM_BOT_TOKEN из переменных окружения (уже использовался выше)
+# Получаем TELEGRAM_BOT_TOKEN (уже использован выше) для создания приложения Telegram
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 if not TELEGRAM_BOT_TOKEN:
     logger.error("Переменная окружения TELEGRAM_BOT_TOKEN не задана!")
@@ -239,7 +239,6 @@ def telegram_webhook():
     try:
         data = request.get_json(force=True)
         update = Update.de_json(data, bot)
-        # Используем глобальный цикл для обработки обновления
         global_loop.run_until_complete(application.process_update(update))
         return 'OK', 200
     except Exception as e:
@@ -254,13 +253,14 @@ def telegram_webhook_test():
 ##############################################
 # Основной блок запуска
 ##############################################
+global_loop = None  # Объявляем глобальный цикл
+
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 8080))
     WEBHOOK_URL = os.getenv("WEBHOOK_URL")
     if not WEBHOOK_URL:
         logger.error("Переменная окружения WEBHOOK_URL не задана!")
         exit(1)
-    # Создаем глобальный цикл, который будем использовать для обработки Telegram-обновлений
     global_loop = asyncio.new_event_loop()
     asyncio.set_event_loop(global_loop)
     global_loop.run_until_complete(application.initialize())
