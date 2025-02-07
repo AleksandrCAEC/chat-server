@@ -1,3 +1,4 @@
+# server.py
 import os
 import logging
 import asyncio
@@ -30,7 +31,7 @@ openai.api_key = os.getenv("OPENAI_API_KEY")
 # Инициализация Flask-приложения
 app = Flask(__name__)
 
-# Настройка CORS (если требуется)
+# Настройка CORS
 from flask_cors import CORS
 CORS(app)
 
@@ -45,9 +46,10 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Отладочный вывод переменных окружения (для проверки)
+# --- Отладочный вывод переменных окружения ---
 logger.info("Текущие переменные окружения:")
 pprint.pprint(dict(os.environ))
+# ----------------------------------------------------
 
 ###############################################
 # Основные серверные эндпоинты (регистрация, чат и т.д.)
@@ -69,11 +71,6 @@ def send_telegram_notification(message):
         logger.error(f"❌ Ошибка при отправке Telegram уведомления: {e}")
 
 def prepare_chat_context(client_code):
-    """
-    Формирует список сообщений для запроса к OpenAI:
-      1. Загружает данные из Bible.xlsx и создает системное сообщение с информацией о компании.
-      2. Если существует файл истории переписки клиента, считывает его и добавляет предыдущие сообщения.
-    """
     messages = []
     bible_df = load_bible_data()
     if bible_df is None:
@@ -176,15 +173,10 @@ def home():
     return jsonify({"status": "Server is running!"}), 200
 
 ##############################################
-# Telegram Bot интеграция для команды /bible
+# Интеграция Telegram Bot для команды /bible
 ##############################################
 
-# Получаем токен из переменной окружения (сейчас мы уже его использовали для создания бота выше, но повторим для ApplicationBuilder)
-TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-if not TELEGRAM_BOT_TOKEN:
-    logger.error("Переменная окружения TELEGRAM_BOT_TOKEN не задана!")
-    exit(1)
-
+# Получаем TELEGRAM_BOT_TOKEN из переменных окружения (уже использовался выше для бота)
 # Состояния для ConversationHandler команды /bible
 ASK_ACTION, ASK_QUESTION, ASK_ANSWER = range(3)
 
@@ -212,7 +204,7 @@ async def ask_answer(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     answer = update.message.text.strip()
     question = context.user_data.get('question')
     logger.info(f"Сохраняем пару: Вопрос: {question} | Ответ: {answer}")
-    # Здесь можно добавить вызов функции сохранения пары в Bible.xlsx с Verification = "Check"
+    # Здесь можно вызвать функцию сохранения пары в Bible.xlsx с Verification = "Check"
     await update.message.reply_text("Пара вопрос-ответ сохранена с отметкой 'Check'.")
     return ConversationHandler.END
 
@@ -220,7 +212,6 @@ async def cancel_bible(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
     await update.message.reply_text("Операция отменена.")
     return ConversationHandler.END
 
-# Создаем ConversationHandler для команды /bible
 conv_handler = ConversationHandler(
     entry_points=[CommandHandler("bible", bible_start)],
     states={
@@ -231,7 +222,7 @@ conv_handler = ConversationHandler(
     fallbacks=[CommandHandler("cancel", cancel_bible)]
 )
 
-# Создаем приложение Telegram с помощью ApplicationBuilder
+# Создаем приложение Telegram через ApplicationBuilder
 application = ApplicationBuilder().token(TELEGRAM_BOT_TOKEN).build()
 application.add_handler(conv_handler)
 
@@ -243,7 +234,7 @@ def telegram_webhook():
     asyncio.run(application.process_update(update))
     return 'OK', 200
 
-# Тестовый маршрут для проверки вебхука (GET)
+# Тестовый маршрут для проверки работы вебхука (GET)
 @app.route('/webhook_test', methods=['GET'])
 def telegram_webhook_test():
     return "Webhook endpoint is active", 200
@@ -257,7 +248,6 @@ if __name__ == '__main__':
     if not WEBHOOK_URL:
         logger.error("Переменная окружения WEBHOOK_URL не задана!")
         exit(1)
-    # Устанавливаем вебхук асинхронно
     asyncio.run(bot.set_webhook(WEBHOOK_URL))
     logger.info(f"Webhook установлен на {WEBHOOK_URL}")
     logger.info(f"✅ Сервер запущен на порту {port}")
