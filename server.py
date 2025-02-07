@@ -48,6 +48,13 @@ logger.info("Текущие переменные окружения:")
 pprint.pprint(dict(os.environ))
 
 ###############################################
+# Тестовый маршрут для проверки работы Flask
+###############################################
+@app.route('/test', methods=['GET'])
+def test():
+    return "Test route works", 200
+
+###############################################
 # Основные серверные эндпоинты (регистрация, чат и т.д.)
 ###############################################
 def send_telegram_notification(message):
@@ -170,7 +177,7 @@ def home():
 ##############################################
 # Интеграция Telegram Bot для команды /bible
 ##############################################
-# Получаем TELEGRAM_BOT_TOKEN из переменных окружения (повторно, для ApplicationBuilder)
+# Получаем токен (уже использован выше) для создания приложения Telegram
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 if not TELEGRAM_BOT_TOKEN:
     logger.error("Переменная окружения TELEGRAM_BOT_TOKEN не задана!")
@@ -203,7 +210,7 @@ async def ask_answer(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     answer = update.message.text.strip()
     question = context.user_data.get('question')
     logger.info(f"Сохраняем пару: Вопрос: {question} | Ответ: {answer}")
-    # Здесь можно добавить вызов функции сохранения пары в Bible.xlsx с Verification = "Check"
+    # Здесь можно вызвать функцию сохранения пары в Bible.xlsx с Verification = "Check"
     await update.message.reply_text("Пара вопрос-ответ сохранена с отметкой 'Check'.")
     return ConversationHandler.END
 
@@ -223,17 +230,25 @@ bible_conv_handler = ConversationHandler(
 
 # Создаем приложение Telegram через ApplicationBuilder
 application = ApplicationBuilder().token(TELEGRAM_BOT_TOKEN).build()
-# Явно получаем объект бота из приложения
+# Обязательно получаем объект бота из приложения
 bot = application.bot
 application.add_handler(bible_conv_handler)
 
 # Маршрут для вебхука Telegram (POST)
 @app.route('/webhook', methods=['POST'])
 def telegram_webhook():
-    data = request.get_json(force=True)
-    update = Update.de_json(data, bot)
-    asyncio.run(application.process_update(update))
-    return 'OK', 200
+    try:
+        data = request.get_json(force=True)
+        update = Update.de_json(data, bot)
+        # Создаем новый цикл для обработки асинхронной функции
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        loop.run_until_complete(application.process_update(update))
+        loop.close()
+        return 'OK', 200
+    except Exception as e:
+        logger.error(f"Ошибка обработки Telegram update: {e}")
+        return jsonify({'error': str(e)}), 500
 
 # Тестовый маршрут для проверки работы вебхука Telegram (GET)
 @app.route('/webhook_test', methods=['GET'])
@@ -249,6 +264,7 @@ if __name__ == '__main__':
     if not WEBHOOK_URL:
         logger.error("Переменная окружения WEBHOOK_URL не задана!")
         exit(1)
+    # Устанавливаем вебхук асинхронно
     asyncio.run(bot.set_webhook(WEBHOOK_URL))
     logger.info(f"Webhook установлен на {WEBHOOK_URL}")
     logger.info(f"✅ Сервер запущен на порту {port}")
