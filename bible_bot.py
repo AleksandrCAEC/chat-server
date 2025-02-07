@@ -1,24 +1,29 @@
 import os
 import logging
-from telegram import Update
+from telegram import Update, Bot
 from telegram.ext import (
-    Updater,
+    Dispatcher,
     CommandHandler,
     MessageHandler,
     Filters,
     ConversationHandler,
     CallbackContext
 )
+from flask import Flask, request
 
 # Состояния для ConversationHandler
 ASK_ACTION, ASK_QUESTION, ASK_ANSWER = range(3)
 
 # Настройка логирования
 logging.basicConfig(
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    level=logging.INFO
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO
 )
 logger = logging.getLogger(__name__)
+
+# Инициализируем Flask-приложение
+app = Flask(__name__)
+
+# Функции-обработчики для диалога /bible
 
 def bible_start(update: Update, context: CallbackContext) -> int:
     update.message.reply_text(
@@ -33,7 +38,7 @@ def ask_action(update: Update, context: CallbackContext) -> int:
         update.message.reply_text("Введите новый вопрос:")
         return ASK_QUESTION
     else:
-        update.message.reply_text("Неверное значение. Введите 'add' для добавления или 'cancel' для отмены.")
+        update.message.reply_text("Неверное значение. Введите 'add' или 'cancel'.")
         return ASK_ACTION
 
 def ask_question(update: Update, context: CallbackContext) -> int:
@@ -56,29 +61,40 @@ def cancel(update: Update, context: CallbackContext) -> int:
     update.message.reply_text("Операция отменена.")
     return ConversationHandler.END
 
-def main():
-    # Чтение токена из переменной окружения ELEGRAM_BOT_TOKEN
-    TELEGRAM_BOT_TOKEN = os.getenv("ELEGRAM_BOT_TOKEN")
-    if not TELEGRAM_BOT_TOKEN:
-        logger.error("Переменная окружения ELEGRAM_BOT_TOKEN не задана!")
-        return
+# Настройка Dispatcher
+TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+if not TOKEN:
+    logger.error("Переменная окружения TELEGRAM_BOT_TOKEN не задана!")
+    exit(1)
 
-    updater = Updater(TELEGRAM_BOT_TOKEN, use_context=True)
-    dispatcher = updater.dispatcher
+bot = Bot(TOKEN)
+dispatcher = Dispatcher(bot, None, workers=0)
+conv_handler = ConversationHandler(
+    entry_points=[CommandHandler('bible', bible_start)],
+    states={
+        ASK_ACTION: [MessageHandler(Filters.text & ~Filters.command, ask_action)],
+        ASK_QUESTION: [MessageHandler(Filters.text & ~Filters.command, ask_question)],
+        ASK_ANSWER: [MessageHandler(Filters.text & ~Filters.command, ask_answer)],
+    },
+    fallbacks=[CommandHandler('cancel', cancel)]
+)
+dispatcher.add_handler(conv_handler)
 
-    conv_handler = ConversationHandler(
-        entry_points=[CommandHandler('bible', bible_start)],
-        states={
-            ASK_ACTION: [MessageHandler(Filters.text & ~Filters.command, ask_action)],
-            ASK_QUESTION: [MessageHandler(Filters.text & ~Filters.command, ask_question)],
-            ASK_ANSWER: [MessageHandler(Filters.text & ~Filters.command, ask_answer)],
-        },
-        fallbacks=[CommandHandler('cancel', cancel)]
-    )
-
-    dispatcher.add_handler(conv_handler)
-    updater.start_polling()
-    updater.idle()
+# Маршрут для приёма вебхуков
+@app.route('/webhook', methods=['POST'])
+def webhook_handler():
+    update = Update.de_json(request.get_json(force=True), bot)
+    dispatcher.process_update(update)
+    return 'OK', 200
 
 if __name__ == '__main__':
-    main()
+    PORT = int(os.getenv("PORT", "8080"))
+    # Переменная окружения WEBHOOK_URL должна содержать публичный URL вашего сервиса с путём /webhook, например:
+    # https://your-cloud-run-url/webhook
+    WEBHOOK_URL = os.getenv("WEBHOOK_URL")
+    if not WEBHOOK_URL:
+        logger.error("Переменная окружения WEBHOOK_URL не задана!")
+        exit(1)
+    bot.setWebhook(WEBHOOK_URL)
+    logger.info(f"Webhook установлен на {WEBHOOK_URL}")
+    app.run(host='0.0.0.0', port=PORT)
