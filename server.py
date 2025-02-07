@@ -230,8 +230,7 @@ bible_conv_handler = ConversationHandler(
 
 # Создаем приложение Telegram через ApplicationBuilder и добавляем обработчик
 application = ApplicationBuilder().token(TELEGRAM_BOT_TOKEN).build()
-# Получаем объект bot из приложения
-bot = application.bot
+bot = application.bot  # Получаем объект бота из приложения
 application.add_handler(bible_conv_handler)
 
 # Маршрут для вебхука Telegram (POST)
@@ -240,11 +239,8 @@ def telegram_webhook():
     try:
         data = request.get_json(force=True)
         update = Update.de_json(data, bot)
-        # Создаем новый цикл событий для обработки обновления
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        loop.run_until_complete(application.process_update(update))
-        loop.close()
+        # Используем глобальный цикл для обработки обновления
+        global_loop.run_until_complete(application.process_update(update))
         return 'OK', 200
     except Exception as e:
         logger.error(f"Ошибка обработки Telegram update: {e}")
@@ -264,9 +260,11 @@ if __name__ == '__main__':
     if not WEBHOOK_URL:
         logger.error("Переменная окружения WEBHOOK_URL не задана!")
         exit(1)
-    # Инициализируем приложение Telegram (необходимо для корректной работы update-процессинга)
-    asyncio.run(application.initialize())
-    asyncio.run(bot.set_webhook(WEBHOOK_URL))
+    # Создаем глобальный цикл, который будем использовать для обработки Telegram-обновлений
+    global_loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(global_loop)
+    global_loop.run_until_complete(application.initialize())
+    global_loop.run_until_complete(bot.set_webhook(WEBHOOK_URL))
     logger.info(f"Webhook установлен на {WEBHOOK_URL}")
     logger.info(f"✅ Сервер запущен на порту {port}")
     app.run(host='0.0.0.0', port=port, debug=False, threaded=True)
