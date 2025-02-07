@@ -24,7 +24,6 @@ logger = logging.getLogger(__name__)
 # Константа для директории файлов клиента
 CLIENT_FILES_DIR = "./CAEC_API_Data/BIG_DATA/Data_CAEC_client/"
 
-# Если директория для файлов клиента не существует, создаём её
 if not os.path.exists(CLIENT_FILES_DIR):
     os.makedirs(CLIENT_FILES_DIR, exist_ok=True)
 
@@ -119,7 +118,7 @@ def create_client_file(client_code, client_data):
             client_data["Email"],
             client_data["Created Date"]
         ])
-        # Устанавливаем формат ячеек как текст
+        # Задаем формат всех ячеек как текст
         for row in ws.iter_rows(min_row=1, max_row=ws.max_row):
             for cell in row:
                 cell.number_format = numbers.FORMAT_TEXT
@@ -140,15 +139,19 @@ def create_client_file(client_code, client_data):
         return None
 
 def add_message_to_client_file(client_code, message, is_assistant=False):
+    """
+    Добавляет новое сообщение в файл клиента Client_CAECxxxxxxx.xlsx.
+    Если файл существует, данные дописываются в конец.
+    В случае ошибки записи оригинального файла, создаётся временный файл Temp_Client_CAECxxxxxxx.xlsx.
+    """
     try:
         file_name = f"Client_{client_code}.xlsx"
         file_path = os.path.join(CLIENT_FILES_DIR, file_name)
-        # Если файл существует, открываем его, иначе создаём новый
+        # Если файл существует, открываем его; если нет, создаём его один раз
         if os.path.exists(file_path):
             wb = load_workbook(file_path)
             ws = wb.active
         else:
-            # Если файла нет, создаем его один раз с заголовками и начальными данными
             wb = Workbook()
             ws = wb.active
             ws.append(["Client", "Assistant", "Client Code", "Name", "Phone", "Email", "Created Date"])
@@ -156,63 +159,43 @@ def add_message_to_client_file(client_code, message, is_assistant=False):
             client_data = verify_client_code(client_code)
             if not client_data:
                 raise Exception(f"Данные клиента {client_code} не найдены.")
-            ws.append([
-                "",  
-                "",  
-                client_data["Client Code"],
-                client_data["Name"],
-                client_data["Phone"],
-                client_data["Email"],
-                client_data["Created Date"]
-            ])
+            ws.append(["", "", client_data["Client Code"], client_data["Name"], client_data["Phone"], client_data["Email"], client_data["Created Date"]])
         current_time = datetime.now().strftime("%d.%m.%y %H:%M")
-        # Добавляем новую строку с сообщением; предыдущие строки остаются нетронутыми
         if is_assistant:
-            ws.append(["", f"{current_time} - {message}", "", "", "", "", ""])
+            new_row = ["", f"{current_time} - {message}", "", "", "", "", ""]
         else:
-            ws.append([f"{current_time} - {message}", "", "", "", "", "", ""])
-        # Принудительно задаём формат ячеек как текст
-        for row in ws.iter_rows(min_row=1, max_row=ws.max_row):
+            new_row = [f"{current_time} - {message}", "", "", "", "", "", ""]
+        ws.append(new_row)
+        # Устанавливаем формат для новой строки
+        for row in ws.iter_rows(min_row=ws.max_row, max_row=ws.max_row):
             for cell in row:
                 cell.number_format = numbers.FORMAT_TEXT
-        for row in ws.iter_rows(min_row=1, max_row=ws.max_row, min_col=1, max_col=2):
-            for cell in row:
                 cell.alignment = Alignment(wrap_text=True)
         wb.save(file_path)
         with open(file_path, "rb") as file_stream:
             upload_or_update_file(file_name, file_stream)
         logger.info(f"Сообщение добавлено в файл клиента {client_code}.")
     except Exception as e:
-        logger.error(f"Ошибка при добавлении сообщения в файл клиента: {e}")
-
-def handle_client(client_code):
-    try:
-        logger.info(f"Обработка клиента с кодом: {client_code}")
-        df = load_client_data()
-        client_data = df[df["Client Code"] == client_code]
-        if not client_data.empty:
-            client_data = client_data.iloc[0].to_dict()
-            file_name = f"Client_{client_code}.xlsx"
-            file_path = os.path.join(CLIENT_FILES_DIR, file_name)
-            # Если файл не существует, создаем его; иначе ничего не делаем (чтобы сохранить историю)
-            if not os.path.exists(file_path):
-                logger.info(f"Создание файла клиента: {file_name}")
-                create_client_file(client_code, client_data)
-        else:
-            logger.warning(f"Клиент с кодом {client_code} не найден в ClientData.xlsx.")
-    except Exception as e:
-        logger.error(f"Ошибка при обработке клиента: {e}")
-
-def handle_all_clients():
-    try:
-        logger.info("Обработка всех клиентов из ClientData.xlsx...")
-        df = load_client_data()
-        for _, row in df.iterrows():
-            client_code = row["Client Code"]
-            handle_client(client_code)
-        logger.info("Все клиенты обработаны.")
-    except Exception as e:
-        logger.error(f"Ошибка при обработке всех клиентов: {e}")
-
-if __name__ == "__main__":
-    handle_all_clients()
+        logger.error(f"Ошибка при добавлении сообщения в файл клиента {client_code}: {e}")
+        # При ошибке не перезаписываем оригинальный файл, а создаем временный файл
+        try:
+            temp_file_name = f"Temp_Client_{client_code}.xlsx"
+            temp_file_path = os.path.join(CLIENT_FILES_DIR, temp_file_name)
+            # Если оригинальный файл существует, копируем его содержимое
+            if os.path.exists(file_path):
+                wb_temp = load_workbook(file_path)
+                ws_temp = wb_temp.active
+            else:
+                wb_temp = Workbook()
+                ws_temp = wb_temp.active
+                ws_temp.append(["Client", "Assistant", "Client Code", "Name", "Phone", "Email", "Created Date"])
+                from clientdata import verify_client_code
+                client_data = verify_client_code(client_code)
+                if not client_data:
+                    raise Exception(f"Данные клиента {client_code} не найдены.")
+                ws_temp.append(["", "", client_data["Client Code"], client_data["Name"], client_data["Phone"], client_data["Email"], client_data["Created Date"]])
+            ws_temp.append(new_row)
+            wb_temp.save(temp_file_path)
+            logger.error(f"Создан временный файл {temp_file_name} для клиента {client_code} из-за ошибки записи.")
+        except Exception as e2:
+            logger.error(f"Ошибка при создании временного файла для клиента {client_code}: {e2}")
