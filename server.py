@@ -1,18 +1,25 @@
 # server.py
-from flask import Flask, request, jsonify
-from flask_cors import CORS
 import os
+import logging
+import asyncio
+from flask import Flask, request, jsonify
 import openai
 import requests
-import logging
 from datetime import datetime
 from clientdata import register_or_update_client, verify_client_code, update_last_visit, update_activity_status
-from client_caec import add_message_to_client_file  # Функция для работы с историей переписки
-from bible import load_bible_data  # Модуль для работы с Bible.xlsx
+from client_caec import add_message_to_client_file
+from bible import load_bible_data
 
-# Telegram импорты
+# Импорты для Telegram Bot (python-telegram-bot v20+)
 from telegram import Update, Bot
-from telegram.ext import Dispatcher, CommandHandler, MessageHandler, Filters, ConversationHandler, CallbackContext
+from telegram.ext import (
+    ApplicationBuilder,
+    CommandHandler,
+    MessageHandler,
+    ConversationHandler,
+    ContextTypes,
+    filters
+)
 
 # Установка пути к файлу service_account_json
 os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = "/etc/secrets/service_account_json"
@@ -20,11 +27,13 @@ os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = "/etc/secrets/service_account_jso
 # Инициализация OpenAI
 openai.api_key = os.getenv("OPENAI_API_KEY")
 
-# Инициализация приложения Flask
+# Инициализация Flask-приложения
 app = Flask(__name__)
-CORS(app)
 
-# Настройка логирования
+# Настройка CORS и логирования
+# (оставляем ваш текущий CORS и конфигурацию логирования)
+from flask_cors import CORS
+CORS(app)
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
@@ -35,59 +44,74 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-def send_telegram_notification(message):
-    telegram_bot_token = os.getenv("TELEGRAM_BOT_TOKEN")
-    telegram_chat_id = os.getenv("TELEGRAM_CHAT_ID")
-    if not telegram_bot_token or not telegram_chat_id:
-        logger.error("Переменные окружения TELEGRAM_BOT_TOKEN и TELEGRAM_CHAT_ID не настроены.")
-        return
-    url = f"https://api.telegram.org/bot{telegram_bot_token}/sendMessage"
-    payload = {"chat_id": telegram_chat_id, "text": message, "parse_mode": "HTML"}
-    try:
-        response = requests.post(url, json=payload)
-        response.raise_for_status()
-        logger.info(f"✅ Telegram уведомление отправлено: {response.json()}")
-    except requests.exceptions.RequestException as e:
-        logger.error(f"❌ Ошибка при отправке Telegram уведомления: {e}")
+##############################
+# Telegram Bot Setup (async)
+##############################
 
-def prepare_chat_context(client_code):
-    """
-    Формирует список сообщений для запроса к OpenAI:
-      1. Загружает данные из Bible.xlsx и создает системное сообщение с информацией о компании.
-      2. Если существует файл истории переписки клиента, считывает его и добавляет предыдущие сообщения.
-    """
-    messages = []
-    bible_df = load_bible_data()
-    if bible_df is None:
-        raise Exception("Bible.xlsx не найден или недоступен.")
-    bible_context = "Информация о компании (FAQ):\n"
-    for index, row in bible_df.iterrows():
-        faq = row.get("FAQ", "")
-        answer = row.get("Answers", "")
-        if faq and answer:
-            bible_context += f"Вопрос: {faq}\nОтвет: {answer}\n\n"
-    system_message = {
-        "role": "system",
-        "content": f"Вы – умный ассистент компании CAEC. Используйте следующую информацию для ответов:\n{bible_context}"
-    }
-    messages.append(system_message)
-    import openpyxl
-    from client_caec import CLIENT_FILES_DIR
-    client_file_path = os.path.join(CLIENT_FILES_DIR, f"Client_{client_code}.xlsx")
-    if os.path.exists(client_file_path):
-        try:
-            wb = openpyxl.load_workbook(client_file_path, data_only=True)
-            ws = wb.active
-            for row in ws.iter_rows(min_row=2, values_only=True):
-                client_msg = row[0]
-                assistant_msg = row[1]
-                if client_msg and isinstance(client_msg, str):
-                    messages.append({"role": "user", "content": client_msg})
-                if assistant_msg and isinstance(assistant_msg, str):
-                    messages.append({"role": "assistant", "content": assistant_msg})
-        except Exception as e:
-            logger.error(f"Ошибка при чтении файла клиента {client_file_path}: {e}")
-    return messages
+# Получаем токен бота из переменной окружения
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+if not TELEGRAM_BOT_TOKEN:
+    logger.error("Переменная окружения TELEGRAM_BOT_TOKEN не задана!")
+    exit(1)
+
+# Создаем приложение Telegram
+application = ApplicationBuilder().token(TELEGRAM_BOT_TOKEN).build()
+bot = application.bot  # Получаем объект Bot
+
+# Состояния для ConversationHandler команды /bible
+ASK_ACTION, ASK_QUESTION, ASK_ANSWER = range(3)
+
+# Асинхронные обработчики для команды /bible
+
+async def bible_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    await update.message.reply_text("Введите 'add' для добавления новой пары вопрос-ответ, или 'cancel' для отмены.")
+    return ASK_ACTION
+
+async def ask_action(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    action = update.message.text.strip().lower()
+    if action == "add":
+        context.user_data['action'] = 'add'
+        await update.message.reply_text("Введите новый вопрос:")
+        return ASK_QUESTION
+    else:
+        await update.message.reply_text("Неверное значение. Введите 'add' или 'cancel'.")
+        return ASK_ACTION
+
+async def ask_question(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    question = update.message.text.strip()
+    context.user_data['question'] = question
+    await update.message.reply_text("Введите ответ для этого вопроса:")
+    return ASK_ANSWER
+
+async def ask_answer(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    answer = update.message.text.strip()
+    question = context.user_data.get('question')
+    logger.info(f"Сохраняем пару: Вопрос: {question} | Ответ: {answer}")
+    # Здесь можно вызвать функцию сохранения пары (например, save_bible_pair(question, answer))
+    await update.message.reply_text("Пара вопрос-ответ сохранена с отметкой 'Check'.")
+    return ConversationHandler.END
+
+async def cancel_bible(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    await update.message.reply_text("Операция отменена.")
+    return ConversationHandler.END
+
+# Создаем ConversationHandler для команды /bible
+conv_handler = ConversationHandler(
+    entry_points=[CommandHandler("bible", bible_start)],
+    states={
+        ASK_ACTION: [MessageHandler(filters.TEXT & ~filters.COMMAND, ask_action)],
+        ASK_QUESTION: [MessageHandler(filters.TEXT & ~filters.COMMAND, ask_question)],
+        ASK_ANSWER: [MessageHandler(filters.TEXT & ~filters.COMMAND, ask_answer)],
+    },
+    fallbacks=[CommandHandler("cancel", cancel_bible)]
+)
+
+# Добавляем обработчик в приложение Telegram
+application.add_handler(conv_handler)
+
+#####################################
+# Остальные маршруты вашего сервера
+#####################################
 
 @app.route('/register-client', methods=['POST'])
 def register_client():
@@ -153,79 +177,57 @@ def chat():
         logger.error(f"❌ Ошибка в /chat: {e}")
         return jsonify({'error': str(e)}), 500
 
-@app.route('/')
+@app.route('/', methods=['GET'])
 def home():
     return jsonify({"status": "Server is running!"}), 200
 
-# ---------------------------------------------------------------------
-# Интеграция Telegram-бота для команды /bible через вебхук
+##############################
+# Маршруты для Telegram Webhook
+##############################
 
-# Определяем состояния для обработки диалога /bible
-ASK_ACTION, ASK_QUESTION, ASK_ANSWER = range(3)
-
-def bible_start(update: Update, context: CallbackContext) -> int:
-    update.message.reply_text("Введите 'add' для добавления новой пары вопрос-ответ, или 'cancel' для отмены.")
-    return ASK_ACTION
-
-def ask_action(update: Update, context: CallbackContext) -> int:
-    action = update.message.text.strip().lower()
-    if action == "add":
-        context.user_data['action'] = 'add'
-        update.message.reply_text("Введите новый вопрос:")
-        return ASK_QUESTION
-    else:
-        update.message.reply_text("Неверное значение. Введите 'add' или 'cancel'.")
-        return ASK_ACTION
-
-def ask_question(update: Update, context: CallbackContext) -> int:
-    question = update.message.text.strip()
-    context.user_data['question'] = question
-    update.message.reply_text("Введите ответ для этого вопроса:")
-    return ASK_ANSWER
-
-def ask_answer(update: Update, context: CallbackContext) -> int:
-    answer = update.message.text.strip()
-    question = context.user_data.get('question')
-    logger.info(f"Сохраняем пару: Вопрос: {question} | Ответ: {answer}")
-    update.message.reply_text("Пара вопрос-ответ сохранена с отметкой 'Check'.")
-    return ConversationHandler.END
-
-def cancel_bible(update: Update, context: CallbackContext) -> int:
-    update.message.reply_text("Операция отменена.")
-    return ConversationHandler.END
-
-conv_handler = ConversationHandler(
-    entry_points=[CommandHandler('bible', bible_start)],
-    states={
-        ASK_ACTION: [MessageHandler(Filters.text & ~Filters.command, ask_action)],
-        ASK_QUESTION: [MessageHandler(Filters.text & ~Filters.command, ask_question)],
-        ASK_ANSWER: [MessageHandler(Filters.text & ~Filters.command, ask_answer)],
-    },
-    fallbacks=[CommandHandler('cancel', cancel_bible)]
-)
-# Регистрируем обработчик команды /bible в диспетчере Telegram
-dispatcher.add_handler(conv_handler)
-
+# Обработка вебхука для Telegram-бота (POST)
 @app.route('/webhook', methods=['POST'])
 def telegram_webhook():
-    update = Update.de_json(request.get_json(force=True), bot)
-    dispatcher.process_update(update)
+    data = request.get_json(force=True)
+    update = Update.de_json(data, bot)
+    # Запускаем асинхронную обработку обновления
+    asyncio.run(application.process_update(update))
     return 'OK', 200
 
+# Тестовый маршрут для проверки работы вебхука (GET)
 @app.route('/webhook_test', methods=['GET'])
 def telegram_webhook_test():
     return "Webhook endpoint is active", 200
 
-# ---------------------------------------------------------------------
+####################################
+# Функция для отправки уведомлений в Telegram
+####################################
+def send_telegram_notification(message):
+    telegram_bot_token = os.getenv("TELEGRAM_BOT_TOKEN")
+    telegram_chat_id = os.getenv("TELEGRAM_CHAT_ID")
+    if not telegram_bot_token or not telegram_chat_id:
+        logger.error("Переменные окружения TELEGRAM_BOT_TOKEN и TELEGRAM_CHAT_ID не настроены.")
+        return
+    url = f"https://api.telegram.org/bot{telegram_bot_token}/sendMessage"
+    payload = {"chat_id": telegram_chat_id, "text": message, "parse_mode": "HTML"}
+    try:
+        response = requests.post(url, json=payload)
+        response.raise_for_status()
+        logger.info(f"✅ Telegram уведомление отправлено: {response.json()}")
+    except requests.exceptions.RequestException as e:
+        logger.error(f"❌ Ошибка при отправке Telegram уведомления: {e}")
 
+####################################
+# Основной блок запуска
+####################################
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 8080))
-    TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
     WEBHOOK_URL = os.getenv("WEBHOOK_URL")
     if not WEBHOOK_URL:
         logger.error("Переменная окружения WEBHOOK_URL не задана!")
         exit(1)
-    bot.setWebhook(WEBHOOK_URL)
+    # Устанавливаем вебхук (асинхронно)
+    asyncio.run(bot.set_webhook(WEBHOOK_URL))
     logger.info(f"Webhook установлен на {WEBHOOK_URL}")
     logger.info(f"✅ Сервер запущен на порту {port}")
     app.run(host='0.0.0.0', port=port, debug=False, threaded=True)
