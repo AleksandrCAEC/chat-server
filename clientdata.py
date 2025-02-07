@@ -110,7 +110,6 @@ def update_activity_status():
         current_date = datetime.now()
         one_year_ago = current_date - timedelta(days=365)
         df.loc[(pd.to_datetime(df["Last Visit"]) < one_year_ago), "Activity Status"] = "Not Active"
-        # Сортировка так, чтобы "Not Active" были в начале
         df = df.sort_values(by=["Activity Status"], ascending=False)
         df.astype(str).to_excel(CLIENT_DATA_PATH, index=False)
         logger.info("Статус активности клиентов обновлен.")
@@ -121,12 +120,19 @@ def update_last_visit(client_code):
     try:
         df = load_client_data()
         last_visit = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        df.loc[df["Client Code"] == client_code, "Last Visit"] = last_visit
+        # Приводим client_code к строке для корректного сравнения
+        df.loc[df["Client Code"] == str(client_code), "Last Visit"] = last_visit
         df.astype(str).to_excel(CLIENT_DATA_PATH, index=False)
-        logger.info(f"Last Visit обновлён для клиента {client_code}")
+        logger.info(f"Last Visit обновлён для клиента {client_code}: {last_visit}")
         return True
     except Exception as e:
         logger.error(f"Ошибка обновления Last Visit для клиента {client_code}: {e}")
+        try:
+            # Отправляем уведомление через функцию send_notification из client_caec
+            from client_caec import send_notification
+            send_notification(f"Ошибка обновления Last Visit для клиента {client_code}: {e}")
+        except Exception as ex:
+            logger.error(f"Ошибка отправки уведомления об обновлении Last Visit: {ex}")
         return False
 
 def register_or_update_client(data):
@@ -154,7 +160,6 @@ def register_or_update_client(data):
             else:
                 df.loc[df["Client Code"] == client_code, "Last Visit"] = last_visit
                 df.astype(str).to_excel(CLIENT_DATA_PATH, index=False)
-            # Локальный импорт для избежания круговой зависимости
             from client_caec import handle_client
             handle_client(client_code)
             return {
