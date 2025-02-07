@@ -1,82 +1,78 @@
 # bible.py
 import os
 import pandas as pd
-from openpyxl import Workbook, load_workbook
-from openpyxl.styles import Alignment, numbers
 import logging
+from google.oauth2.service_account import Credentials
+from googleapiclient.discovery import build
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
-# Определяем текущий рабочий каталог и выводим его для отладки
-current_dir = os.getcwd()
-logger.info(f"Текущий рабочий каталог: {current_dir}")
+# Укажите идентификатор Google Sheets таблицы Bible.xlsx
+# Например: "1QB3Jv7cL5hNwDKx9rQF6FCrKHW7IHPAqrUg7FIvY7Dk"
+BIBLE_SPREADSHEET_ID = "1QB3Jv7cL5hNwDKx9rQF6FCrKHW7IHPAqrUg7FIvY7Dk"
 
-# Формируем абсолютный путь к файлу Bible.xlsx
-BIBLE_FILE_PATH = os.path.join(current_dir, "CAEC_API_Data", "BIG_DATA", "Bible.xlsx")
-logger.info(f"Путь к Bible.xlsx: {BIBLE_FILE_PATH}")
-
-def ensure_bible_file():
+def get_sheets_service():
     """
-    Проверяет наличие файла Bible.xlsx и создаёт его с заголовками, если отсутствует.
+    Инициализирует и возвращает объект сервиса Google Sheets.
     """
-    directory = os.path.dirname(BIBLE_FILE_PATH)
-    if not os.path.exists(directory):
-        try:
-            os.makedirs(directory, exist_ok=True)
-            logger.info(f"Директория {directory} создана.")
-        except Exception as e:
-            logger.error(f"Ошибка при создании директории {directory}: {e}")
-            raise
-
-    if not os.path.exists(BIBLE_FILE_PATH):
-        try:
-            wb = Workbook()
-            ws = wb.active
-            ws.append(["FAQ", "Answers", "Verification"])
-            wb.save(BIBLE_FILE_PATH)
-            logger.info(f"Файл {BIBLE_FILE_PATH} создан с заголовками.")
-        except Exception as e:
-            logger.error(f"Ошибка при создании файла Bible.xlsx: {e}")
-            raise
+    try:
+        credentials = Credentials.from_service_account_file(
+            os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
+        )
+        service = build('sheets', 'v4', credentials=credentials)
+        return service
+    except Exception as e:
+        logger.error(f"Ошибка инициализации Google Sheets API: {e}")
+        raise
 
 def load_bible_data():
     """
-    Загружает данные из файла Bible.xlsx в виде DataFrame.
-    Если файла нет, создает его.
+    Загружает данные из Google Sheets таблицы Bible.xlsx и возвращает их в виде DataFrame.
+    Предполагается, что данные находятся в листе с именем "Bible" и в диапазоне A2:C,
+    где строка 1 содержит заголовки: FAQ, Answers, Verification.
     """
     try:
-        ensure_bible_file()
-        df = pd.read_excel(BIBLE_FILE_PATH)
-        logger.info(f"Bible.xlsx загружен. Количество записей: {len(df)}")
+        service = get_sheets_service()
+        # Задаем диапазон: данные начинаются со 2-й строки (заголовки в 1-й)
+        range_name = "Bible!A2:C"
+        result = service.spreadsheets().values().get(
+            spreadsheetId=BIBLE_SPREADSHEET_ID,
+            range=range_name
+        ).execute()
+        values = result.get("values", [])
+        if values:
+            df = pd.DataFrame(values, columns=["FAQ", "Answers", "Verification"])
+        else:
+            df = pd.DataFrame(columns=["FAQ", "Answers", "Verification"])
+        logger.info(f"Bible data loaded. Количество записей: {len(df)}")
         return df
     except Exception as e:
-        logger.error(f"Ошибка при загрузке Bible.xlsx: {e}")
+        logger.error(f"Ошибка при загрузке данных из Bible.xlsx: {e}")
         return None
 
 def save_bible_pair(question, answer):
     """
-    Добавляет новую строку в Bible.xlsx с вопросом, ответом и статусом "Check".
-    После сохранения логирует количество строк.
+    Добавляет новую строку в Google Sheets таблицу Bible.xlsx с вопросом, ответом и статусом "Check".
     
     :param question: Текст вопроса.
     :param answer: Текст ответа.
     :raises Exception: При ошибке записи.
     """
     try:
-        ensure_bible_file()
-        wb = load_workbook(BIBLE_FILE_PATH)
-        ws = wb.active
-        # Добавляем новую строку с вопросом, ответом и статусом "Check"
-        ws.append([question, answer, "Check"])
-        wb.save(BIBLE_FILE_PATH)
-        logger.info(f"Новая пара добавлена: FAQ='{question}', Answers='{answer}', Verification='Check'")
-        
-        # Повторно открываем файл и считаем число строк для проверки
-        wb2 = load_workbook(BIBLE_FILE_PATH)
-        ws2 = wb2.active
-        row_count = ws2.max_row
-        logger.info(f"После сохранения, количество строк в Bible.xlsx: {row_count}")
+        service = get_sheets_service()
+        # Подготовим данные: новая строка с [question, answer, "Check"]
+        new_row = [[question, answer, "Check"]]
+        body = {"values": new_row}
+        # Используем метод append для добавления новой строки в лист "Bible"
+        result = service.spreadsheets().values().append(
+            spreadsheetId=BIBLE_SPREADSHEET_ID,
+            range="Bible!A:C",  # Область, в которую добавляем данные
+            valueInputOption="RAW",
+            insertDataOption="INSERT_ROWS",
+            body=body
+        ).execute()
+        logger.info(f"Новая пара добавлена: FAQ='{question}', Answers='{answer}', Verification='Check'. Ответ API: {result}")
     except Exception as e:
-        logger.error(f"Ошибка при сохранении пары в Bible.xlsx: {e}")
+        logger.error(f"Ошибка при сохранении пары в Bible.xlsx через Google Sheets API: {e}")
         raise
