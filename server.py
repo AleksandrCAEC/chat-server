@@ -1,8 +1,7 @@
-# server.py
 import os
-import pprint
 import logging
 import asyncio
+import pprint
 from flask import Flask, request, jsonify
 import openai
 import requests
@@ -46,10 +45,9 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# --- Отладочный вывод переменных окружения ---
+# Отладочный вывод переменных окружения (для проверки)
 logger.info("Текущие переменные окружения:")
 pprint.pprint(dict(os.environ))
-# ------------------------------------------------
 
 ###############################################
 # Основные серверные эндпоинты (регистрация, чат и т.д.)
@@ -178,8 +176,14 @@ def home():
     return jsonify({"status": "Server is running!"}), 200
 
 ##############################################
-# Telegram Bot интеграция (обработка команды /bible)
+# Telegram Bot интеграция для команды /bible
 ##############################################
+
+# Получаем токен из переменной окружения (сейчас мы уже его использовали для создания бота выше, но повторим для ApplicationBuilder)
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+if not TELEGRAM_BOT_TOKEN:
+    logger.error("Переменная окружения TELEGRAM_BOT_TOKEN не задана!")
+    exit(1)
 
 # Состояния для ConversationHandler команды /bible
 ASK_ACTION, ASK_QUESTION, ASK_ANSWER = range(3)
@@ -227,7 +231,7 @@ conv_handler = ConversationHandler(
     fallbacks=[CommandHandler("cancel", cancel_bible)]
 )
 
-# Регистрируем обработчик /bible в приложении Telegram
+# Создаем приложение Telegram с помощью ApplicationBuilder
 application = ApplicationBuilder().token(TELEGRAM_BOT_TOKEN).build()
 application.add_handler(conv_handler)
 
@@ -239,7 +243,7 @@ def telegram_webhook():
     asyncio.run(application.process_update(update))
     return 'OK', 200
 
-# Тестовый маршрут для проверки работы вебхука (GET)
+# Тестовый маршрут для проверки вебхука (GET)
 @app.route('/webhook_test', methods=['GET'])
 def telegram_webhook_test():
     return "Webhook endpoint is active", 200
@@ -253,6 +257,7 @@ if __name__ == '__main__':
     if not WEBHOOK_URL:
         logger.error("Переменная окружения WEBHOOK_URL не задана!")
         exit(1)
+    # Устанавливаем вебхук асинхронно
     asyncio.run(bot.set_webhook(WEBHOOK_URL))
     logger.info(f"Webhook установлен на {WEBHOOK_URL}")
     logger.info(f"✅ Сервер запущен на порту {port}")
