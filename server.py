@@ -181,7 +181,7 @@ def home():
 ##############################################
 # Интеграция Telegram Bot для команды /bible
 ##############################################
-# Получаем TELEGRAM_BOT_TOKEN из переменных окружения (уже использовался выше)
+# Получаем TELEGRAM_BOT_TOKEN (уже использовался выше)
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 if not TELEGRAM_BOT_TOKEN:
     logger.error("Переменная окружения TELEGRAM_BOT_TOKEN не задана!")
@@ -230,11 +230,12 @@ async def cancel_bible(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
 bible_conv_handler = ConversationHandler(
     entry_points=[CommandHandler("bible", bible_start)],
     states={
-        BIBLE_ASK_ACTION: [MessageHandler(filters.TEXT & filters.Regex(r'(?i)^(add|cancel)$'), ask_action)],
+        # Убираем ограничение регулярным выражением – теперь любое текстовое сообщение обрабатывается функцией ask_action
+        BIBLE_ASK_ACTION: [MessageHandler(filters.TEXT & ~filters.COMMAND, ask_action)],
         BIBLE_ASK_QUESTION: [MessageHandler(filters.TEXT & ~filters.COMMAND, ask_question)],
         BIBLE_ASK_ANSWER: [MessageHandler(filters.TEXT & ~filters.COMMAND, ask_answer)],
     },
-    fallbacks=[MessageHandler(filters.TEXT & filters.Regex(r'(?i)^cancel$'), cancel_bible)]
+    fallbacks=[CommandHandler("cancel", cancel_bible)]
 )
 
 # Создаем приложение Telegram через ApplicationBuilder и добавляем обработчик
