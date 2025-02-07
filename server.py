@@ -48,15 +48,57 @@ logger.info("Текущие переменные окружения:")
 pprint.pprint(dict(os.environ))
 
 ###############################################
-# Тестовый маршрут для проверки работы Flask
-###############################################
-@app.route('/test', methods=['GET'])
-def test():
-    return "Test route works", 200
-
-###############################################
 # Основные серверные эндпоинты (регистрация, чат и т.д.)
 ###############################################
+def send_telegram_notification(message):
+    telegram_bot_token = os.getenv("TELEGRAM_BOT_TOKEN")
+    telegram_chat_id = os.getenv("TELEGRAM_CHAT_ID")
+    if not telegram_bot_token or not telegram_chat_id:
+        logger.error("Переменные окружения TELEGRAM_BOT_TOKEN и TELEGRAM_CHAT_ID не настроены.")
+        return
+    url = f"https://api.telegram.org/bot{telegram_bot_token}/sendMessage"
+    payload = {"chat_id": telegram_chat_id, "text": message, "parse_mode": "HTML"}
+    try:
+        response = requests.post(url, json=payload)
+        response.raise_for_status()
+        logger.info(f"✅ Telegram уведомление отправлено: {response.json()}")
+    except requests.exceptions.RequestException as e:
+        logger.error(f"❌ Ошибка при отправке Telegram уведомления: {e}")
+
+def prepare_chat_context(client_code):
+    messages = []
+    bible_df = load_bible_data()
+    if bible_df is None:
+        raise Exception("Bible.xlsx не найден или недоступен.")
+    bible_context = "Информация о компании (FAQ):\n"
+    for index, row in bible_df.iterrows():
+        faq = row.get("FAQ", "")
+        answer = row.get("Answers", "")
+        if faq and answer:
+            bible_context += f"Вопрос: {faq}\nОтвет: {answer}\n\n"
+    system_message = {
+        "role": "system",
+        "content": f"Вы – умный ассистент компании CAEC. Используйте следующую информацию для ответов:\n{bible_context}"
+    }
+    messages.append(system_message)
+    import openpyxl
+    from client_caec import CLIENT_FILES_DIR
+    client_file_path = os.path.join(CLIENT_FILES_DIR, f"Client_{client_code}.xlsx")
+    if os.path.exists(client_file_path):
+        try:
+            wb = openpyxl.load_workbook(client_file_path, data_only=True)
+            ws = wb.active
+            for row in ws.iter_rows(min_row=2, values_only=True):
+                client_msg = row[0]
+                assistant_msg = row[1]
+                if client_msg and isinstance(client_msg, str):
+                    messages.append({"role": "user", "content": client_msg})
+                if assistant_msg and isinstance(assistant_msg, str):
+                    messages.append({"role": "assistant", "content": assistant_msg})
+        except Exception as e:
+            logger.error(f"Ошибка при чтении файла клиента {client_file_path}: {e}")
+    return messages
+
 @app.route('/register-client', methods=['POST'])
 def register_client():
     try:
@@ -125,10 +167,10 @@ def chat():
 def home():
     return jsonify({"status": "Server is running!"}), 200
 
-###############################################
-# Telegram Bot интеграция для команды /bible
-###############################################
-# Получаем токен для Telegram-бота (повторно, для ApplicationBuilder)
+##############################################
+# Интеграция Telegram Bot для команды /bible
+##############################################
+# Получаем TELEGRAM_BOT_TOKEN из переменных окружения (повторно, для ApplicationBuilder)
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 if not TELEGRAM_BOT_TOKEN:
     logger.error("Переменная окружения TELEGRAM_BOT_TOKEN не задана!")
@@ -161,7 +203,7 @@ async def ask_answer(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     answer = update.message.text.strip()
     question = context.user_data.get('question')
     logger.info(f"Сохраняем пару: Вопрос: {question} | Ответ: {answer}")
-    # Здесь можно вызвать функцию сохранения пары в Bible.xlsx с Verification = "Check"
+    # Здесь можно добавить вызов функции сохранения пары в Bible.xlsx с Verification = "Check"
     await update.message.reply_text("Пара вопрос-ответ сохранена с отметкой 'Check'.")
     return ConversationHandler.END
 
@@ -181,6 +223,8 @@ bible_conv_handler = ConversationHandler(
 
 # Создаем приложение Telegram через ApplicationBuilder
 application = ApplicationBuilder().token(TELEGRAM_BOT_TOKEN).build()
+# Явно получаем объект бота из приложения
+bot = application.bot
 application.add_handler(bible_conv_handler)
 
 # Маршрут для вебхука Telegram (POST)
@@ -196,9 +240,9 @@ def telegram_webhook():
 def telegram_webhook_test():
     return "Webhook endpoint is active", 200
 
-###############################################
+##############################################
 # Основной блок запуска
-###############################################
+##############################################
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 8080))
     WEBHOOK_URL = os.getenv("WEBHOOK_URL")
