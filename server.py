@@ -177,7 +177,7 @@ def home():
 ##############################################
 # Интеграция Telegram Bot для команды /bible
 ##############################################
-# Получаем токен (уже использован выше) для создания приложения Telegram
+# Получаем TELEGRAM_BOT_TOKEN из переменных окружения (уже использовался выше)
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 if not TELEGRAM_BOT_TOKEN:
     logger.error("Переменная окружения TELEGRAM_BOT_TOKEN не задана!")
@@ -210,7 +210,7 @@ async def ask_answer(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     answer = update.message.text.strip()
     question = context.user_data.get('question')
     logger.info(f"Сохраняем пару: Вопрос: {question} | Ответ: {answer}")
-    # Здесь можно вызвать функцию сохранения пары в Bible.xlsx с Verification = "Check"
+    # Здесь можно добавить вызов функции сохранения пары в Bible.xlsx с Verification = "Check"
     await update.message.reply_text("Пара вопрос-ответ сохранена с отметкой 'Check'.")
     return ConversationHandler.END
 
@@ -228,9 +228,9 @@ bible_conv_handler = ConversationHandler(
     fallbacks=[CommandHandler("cancel", cancel_bible)]
 )
 
-# Создаем приложение Telegram через ApplicationBuilder
+# Создаем приложение Telegram через ApplicationBuilder и добавляем обработчик
 application = ApplicationBuilder().token(TELEGRAM_BOT_TOKEN).build()
-# Обязательно получаем объект бота из приложения
+# Получаем объект bot из приложения
 bot = application.bot
 application.add_handler(bible_conv_handler)
 
@@ -240,7 +240,7 @@ def telegram_webhook():
     try:
         data = request.get_json(force=True)
         update = Update.de_json(data, bot)
-        # Создаем новый цикл для обработки асинхронной функции
+        # Создаем новый цикл событий для обработки обновления
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         loop.run_until_complete(application.process_update(update))
@@ -264,7 +264,8 @@ if __name__ == '__main__':
     if not WEBHOOK_URL:
         logger.error("Переменная окружения WEBHOOK_URL не задана!")
         exit(1)
-    # Устанавливаем вебхук асинхронно
+    # Инициализируем приложение Telegram (необходимо для корректной работы update-процессинга)
+    asyncio.run(application.initialize())
     asyncio.run(bot.set_webhook(WEBHOOK_URL))
     logger.info(f"Webhook установлен на {WEBHOOK_URL}")
     logger.info(f"✅ Сервер запущен на порту {port}")
