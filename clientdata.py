@@ -5,7 +5,9 @@ from googleapiclient.discovery import build
 import pandas as pd
 from datetime import datetime, timedelta
 import logging
-from config import CLIENT_DATA_PATH  # Используем общий путь из config
+from config import CLIENT_DATA_PATH  # CLIENT_DATA_PATH определён в config.py
+# Если константа CLIENT_FILES_DIR нужна, импортируйте её из config:
+from config import CLIENT_FILES_DIR
 
 logging.basicConfig(
     level=logging.INFO,
@@ -98,7 +100,6 @@ def save_client_data(client_code, name, phone, email, created_date, last_visit, 
             "Activity Status": activity_status
         }])
         df = pd.concat([df, new_data], ignore_index=True)
-        # Приводим все данные к строковому типу для сохранения в формате "Обычный текст"
         df.astype(str).to_excel(CLIENT_DATA_PATH, index=False)
         logger.info(f"Данные сохранены в ClientData.xlsx: {client_code}, {name}, {phone}, {email}")
     except Exception as e:
@@ -109,7 +110,9 @@ def update_activity_status():
         df = load_client_data()
         current_date = datetime.now()
         one_year_ago = current_date - timedelta(days=365)
-        df.loc[(pd.to_datetime(df["Last Visit"]) < one_year_ago), "Activity Status"] = "Not Active"
+        df["Client Code"] = df["Client Code"].astype(str)
+        # Обновляем статус для клиентов, у которых Last Visit меньше, чем год назад
+        df.loc[pd.to_datetime(df["Last Visit"]) < one_year_ago, "Activity Status"] = "Not Active"
         df = df.sort_values(by=["Activity Status"], ascending=False)
         df.astype(str).to_excel(CLIENT_DATA_PATH, index=False)
         logger.info("Статус активности клиентов обновлен.")
@@ -120,15 +123,18 @@ def update_last_visit(client_code):
     try:
         df = load_client_data()
         last_visit = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        # Приводим client_code к строке для корректного сравнения
-        df.loc[df["Client Code"] == str(client_code), "Last Visit"] = last_visit
-        df.astype(str).to_excel(CLIENT_DATA_PATH, index=False)
-        logger.info(f"Last Visit обновлён для клиента {client_code}: {last_visit}")
+        df["Client Code"] = df["Client Code"].astype(str)
+        mask = df["Client Code"] == str(client_code)
+        if mask.sum() == 0:
+            logger.warning(f"Клиент с кодом {client_code} не найден для обновления Last Visit.")
+        else:
+            df.loc[mask, "Last Visit"] = last_visit
+            df.astype(str).to_excel(CLIENT_DATA_PATH, index=False)
+            logger.info(f"Last Visit обновлён для клиента {client_code}: {last_visit}")
         return True
     except Exception as e:
         logger.error(f"Ошибка обновления Last Visit для клиента {client_code}: {e}")
         try:
-            # Отправляем уведомление через функцию send_notification из client_caec
             from client_caec import send_notification
             send_notification(f"Ошибка обновления Last Visit для клиента {client_code}: {e}")
         except Exception as ex:
@@ -158,10 +164,13 @@ def register_or_update_client(data):
                     activity_status=activity_status
                 )
             else:
-                df.loc[df["Client Code"] == client_code, "Last Visit"] = last_visit
+                df.loc[df["Client Code"] == str(client_code), "Last Visit"] = last_visit
                 df.astype(str).to_excel(CLIENT_DATA_PATH, index=False)
-            from client_caec import handle_client
-            handle_client(client_code)
+            try:
+                from client_caec import handle_client
+                handle_client(client_code)
+            except Exception as e_import:
+                logger.error(f"Ошибка импорта handle_client: {e_import}")
             return {
                 "uniqueCode": client_code,
                 "message": f"Добро пожаловать обратно, {name}! Ваш код: {client_code}.",
@@ -183,8 +192,11 @@ def register_or_update_client(data):
             last_visit=last_visit,
             activity_status=activity_status
         )
-        from client_caec import handle_client
-        handle_client(client_code)
+        try:
+            from client_caec import handle_client
+            handle_client(client_code)
+        except Exception as e_import:
+            logger.error(f"Ошибка импорта handle_client при регистрации нового клиента: {e_import}")
         update_activity_status()
         return {
             "uniqueCode": client_code,
