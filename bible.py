@@ -8,8 +8,7 @@ import logging
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
-# Определяем путь к файлу Bible.xlsx относительно текущего рабочего каталога.
-# Добавляем вывод os.getcwd(), чтобы убедиться, что путь соответствует ожиданиям.
+# Определяем текущий рабочий каталог и выводим его для отладки
 current_dir = os.getcwd()
 logger.info(f"Текущий рабочий каталог: {current_dir}")
 
