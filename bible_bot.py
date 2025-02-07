@@ -3,17 +3,10 @@ import os
 import logging
 from flask import Blueprint, request
 from telegram import Update, Bot
-from telegram.ext import (
-    Dispatcher,
-    CommandHandler,
-    MessageHandler,
-    Filters,
-    ConversationHandler,
-    CallbackContext
-)
+from telegram.ext import Dispatcher, CommandHandler, MessageHandler, Filters, ConversationHandler, CallbackContext
 
-# Создаем blueprint
-bible_bp = Blueprint('bible', __name__)
+# Создаем blueprint с пустым префиксом
+bible_bp = Blueprint('bible', __name__, url_prefix="")
 
 # Настройка логирования
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
@@ -22,7 +15,7 @@ logger = logging.getLogger(__name__)
 # Состояния для ConversationHandler
 ASK_ACTION, ASK_QUESTION, ASK_ANSWER = range(3)
 
-# Инициализируем бота и диспетчера
+# Инициализация бота и диспетчера
 TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 if not TOKEN:
     logger.error("Переменная окружения TELEGRAM_BOT_TOKEN не задана!")
@@ -31,7 +24,6 @@ bot = Bot(TOKEN)
 dispatcher = Dispatcher(bot, None, workers=0)
 
 # Обработчики для команды /bible
-
 def bible_start(update: Update, context: CallbackContext) -> int:
     update.message.reply_text(
         "Введите 'add' для добавления новой пары вопрос-ответ, или 'cancel' для отмены."
@@ -57,7 +49,7 @@ def ask_question(update: Update, context: CallbackContext) -> int:
 def ask_answer(update: Update, context: CallbackContext) -> int:
     answer = update.message.text.strip()
     question = context.user_data.get('question')
-    # Здесь необходимо добавить сохранение пары (question, answer) в Bible.xlsx с Verification="Check"
+    # Здесь должна быть логика сохранения (например, save_bible_pair(question, answer))
     logger.info(f"Сохраняем пару: Вопрос: {question} | Ответ: {answer}")
     update.message.reply_text("Пара вопрос-ответ сохранена с отметкой 'Check'.")
     return ConversationHandler.END
@@ -77,14 +69,14 @@ conv_handler = ConversationHandler(
 )
 dispatcher.add_handler(conv_handler)
 
-# Маршрут для вебхука, по которому Telegram будет отправлять обновления
+# Маршрут вебхука для Telegram
 @bible_bp.route('/webhook', methods=['POST'])
 def webhook_handler():
     update = Update.de_json(request.get_json(force=True), bot)
     dispatcher.process_update(update)
     return 'OK', 200
 
-# Тестовый маршрут, чтобы проверить, что Flask-приложение работает
+# Тестовый маршрут для проверки Flask-приложения
 @bible_bp.route('/webhook_test', methods=['GET'])
 def webhook_test():
     return "Webhook endpoint is active", 200
