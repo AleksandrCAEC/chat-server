@@ -9,7 +9,7 @@ from openpyxl.styles import Alignment, numbers
 from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseUpload, MediaIoBaseDownload
-from config import CLIENT_DATA_PATH, CLIENT_FILES_DIR  # Импортируем пути из config
+from config import CLIENT_DATA_PATH, CLIENT_FILES_DIR
 
 logging.basicConfig(
     level=logging.INFO,
@@ -84,8 +84,7 @@ def find_file_id(drive_service, file_name):
 
 def find_client_file_id(client_code):
     """
-    Ищет Google Sheets файл для клиента по имени.
-    Файл должен содержать фрагмент "Client_{client_code}" в имени.
+    Ищет Google Sheets файл для клиента по имени, содержащий "Client_{client_code}".
     Возвращает spreadsheetId, если найден, иначе None.
     """
     file_name_fragment = f"Client_{client_code}"
@@ -107,7 +106,6 @@ def find_client_file_id(client_code):
 def create_client_file(client_code, client_data):
     """
     Создает новый Google Sheets файл для клиента с начальными данными.
-    Использует Google Sheets API для создания таблицы с заголовками.
     Возвращает spreadsheetId нового файла.
     """
     sheets_service = get_sheets_service()
@@ -117,9 +115,7 @@ def create_client_file(client_code, client_data):
         ["", "", client_data["Client Code"], client_data["Name"], client_data["Phone"], client_data["Email"], client_data["Created Date"]]
     ]
     body = {
-        "properties": {
-            "title": file_title
-        },
+        "properties": {"title": file_title},
         "sheets": [
             {
                 "data": [
@@ -143,9 +139,9 @@ def create_client_file(client_code, client_data):
             addParents=GOOGLE_DRIVE_FOLDER_ID,
             fields="id, parents"
         ).execute()
-        # Опционально, можно вызвать метод batchUpdate для установки ширины столбцов A и B равной 450 пикселей.
-        set_column_width(spreadsheet_id, 0, 450)  # Столбец A
-        set_column_width(spreadsheet_id, 1, 450)  # Столбец B
+        # Устанавливаем ширину столбцов A и B равной 450 пикселей
+        set_column_width(spreadsheet_id, 0, 450)
+        set_column_width(spreadsheet_id, 1, 450)
         return spreadsheet_id
     except Exception as e:
         logger.error(f"Ошибка при создании файла клиента {file_title}: {e}")
@@ -153,10 +149,6 @@ def create_client_file(client_code, client_data):
         raise
 
 def set_column_width(spreadsheet_id, column_index, width):
-    """
-    Устанавливает ширину столбца (по индексу) на заданное значение (в пикселях)
-    для первого листа (sheetId = 0) в Google Sheets.
-    """
     try:
         sheets_service = get_sheets_service()
         requests_body = {
@@ -164,14 +156,12 @@ def set_column_width(spreadsheet_id, column_index, width):
                 {
                     "updateDimensionProperties": {
                         "range": {
-                            "sheetId": 0,  # предполагаем, что используется первый лист
+                            "sheetId": 0,
                             "dimension": "COLUMNS",
                             "startIndex": column_index,
                             "endIndex": column_index + 1
                         },
-                        "properties": {
-                            "pixelSize": width
-                        },
+                        "properties": {"pixelSize": width},
                         "fields": "pixelSize"
                     }
                 }
@@ -189,13 +179,12 @@ def set_column_width(spreadsheet_id, column_index, width):
 def add_message_to_client_file(client_code, message, is_assistant=False):
     """
     Добавляет новое сообщение в Google Sheets файл клиента Client_{client_code}.xlsx.
-    Если сообщение от клиента (is_assistant == False), создаётся новая строка с вопросом (столбец A).
-    Если сообщение от ассистента (is_assistant == True), функция проверяет последнюю строку:
-      - Если в последней строке в столбце A есть вопрос и столбец B пуст, ответ дописывается в ту же строку.
+    Если сообщение от клиента, создаётся новая строка с текстом в столбце A.
+    Если сообщение от ассистента, проверяется последняя строка:
+      - Если в последней строке в столбце A есть текст и столбец B пуст, ответ дописывается в ту же строку.
       - Иначе добавляется новая строка с ответом в столбце B.
-    В случае ошибки создаётся временный файл Temp_Client_{client_code}.
+    При возникновении ошибки отправляется уведомление, но временный файл не создаётся.
     """
-    new_row = None
     try:
         sheets_service = get_sheets_service()
         spreadsheet_id = find_client_file_id(client_code)
@@ -218,7 +207,6 @@ def add_message_to_client_file(client_code, message, is_assistant=False):
             ).execute()
             logger.info(f"Запрос клиента добавлен в файл клиента {client_code}.")
         else:
-            # Получаем данные листа для проверки последней строки
             result = sheets_service.spreadsheets().values().get(
                 spreadsheetId=spreadsheet_id,
                 range="Sheet1!A:B"
@@ -228,7 +216,6 @@ def add_message_to_client_file(client_code, message, is_assistant=False):
             if values and len(values) > 0:
                 last_row = values[-1]
                 if len(last_row) >= 1 and last_row[0] and (len(last_row) < 2 or not last_row[1]):
-                    # Обновляем столбец B в последней строке
                     row_number = len(values) + 1
                     range_update = f"Sheet1!B{row_number}"
                     body = {"values": [[f"{current_time} - {message}"]]}
@@ -262,27 +249,7 @@ def add_message_to_client_file(client_code, message, is_assistant=False):
     except Exception as e:
         logger.error(f"Ошибка при добавлении сообщения в файл клиента {client_code}: {e}")
         send_notification(f"Ошибка при добавлении сообщения в файл клиента {client_code}: {e}")
-        try:
-            temp_identifier = f"Temp_Client_{client_code}"
-            from clientdata import verify_client_code
-            client_data = verify_client_code(client_code)
-            if not client_data:
-                raise Exception(f"Данные клиента {client_code} не найдены.")
-            temp_spreadsheet_id = create_client_file(temp_identifier, client_data)
-            body = {"values": [new_row]}
-            sheets_service.spreadsheets().values().append(
-                spreadsheetId=temp_spreadsheet_id,
-                range="Sheet1!A:G",
-                valueInputOption="RAW",
-                insertDataOption="INSERT_ROWS",
-                body=body
-            ).execute()
-            logger.error(f"Временный файл для клиента {client_code} создан. Ответ API: {temp_spreadsheet_id}")
-            send_notification(f"Временный файл для клиента {client_code} создан из-за ошибки записи.")
-        except Exception as e2:
-            logger.error(f"Ошибка при создании временного файла для клиента {client_code}: {e2}")
-            send_notification(f"Ошибка при создании временного файла для клиента {client_code}: {e2}")
-            raise
+        raise
 
 def handle_client(client_code):
     try:
