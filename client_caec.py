@@ -66,6 +66,20 @@ def get_sheets_service():
         send_notification(f"Ошибка инициализации Google Sheets API: {e}")
         raise
 
+def get_first_sheet_id(spreadsheet_id):
+    """Получает sheetId первого листа в таблице."""
+    try:
+        sheets_service = get_sheets_service()
+        spreadsheet = sheets_service.spreadsheets().get(
+            spreadsheetId=spreadsheet_id,
+            fields="sheets(properties(sheetId))"
+        ).execute()
+        sheet_id = spreadsheet["sheets"][0]["properties"]["sheetId"]
+        return sheet_id
+    except Exception as e:
+        logger.error(f"Ошибка получения sheetId для файла {spreadsheet_id}: {e}")
+        return 0  # возвращаем 0 по умолчанию
+
 def find_file_id(drive_service, file_name):
     try:
         response = drive_service.files().list(
@@ -153,12 +167,13 @@ def create_client_file(client_code, client_data):
 def set_column_width(spreadsheet_id, column_index, width):
     try:
         sheets_service = get_sheets_service()
+        sheet_id = get_first_sheet_id(spreadsheet_id)
         requests_body = {
             "requests": [
                 {
                     "updateDimensionProperties": {
                         "range": {
-                            "sheetId": 0,
+                            "sheetId": sheet_id,
                             "dimension": "COLUMNS",
                             "startIndex": column_index,
                             "endIndex": column_index + 1
@@ -184,12 +199,13 @@ def set_text_wrap(spreadsheet_id, start_column_index, end_column_index):
     """
     try:
         sheets_service = get_sheets_service()
+        sheet_id = get_first_sheet_id(spreadsheet_id)
         requests_body = {
             "requests": [
                 {
                     "repeatCell": {
                         "range": {
-                            "sheetId": 0,
+                            "sheetId": sheet_id,
                             "startColumnIndex": start_column_index,
                             "endColumnIndex": end_column_index
                         },
