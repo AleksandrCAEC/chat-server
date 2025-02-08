@@ -1,4 +1,5 @@
 import os
+import re
 import logging
 import asyncio
 import pprint
@@ -7,9 +8,11 @@ import openai
 import requests
 from datetime import datetime
 from clientdata import register_or_update_client, verify_client_code, update_last_visit, update_activity_status
-from client_caec import add_message_to_client_file, find_client_file_id, get_sheets_service
-from bible import load_bible_data, save_bible_pair  # Функция save_bible_pair должна быть реализована в bible.py
+from client_caec import add_message_to_client_file, find_client_file_id, get_sheets_service, CLIENT_FILES_DIR
+from bible import load_bible_data, save_bible_pair
+from price_handler import check_ferry_price
 from flask_cors import CORS
+import openpyxl
 
 # Импорты для Telegram Bot (python-telegram-bot v20+)
 from telegram import Update, Bot
@@ -36,56 +39,62 @@ CORS(app)
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    handlers=[
-        logging.FileHandler("server.log"),
-        logging.StreamHandler()
-    ]
+    handlers=[logging.FileHandler("server.log"), logging.StreamHandler()]
 )
 logger = logging.getLogger(__name__)
-
-# Отладочный вывод переменных окружения (для проверки)
 logger.info("Текущие переменные окружения:")
 pprint.pprint(dict(os.environ))
 
 ###############################################
-# Тестовые маршруты для проверки работы Flask
+# Вспомогательные функции для обработки цен
 ###############################################
-@app.route('/test', methods=['GET'])
-def test():
-    return "Test route works", 200
+# Ключевые слова для распознавания запроса о цене.
+PRICE_KEYWORDS = ["цена", "прайс", "сколько стоит", "во сколько обойдется"]
 
-@app.route('/webhook_test', methods=['GET'])
-def telegram_webhook_test():
-    return "Webhook endpoint is active", 200
+def is_price_query(text):
+    lower_text = text.lower()
+    return any(keyword in lower_text for keyword in PRICE_KEYWORDS)
 
-###############################################
-# Основные серверные эндпоинты (регистрация, чат и т.д.)
-###############################################
-def send_telegram_notification(message):
-    telegram_bot_token = os.getenv("TELEGRAM_BOT_TOKEN")
-    telegram_chat_id = os.getenv("TELEGRAM_CHAT_ID")
-    if not telegram_bot_token or not telegram_chat_id:
-        logger.error("Переменные окружения TELEGRAM_BOT_TOKEN и TELEGRAM_CHAT_ID не настроены.")
-        return
-    url = f"https://api.telegram.org/bot{telegram_bot_token}/sendMessage"
-    payload = {"chat_id": telegram_chat_id, "text": message, "parse_mode": "HTML"}
+def get_vehicle_type(text):
+    """
+    Пробует извлечь тип транспортного средства из текста.
+    Если встречается "фура" или "грузовик", возвращает стандартизированное название.
+    """
+    known_types = {"truck": "Truck", "грузовик": "Truck", "fura": "Fura", "фура": "Fura"}
+    for key, standard in known_types.items():
+        if key in text.lower():
+            return standard
+    return None
+
+def get_price_response(vehicle_type, direction="Ro_Ge"):
+    """
+    Вызывает функцию check_ferry_price из модуля price_handler для получения актуальной цены.
+    """
     try:
-        response = requests.post(url, json=payload)
-        response.raise_for_status()
-        logger.info(f"✅ Telegram уведомление отправлено: {response.json()}")
-    except requests.exceptions.RequestException as e:
-        logger.error(f"❌ Ошибка при отправке Telegram уведомления: {e}")
+        response = check_ferry_price(vehicle_type, direction)
+        return response
+    except Exception as e:
+        logger.error(f"Ошибка при получении цены для {vehicle_type}: {e}")
+        return "Произошла ошибка при получении актуальной цены. Пожалуйста, попробуйте позже."
 
+###############################################
+# Функция подготовки контекста для диалога
+###############################################
 def prepare_chat_context(client_code):
+    """
+    Формирует контекст для чата, объединяя системное сообщение с данными из Bible.xlsx
+    и историю переписки клиента из его уникального файла (начиная со 3-й строки).
+    """
     messages = []
     bible_df = load_bible_data()
     if bible_df is None:
         raise Exception("Bible.xlsx не найден или недоступен.")
+    logger.info(f"Bible.xlsx содержит {len(bible_df)} записей.")
     bible_context = "Информация о компании (FAQ):\n"
     for index, row in bible_df.iterrows():
         faq = row.get("FAQ", "")
         answer = row.get("Answers", "")
-        # Приводим значение столбца Verification к строке и верхнему регистру
+        # Приводим значение столбца Verification к верхнему регистру
         verification = str(row.get("Verification", "")).strip().upper()
         # Используем строку только если есть вопрос и ответ, и если Verification не равен "CHECK"
         if faq and answer and verification != "CHECK":
@@ -105,9 +114,10 @@ def prepare_chat_context(client_code):
             range="Sheet1!A:B"
         ).execute()
         values = result.get("values", [])
-        # Пропускаем первые 2 строки (заголовок и строка с данными клиента)
+        # Пропускаем первые 2 строки (заголовок и базовые данные клиента)
         if len(values) >= 2:
             conversation_rows = values[2:]
+            logger.info(f"Найдено {len(conversation_rows)} строк переписки для клиента {client_code}.")
             for row in conversation_rows:
                 if len(row) >= 1 and row[0].strip():
                     messages.append({"role": "user", "content": row[0].strip()})
@@ -117,6 +127,9 @@ def prepare_chat_context(client_code):
         logger.info(f"Файл клиента с кодом {client_code} не найден.")
     return messages
 
+###############################################
+# Основные эндпоинты: регистрация, верификация, чат
+###############################################
 @app.route('/register-client', methods=['POST'])
 def register_client():
     try:
@@ -152,31 +165,41 @@ def chat():
     try:
         data = request.json
         logger.info(f"Получен запрос на чат: {data}")
-        user_message = data.get('message', '')
-        client_code = data.get('client_code', '')
+        user_message = data.get("message", "")
+        client_code = data.get("client_code", "")
         if not user_message or not client_code:
             logger.error("Ошибка: Сообщение и код клиента не могут быть пустыми")
             return jsonify({'error': 'Сообщение и код клиента не могут быть пустыми'}), 400
+        
+        # Обновляем данные клиента (Last Visit и Activity Status)
         update_last_visit(client_code)
         update_activity_status()
-        try:
+        
+        # Если сообщение содержит ключевые слова о цене, обрабатываем запрос через модуль price_handler
+        if is_price_query(user_message):
+            vehicle_type = get_vehicle_type(user_message)
+            if not vehicle_type:
+                response_message = ("Для определения цены, пожалуйста, уточните тип транспортного средства "
+                                    "(например, грузовик или фура).")
+            else:
+                response_message = get_price_response(vehicle_type, direction="Ro_Ge")
+        else:
+            # Стандартная обработка: формируем контекст (Bible.xlsx + история переписки)
             messages = prepare_chat_context(client_code)
-        except Exception as e:
-            error_msg = f"Ошибка подготовки контекста: {e}"
-            logger.error(error_msg)
-            send_telegram_notification(f"Ошибка базы данных: {error_msg}")
-            return jsonify({'error': 'Внутренняя ошибка сервера'}), 500
-        messages.append({"role": "user", "content": user_message})
-        response = openai.ChatCompletion.create(
-            model="gpt-3.5-turbo",
-            messages=messages,
-            max_tokens=150
-        )
-        reply = response['choices'][0]['message']['content'].strip()
+            messages.append({"role": "user", "content": user_message})
+            openai_response = openai.ChatCompletion.create(
+                model="gpt-3.5-turbo",
+                messages=messages,
+                max_tokens=150
+            )
+            response_message = openai_response['choices'][0]['message']['content'].strip()
+        
+        # Сохраняем переписку: сначала сообщение клиента, затем ответ ассистента
         add_message_to_client_file(client_code, user_message, is_assistant=False)
-        add_message_to_client_file(client_code, reply, is_assistant=True)
-        logger.info(f"Ответ от OpenAI: {reply}")
-        return jsonify({'reply': reply}), 200
+        add_message_to_client_file(client_code, response_message, is_assistant=True)
+        
+        logger.info(f"Ответ от OpenAI/price_handler: {response_message}")
+        return jsonify({'reply': response_message}), 200
     except Exception as e:
         logger.error(f"❌ Ошибка в /chat: {e}")
         return jsonify({'error': str(e)}), 500
