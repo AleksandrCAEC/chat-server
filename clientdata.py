@@ -1,4 +1,3 @@
-# clientdata.py
 import os
 from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
@@ -66,6 +65,44 @@ def generate_unique_code():
         logger.error(f"Ошибка генерации уникального кода: {e}")
         raise
 
+def update_last_visit(client_code):
+    try:
+        sheets_service = get_sheets_service()
+        last_visit = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        # Получаем список клиентских кодов из столбца A, начиная со второй строки
+        range_name = "Sheet1!A2:A"
+        result = sheets_service.spreadsheets().values().get(
+            spreadsheetId=SPREADSHEET_ID,
+            range=range_name
+        ).execute()
+        values = result.get("values", [])
+        row_number = None
+        for idx, row in enumerate(values):
+            if row and row[0] == client_code:
+                row_number = idx + 2  # +2: строка 1 – заголовок, далее индексация с 0
+                break
+        if row_number is None:
+            logger.warning(f"Клиент с кодом {client_code} не найден для обновления Last Visit.")
+        else:
+            range_update = f"Sheet1!F{row_number}"
+            body = {"values": [[last_visit]]}
+            sheets_service.spreadsheets().values().update(
+                spreadsheetId=SPREADSHEET_ID,
+                range=range_update,
+                valueInputOption="RAW",
+                body=body
+            ).execute()
+            logger.info(f"Last Visit обновлён для клиента {client_code}: {last_visit}")
+        return True
+    except Exception as e:
+        logger.error(f"Ошибка обновления Last Visit для клиента {client_code}: {e}")
+        try:
+            from client_caec import send_notification
+            send_notification(f"Ошибка обновления Last Visit для клиента {client_code}: {e}")
+        except Exception as ex:
+            logger.error(f"Ошибка отправки уведомления об обновлении Last Visit: {ex}")
+        return False
+
 def save_client_data(client_code, name, phone, email, created_date, last_visit, activity_status):
     try:
         logger.info("Подключение к Google Sheets...")
@@ -116,28 +153,6 @@ def update_activity_status():
     except Exception as e:
         logger.error(f"Ошибка при обновлении статуса активности: {e}")
 
-def update_last_visit(client_code):
-    try:
-        df = load_client_data()
-        last_visit = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        df["Client Code"] = df["Client Code"].astype(str)
-        mask = df["Client Code"] == str(client_code)
-        if mask.sum() == 0:
-            logger.warning(f"Клиент с кодом {client_code} не найден для обновления Last Visit.")
-        else:
-            df.loc[mask, "Last Visit"] = last_visit
-            df.astype(str).to_excel(CLIENT_DATA_PATH, index=False)
-            logger.info(f"Last Visit обновлён для клиента {client_code}: {last_visit}")
-        return True
-    except Exception as e:
-        logger.error(f"Ошибка обновления Last Visit для клиента {client_code}: {e}")
-        try:
-            from client_caec import send_notification
-            send_notification(f"Ошибка обновления Last Visit для клиента {client_code}: {e}")
-        except Exception as ex:
-            logger.error(f"Ошибка отправки уведомления об обновлении Last Visit: {ex}")
-        return False
-
 def register_or_update_client(data):
     try:
         df = load_client_data()
@@ -161,6 +176,8 @@ def register_or_update_client(data):
                     activity_status=activity_status
                 )
             else:
+                # Обновляем Last Visit в Google Sheets
+                update_last_visit(client_code)
                 df.loc[df["Client Code"] == str(client_code), "Last Visit"] = last_visit
                 df.astype(str).to_excel(CLIENT_DATA_PATH, index=False)
             try:
