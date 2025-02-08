@@ -9,7 +9,7 @@ from openpyxl.styles import Alignment, numbers
 from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseUpload, MediaIoBaseDownload
-from config import CLIENT_DATA_PATH, CLIENT_FILES_DIR
+from config import CLIENT_DATA_PATH, CLIENT_FILES_DIR  # Импортируем константы из config
 
 logging.basicConfig(
     level=logging.INFO,
@@ -122,7 +122,9 @@ def create_client_file(client_code, client_data):
                     {
                         "startRow": 0,
                         "startColumn": 0,
-                        "rowData": [{"values": [{"userEnteredValue": {"stringValue": cell}} for cell in row]} for row in values]
+                        "rowData": [
+                            {"values": [{"userEnteredValue": {"stringValue": cell}} for cell in row]} for row in values
+                        ]
                     }
                 ]
             }
@@ -181,9 +183,8 @@ def add_message_to_client_file(client_code, message, is_assistant=False):
     Добавляет новое сообщение в Google Sheets файл клиента Client_{client_code}.xlsx.
     Если сообщение от клиента, создаётся новая строка с текстом в столбце A.
     Если сообщение от ассистента, проверяется последняя строка:
-      - Если в последней строке в столбце A есть текст и столбец B пуст, ответ дописывается в ту же строку.
-      - Иначе добавляется новая строка с ответом в столбце B.
-    При возникновении ошибки отправляется уведомление, но временный файл не создаётся.
+      - Если в последней строке в столбце A есть текст и столбец B пуст, ответ дописывается в ту же строку (обновляется ячейка B).
+      - Иначе добавляется новая строка, где в столбце B записывается ответ.
     """
     try:
         sheets_service = get_sheets_service()
@@ -196,6 +197,7 @@ def add_message_to_client_file(client_code, message, is_assistant=False):
             spreadsheet_id = create_client_file(client_code, client_data)
         current_time = datetime.now().strftime("%d.%m.%y %H:%M")
         if not is_assistant:
+            # Сообщение от клиента – создаём новую строку с текстом в столбце A
             new_row = [f"{current_time} - {message}", "", "", "", "", "", ""]
             body = {"values": [new_row]}
             sheets_service.spreadsheets().values().append(
@@ -207,16 +209,19 @@ def add_message_to_client_file(client_code, message, is_assistant=False):
             ).execute()
             logger.info(f"Запрос клиента добавлен в файл клиента {client_code}.")
         else:
+            # Сообщение от ассистента – пытаемся дописать ответ в ту же строку, где есть вопрос без ответа
             result = sheets_service.spreadsheets().values().get(
                 spreadsheetId=spreadsheet_id,
                 range="Sheet1!A:B"
             ).execute()
             values = result.get("values", [])
-            new_row = [f"{current_time} - {message}", "", "", "", "", "", ""]
+            # По умолчанию готовим новую строку с ответом в столбце B
+            new_row = ["", f"{current_time} - {message}", "", "", "", "", ""]
             if values and len(values) > 0:
                 last_row = values[-1]
-                if len(last_row) >= 1 and last_row[0] and (len(last_row) < 2 or not last_row[1]):
-                    row_number = len(values) + 1
+                # Если в последней строке в столбце A есть текст, а столбец B отсутствует или пуст, обновляем ячейку B
+                if len(last_row) >= 1 and last_row[0] and (len(last_row) < 2 or not last_row[1].strip()):
+                    row_number = len(values) + 1  # строки нумеруются с 1
                     range_update = f"Sheet1!B{row_number}"
                     body = {"values": [[f"{current_time} - {message}"]]}
                     sheets_service.spreadsheets().values().update(
@@ -227,6 +232,7 @@ def add_message_to_client_file(client_code, message, is_assistant=False):
                     ).execute()
                     logger.info(f"Ответ ассистента добавлен в строку {row_number} файла клиента {client_code}.")
                 else:
+                    # Иначе добавляем новую строку с ответом в столбце B
                     body = {"values": [new_row]}
                     sheets_service.spreadsheets().values().append(
                         spreadsheetId=spreadsheet_id,
@@ -237,6 +243,7 @@ def add_message_to_client_file(client_code, message, is_assistant=False):
                     ).execute()
                     logger.info(f"Ответ ассистента добавлен в новую строку файла клиента {client_code}.")
             else:
+                # Если лист пуст, добавляем новую строку
                 body = {"values": [new_row]}
                 sheets_service.spreadsheets().values().append(
                     spreadsheetId=spreadsheet_id,
