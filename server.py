@@ -1,5 +1,4 @@
 import os
-import re
 import logging
 import asyncio
 import pprint
@@ -8,11 +7,9 @@ import openai
 import requests
 from datetime import datetime
 from clientdata import register_or_update_client, verify_client_code, update_last_visit, update_activity_status
-from client_caec import add_message_to_client_file, CLIENT_FILES_DIR
-from bible import load_bible_data
-from price_handler import check_ferry_price
+from client_caec import add_message_to_client_file, find_client_file_id, get_sheets_service
+from bible import load_bible_data, save_bible_pair  # Функция save_bible_pair должна быть реализована в bible.py
 from flask_cors import CORS
-import openpyxl
 
 # Импорты для Telegram Bot (python-telegram-bot v20+)
 from telegram import Update, Bot
@@ -27,91 +24,32 @@ from telegram.ext import (
 
 # Установка пути к файлу service_account_json
 os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = "/etc/secrets/service_account_json"
+
+# Инициализация OpenAI
 openai.api_key = os.getenv("OPENAI_API_KEY")
 
+# Инициализация Flask-приложения
 app = Flask(__name__)
 CORS(app)
 
+# Настройка логирования
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    handlers=[logging.FileHandler("server.log"), logging.StreamHandler()]
+    handlers=[
+        logging.FileHandler("server.log"),
+        logging.StreamHandler()
+    ]
 )
 logger = logging.getLogger(__name__)
+
+# Отладочный вывод переменных окружения (для проверки)
 logger.info("Текущие переменные окружения:")
 pprint.pprint(dict(os.environ))
 
-def prepare_chat_context(client_code):
-    """
-    Формирует контекст для чата, объединяя системное сообщение с данными Bible.xlsx
-    и историю переписки клиента из файла Client_{client_code}.xlsx.
-    Добавлены отладочные сообщения для проверки чтения Bible.xlsx и файла клиента.
-    """
-    messages = []
-    bible_df = load_bible_data()
-    if bible_df is None:
-        raise Exception("Bible.xlsx не найден или недоступен.")
-    logger.info(f"Bible.xlsx содержит {len(bible_df)} записей.")
-    bible_context = "Информация о компании (FAQ):\n"
-    for index, row in bible_df.iterrows():
-        faq = row.get("FAQ", "")
-        answer = row.get("Answers", "")
-        verification = str(row.get("Verification", "")).strip().upper()
-        # Если Verification не равен "CHECK", пара считается подтвержденной
-        if faq and answer and verification != "CHECK":
-            bible_context += f"Вопрос: {faq}\nОтвет: {answer}\n\n"
-    system_message = {
-        "role": "system",
-        "content": f"Вы – умный ассистент компании CAEC. Используйте следующую информацию для ответов:\n{bible_context}"
-    }
-    messages.append(system_message)
-    
-    client_file_path = os.path.join(CLIENT_FILES_DIR, f"Client_{client_code}.xlsx")
-    if os.path.exists(client_file_path):
-        try:
-            wb = openpyxl.load_workbook(client_file_path, data_only=True)
-            ws = wb.active
-            rows = list(ws.iter_rows(min_row=3, values_only=True))
-            logger.info(f"В клиентском файле найдено {len(rows)} строк переписки (начиная с 3-й).")
-            for row in rows:
-                client_msg = row[0]
-                assistant_msg = row[1]
-                if client_msg and isinstance(client_msg, str):
-                    messages.append({"role": "user", "content": client_msg})
-                if assistant_msg and isinstance(assistant_msg, str):
-                    messages.append({"role": "assistant", "content": assistant_msg})
-        except Exception as e:
-            logger.error(f"Ошибка при чтении файла клиента {client_file_path}: {e}")
-    else:
-        logger.warning(f"Файл клиента {client_file_path} не найден.")
-    return messages
-
-# Ключевые слова для распознавания запроса о цене.
-PRICE_KEYWORDS = ["цена", "прайс", "сколько стоит", "во сколько обойдется"]
-
-def is_price_query(text):
-    lower_text = text.lower()
-    return any(keyword in lower_text for keyword in PRICE_KEYWORDS)
-
-def get_vehicle_type(text):
-    """
-    Пробует извлечь тип транспортного средства из текста.
-    Пример: если встречается "фура" или "грузовик", возвращает стандартизированное название.
-    """
-    known_types = {"truck": "Truck", "грузовик": "Truck", "fura": "Fura", "фура": "Fura"}
-    for key, standard in known_types.items():
-        if key in text.lower():
-            return standard
-    return None
-
-def get_price_response(vehicle_type, direction="Ro_Ge"):
-    try:
-        response = check_ferry_price(vehicle_type, direction)
-        return response
-    except Exception as e:
-        logger.error(f"Ошибка при получении цены для {vehicle_type}: {e}")
-        return "Произошла ошибка при получении актуальной цены. Пожалуйста, попробуйте позже."
-
+###############################################
+# Тестовые маршруты для проверки работы Flask
+###############################################
 @app.route('/test', methods=['GET'])
 def test():
     return "Test route works", 200
@@ -120,15 +58,78 @@ def test():
 def telegram_webhook_test():
     return "Webhook endpoint is active", 200
 
+###############################################
+# Основные серверные эндпоинты (регистрация, чат и т.д.)
+###############################################
+def send_telegram_notification(message):
+    telegram_bot_token = os.getenv("TELEGRAM_BOT_TOKEN")
+    telegram_chat_id = os.getenv("TELEGRAM_CHAT_ID")
+    if not telegram_bot_token or not telegram_chat_id:
+        logger.error("Переменные окружения TELEGRAM_BOT_TOKEN и TELEGRAM_CHAT_ID не настроены.")
+        return
+    url = f"https://api.telegram.org/bot{telegram_bot_token}/sendMessage"
+    payload = {"chat_id": telegram_chat_id, "text": message, "parse_mode": "HTML"}
+    try:
+        response = requests.post(url, json=payload)
+        response.raise_for_status()
+        logger.info(f"✅ Telegram уведомление отправлено: {response.json()}")
+    except requests.exceptions.RequestException as e:
+        logger.error(f"❌ Ошибка при отправке Telegram уведомления: {e}")
+
+def prepare_chat_context(client_code):
+    messages = []
+    bible_df = load_bible_data()
+    if bible_df is None:
+        raise Exception("Bible.xlsx не найден или недоступен.")
+    bible_context = "Информация о компании (FAQ):\n"
+    for index, row in bible_df.iterrows():
+        faq = row.get("FAQ", "")
+        answer = row.get("Answers", "")
+        # Приводим значение столбца Verification к строке и верхнему регистру
+        verification = str(row.get("Verification", "")).strip().upper()
+        # Используем строку только если есть вопрос и ответ, и если Verification не равен "CHECK"
+        if faq and answer and verification != "CHECK":
+            bible_context += f"Вопрос: {faq}\nОтвет: {answer}\n\n"
+    system_message = {
+        "role": "system",
+        "content": f"Вы – умный ассистент компании CAEC. Используйте следующую информацию для ответов:\n{bible_context}"
+    }
+    messages.append(system_message)
+    
+    # Чтение истории переписки из Google Sheets клиентского файла
+    spreadsheet_id = find_client_file_id(client_code)
+    if spreadsheet_id:
+        sheets_service = get_sheets_service()
+        result = sheets_service.spreadsheets().values().get(
+            spreadsheetId=spreadsheet_id,
+            range="Sheet1!A:B"
+        ).execute()
+        values = result.get("values", [])
+        # Пропускаем первые 2 строки (заголовок и строка с данными клиента)
+        if len(values) >= 2:
+            conversation_rows = values[2:]
+            for row in conversation_rows:
+                if len(row) >= 1 and row[0].strip():
+                    messages.append({"role": "user", "content": row[0].strip()})
+                if len(row) >= 2 and row[1].strip():
+                    messages.append({"role": "assistant", "content": row[1].strip()})
+    else:
+        logger.info(f"Файл клиента с кодом {client_code} не найден.")
+    return messages
+
 @app.route('/register-client', methods=['POST'])
 def register_client():
     try:
         data = request.json
         logger.info(f"Получен запрос на регистрацию клиента: {data}")
         result = register_or_update_client(data)
+        if result.get("isNewClient", True):
+            send_telegram_notification(f"🆕 Новый пользователь зарегистрирован: {result['name']}, {result['email']}, {result['phone']}, Код: {result['uniqueCode']}")
+        else:
+            send_telegram_notification(f"🔙 Пользователь вернулся: {result['name']}, {result['email']}, {result['phone']}, Код: {result['uniqueCode']}")
         return jsonify(result), 200
     except Exception as e:
-        logger.error(f"Ошибка в /register-client: {e}")
+        logger.error(f"❌ Ошибка в /register-client: {e}")
         return jsonify({'error': str(e)}), 400
 
 @app.route('/verify-code', methods=['POST'])
@@ -139,10 +140,11 @@ def verify_code():
         code = data.get('code', '')
         client_data = verify_client_code(code)
         if client_data:
+            send_telegram_notification(f"🔙 Пользователь вернулся: {client_data['Name']}, {client_data['Email']}, {client_data['Phone']}, Код: {code}")
             return jsonify({'status': 'success', 'clientData': client_data}), 200
         return jsonify({'status': 'error', 'message': 'Неверный код'}), 404
     except Exception as e:
-        logger.error(f"Ошибка в /verify-code: {e}")
+        logger.error(f"❌ Ошибка в /verify-code: {e}")
         return jsonify({'error': str(e)}), 400
 
 @app.route('/chat', methods=['POST'])
@@ -150,62 +152,44 @@ def chat():
     try:
         data = request.json
         logger.info(f"Получен запрос на чат: {data}")
-        user_message = data.get("message", "")
-        client_code = data.get("client_code", "")
-        
-        # Обновляем данные клиента (Last Visit и Activity Status)
+        user_message = data.get('message', '')
+        client_code = data.get('client_code', '')
+        if not user_message or not client_code:
+            logger.error("Ошибка: Сообщение и код клиента не могут быть пустыми")
+            return jsonify({'error': 'Сообщение и код клиента не могут быть пустыми'}), 400
         update_last_visit(client_code)
         update_activity_status()
-        
-        if is_price_query(user_message):
-            bible_df = load_bible_data()
-            price_marker_found = False
-            for idx, row in bible_df.iterrows():
-                faq = row.get("FAQ", "").lower()
-                answer = row.get("Answers", "").lower()
-                # Здесь ожидаем, что для вопросов о цене в Bible.xlsx в столбце Answers записан маркер PRICE_QUERY
-                if is_price_query(user_message) and "price_query" in answer:
-                    price_marker_found = True
-                    break
-            if price_marker_found:
-                vehicle_type = get_vehicle_type(user_message)
-                if not vehicle_type:
-                    response_message = ("Для определения цены, пожалуйста, уточните тип транспортного средства "
-                                        "(например, грузовик или фура).")
-                else:
-                    response_message = get_price_response(vehicle_type, direction="Ro_Ge")
-            else:
-                # Если маркер не найден, обрабатываем стандартно через OpenAI
-                context_messages = prepare_chat_context(client_code)
-                context_messages.append({"role": "user", "content": user_message})
-                openai_response = openai.ChatCompletion.create(
-                    model="gpt-3.5-turbo",
-                    messages=context_messages,
-                    max_tokens=150
-                )
-                response_message = openai_response['choices'][0]['message']['content'].strip()
-        else:
-            # Стандартная обработка: собираем контекст из Bible.xlsx и истории переписки
-            context_messages = prepare_chat_context(client_code)
-            context_messages.append({"role": "user", "content": user_message})
-            openai_response = openai.ChatCompletion.create(
-                model="gpt-3.5-turbo",
-                messages=context_messages,
-                max_tokens=150
-            )
-            response_message = openai_response['choices'][0]['message']['content'].strip()
-        
-        # Сохраняем переписку в файл клиента: сначала сообщение клиента, затем ответ ассистента.
+        try:
+            messages = prepare_chat_context(client_code)
+        except Exception as e:
+            error_msg = f"Ошибка подготовки контекста: {e}"
+            logger.error(error_msg)
+            send_telegram_notification(f"Ошибка базы данных: {error_msg}")
+            return jsonify({'error': 'Внутренняя ошибка сервера'}), 500
+        messages.append({"role": "user", "content": user_message})
+        response = openai.ChatCompletion.create(
+            model="gpt-3.5-turbo",
+            messages=messages,
+            max_tokens=150
+        )
+        reply = response['choices'][0]['message']['content'].strip()
         add_message_to_client_file(client_code, user_message, is_assistant=False)
-        add_message_to_client_file(client_code, response_message, is_assistant=True)
-        
-        logger.info(f"Ответ от сервера: {response_message}")
-        return jsonify({"reply": response_message}), 200
+        add_message_to_client_file(client_code, reply, is_assistant=True)
+        logger.info(f"Ответ от OpenAI: {reply}")
+        return jsonify({'reply': reply}), 200
     except Exception as e:
-        logger.error(f"Ошибка в /chat: {e}")
-        return jsonify({"error": str(e)}), 500
+        logger.error(f"❌ Ошибка в /chat: {e}")
+        return jsonify({'error': str(e)}), 500
 
-# Telegram Bot Integration
+@app.route('/', methods=['GET'])
+def home():
+    return jsonify({"status": "Server is running!"}), 200
+
+##############################################
+# Интеграция Telegram Bot для команды /bible
+##############################################
+from telegram.ext import ConversationHandler
+
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 if not TELEGRAM_BOT_TOKEN:
     logger.error("Переменная окружения TELEGRAM_BOT_TOKEN не задана!")
@@ -240,7 +224,6 @@ async def ask_answer(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     question = context.user_data.get('question')
     logger.info(f"Сохраняем пару: Вопрос: {question} | Ответ: {answer}")
     try:
-        from bible import save_bible_pair
         save_bible_pair(question, answer)
     except Exception as e:
         logger.error(f"Ошибка сохранения пары в Bible.xlsx: {e}")
@@ -251,7 +234,6 @@ async def cancel_bible(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
     await update.message.reply_text("Операция отменена.")
     return ConversationHandler.END
 
-from telegram.ext import ConversationHandler
 bible_conv_handler = ConversationHandler(
     entry_points=[CommandHandler("bible", bible_start)],
     states={
@@ -277,6 +259,9 @@ def telegram_webhook():
         logger.error(f"Ошибка обработки Telegram update: {e}")
         return jsonify({'error': str(e)}), 500
 
+##############################################
+# Основной блок запуска
+##############################################
 global_loop = asyncio.new_event_loop()
 asyncio.set_event_loop(global_loop)
 if __name__ == '__main__':
