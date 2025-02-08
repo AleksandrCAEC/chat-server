@@ -41,18 +41,23 @@ logger = logging.getLogger(__name__)
 logger.info("Текущие переменные окружения:")
 pprint.pprint(dict(os.environ))
 
-# Функция подготовки контекста для диалога: читает Bible.xlsx и историю переписки клиента.
 def prepare_chat_context(client_code):
+    """
+    Формирует контекст для чата, объединяя системное сообщение с данными Bible.xlsx
+    и историю переписки клиента из файла Client_{client_code}.xlsx.
+    Добавлены отладочные сообщения для проверки чтения Bible.xlsx и файла клиента.
+    """
     messages = []
     bible_df = load_bible_data()
     if bible_df is None:
         raise Exception("Bible.xlsx не найден или недоступен.")
+    logger.info(f"Bible.xlsx содержит {len(bible_df)} записей.")
     bible_context = "Информация о компании (FAQ):\n"
     for index, row in bible_df.iterrows():
         faq = row.get("FAQ", "")
         answer = row.get("Answers", "")
         verification = str(row.get("Verification", "")).strip().upper()
-        # Если в Verification НЕ стоит "CHECK", пара считается подтвержденной.
+        # Если Verification не равен "CHECK", пара считается подтвержденной
         if faq and answer and verification != "CHECK":
             bible_context += f"Вопрос: {faq}\nОтвет: {answer}\n\n"
     system_message = {
@@ -66,9 +71,9 @@ def prepare_chat_context(client_code):
         try:
             wb = openpyxl.load_workbook(client_file_path, data_only=True)
             ws = wb.active
-            # Предполагается, что первые две строки содержат заголовок и базовые данные клиента,
-            # а переписка начинается с 3-й строки.
-            for row in ws.iter_rows(min_row=3, values_only=True):
+            rows = list(ws.iter_rows(min_row=3, values_only=True))
+            logger.info(f"В клиентском файле найдено {len(rows)} строк переписки (начиная с 3-й).")
+            for row in rows:
                 client_msg = row[0]
                 assistant_msg = row[1]
                 if client_msg and isinstance(client_msg, str):
@@ -77,6 +82,8 @@ def prepare_chat_context(client_code):
                     messages.append({"role": "assistant", "content": assistant_msg})
         except Exception as e:
             logger.error(f"Ошибка при чтении файла клиента {client_file_path}: {e}")
+    else:
+        logger.warning(f"Файл клиента {client_file_path} не найден.")
     return messages
 
 # Ключевые слова для распознавания запроса о цене.
@@ -87,6 +94,10 @@ def is_price_query(text):
     return any(keyword in lower_text for keyword in PRICE_KEYWORDS)
 
 def get_vehicle_type(text):
+    """
+    Пробует извлечь тип транспортного средства из текста.
+    Пример: если встречается "фура" или "грузовик", возвращает стандартизированное название.
+    """
     known_types = {"truck": "Truck", "грузовик": "Truck", "fura": "Fura", "фура": "Fura"}
     for key, standard in known_types.items():
         if key in text.lower():
@@ -142,19 +153,17 @@ def chat():
         user_message = data.get("message", "")
         client_code = data.get("client_code", "")
         
-        # Обновляем данные клиента (Last Visit и активность)
+        # Обновляем данные клиента (Last Visit и Activity Status)
         update_last_visit(client_code)
         update_activity_status()
         
-        # Если запрос содержит ключевые слова о цене и в Bible.xlsx найден маркер PRICE_QUERY,
-        # то используем специальную обработку для цены.
         if is_price_query(user_message):
             bible_df = load_bible_data()
             price_marker_found = False
-            # Ищем среди FAQ ответы, в которых указан маркер PRICE_QUERY (без кавычек)
             for idx, row in bible_df.iterrows():
                 faq = row.get("FAQ", "").lower()
                 answer = row.get("Answers", "").lower()
+                # Здесь ожидаем, что для вопросов о цене в Bible.xlsx в столбце Answers записан маркер PRICE_QUERY
                 if is_price_query(user_message) and "price_query" in answer:
                     price_marker_found = True
                     break
@@ -166,7 +175,7 @@ def chat():
                 else:
                     response_message = get_price_response(vehicle_type, direction="Ro_Ge")
             else:
-                # Если маркер не найден, продолжаем стандартную обработку через OpenAI
+                # Если маркер не найден, обрабатываем стандартно через OpenAI
                 context_messages = prepare_chat_context(client_code)
                 context_messages.append({"role": "user", "content": user_message})
                 openai_response = openai.ChatCompletion.create(
@@ -176,7 +185,7 @@ def chat():
                 )
                 response_message = openai_response['choices'][0]['message']['content'].strip()
         else:
-            # Стандартная обработка: собираем весь контекст (Bible.xlsx + история переписки)
+            # Стандартная обработка: собираем контекст из Bible.xlsx и истории переписки
             context_messages = prepare_chat_context(client_code)
             context_messages.append({"role": "user", "content": user_message})
             openai_response = openai.ChatCompletion.create(
@@ -186,7 +195,7 @@ def chat():
             )
             response_message = openai_response['choices'][0]['message']['content'].strip()
         
-        # Сохраняем переписку (сначала запрос клиента, затем ответ ассистента)
+        # Сохраняем переписку в файл клиента: сначала сообщение клиента, затем ответ ассистента.
         add_message_to_client_file(client_code, user_message, is_assistant=False)
         add_message_to_client_file(client_code, response_message, is_assistant=True)
         
