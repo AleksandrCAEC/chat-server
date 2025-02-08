@@ -46,9 +46,26 @@ logger.info("Текущие переменные окружения:")
 pprint.pprint(dict(os.environ))
 
 ###############################################
-# Вспомогательные функции для обработки цен
+# ФУНКЦИЯ ОТПРАВКИ УВЕДОМЛЕНИЙ ЧЕРЕЗ TELEGRAM
 ###############################################
-# Ключевые слова для распознавания запроса о цене.
+def send_telegram_notification(message):
+    telegram_bot_token = os.getenv("TELEGRAM_BOT_TOKEN")
+    telegram_chat_id = os.getenv("TELEGRAM_CHAT_ID")
+    if not telegram_bot_token or not telegram_chat_id:
+        logger.error("Переменные окружения TELEGRAM_BOT_TOKEN и TELEGRAM_CHAT_ID не настроены.")
+        return
+    url = f"https://api.telegram.org/bot{telegram_bot_token}/sendMessage"
+    payload = {"chat_id": telegram_chat_id, "text": message, "parse_mode": "HTML"}
+    try:
+        response = requests.post(url, json=payload)
+        response.raise_for_status()
+        logger.info(f"✅ Telegram уведомление отправлено: {response.json()}")
+    except requests.exceptions.RequestException as e:
+        logger.error(f"❌ Ошибка при отправке Telegram уведомления: {e}")
+
+###############################################
+# Вспомогательные функции для обработки запросов о цене
+###############################################
 PRICE_KEYWORDS = ["цена", "прайс", "сколько стоит", "во сколько обойдется"]
 
 def is_price_query(text):
@@ -56,10 +73,7 @@ def is_price_query(text):
     return any(keyword in lower_text for keyword in PRICE_KEYWORDS)
 
 def get_vehicle_type(text):
-    """
-    Пробует извлечь тип транспортного средства из текста.
-    Если встречается "фура" или "грузовик", возвращает стандартизированное название.
-    """
+    # Простая логика извлечения типа транспортного средства
     known_types = {"truck": "Truck", "грузовик": "Truck", "fura": "Fura", "фура": "Fura"}
     for key, standard in known_types.items():
         if key in text.lower():
@@ -67,9 +81,6 @@ def get_vehicle_type(text):
     return None
 
 def get_price_response(vehicle_type, direction="Ro_Ge"):
-    """
-    Вызывает функцию check_ferry_price из модуля price_handler для получения актуальной цены.
-    """
     try:
         response = check_ferry_price(vehicle_type, direction)
         return response
@@ -78,13 +89,9 @@ def get_price_response(vehicle_type, direction="Ro_Ge"):
         return "Произошла ошибка при получении актуальной цены. Пожалуйста, попробуйте позже."
 
 ###############################################
-# Функция подготовки контекста для диалога
+# Функция подготовки контекста для диалога (память ассистента)
 ###############################################
 def prepare_chat_context(client_code):
-    """
-    Формирует контекст для чата, объединяя системное сообщение с данными из Bible.xlsx
-    и историю переписки клиента из его уникального файла (начиная со 3-й строки).
-    """
     messages = []
     bible_df = load_bible_data()
     if bible_df is None:
@@ -94,9 +101,9 @@ def prepare_chat_context(client_code):
     for index, row in bible_df.iterrows():
         faq = row.get("FAQ", "")
         answer = row.get("Answers", "")
-        # Приводим значение столбца Verification к верхнему регистру
+        # Приводим Verification к верхнему регистру
         verification = str(row.get("Verification", "")).strip().upper()
-        # Используем строку только если есть вопрос и ответ, и если Verification не равен "CHECK"
+        # Используем запись, если есть FAQ и Answer и если Verification не равен "CHECK"
         if faq and answer and verification != "CHECK":
             bible_context += f"Вопрос: {faq}\nОтвет: {answer}\n\n"
     system_message = {
@@ -105,7 +112,7 @@ def prepare_chat_context(client_code):
     }
     messages.append(system_message)
     
-    # Чтение истории переписки из Google Sheets клиентского файла
+    # Чтение истории переписки из уникального файла клиента (начиная со 3-й строки)
     spreadsheet_id = find_client_file_id(client_code)
     if spreadsheet_id:
         sheets_service = get_sheets_service()
@@ -114,7 +121,6 @@ def prepare_chat_context(client_code):
             range="Sheet1!A:B"
         ).execute()
         values = result.get("values", [])
-        # Пропускаем первые 2 строки (заголовок и базовые данные клиента)
         if len(values) >= 2:
             conversation_rows = values[2:]
             logger.info(f"Найдено {len(conversation_rows)} строк переписки для клиента {client_code}.")
@@ -128,7 +134,7 @@ def prepare_chat_context(client_code):
     return messages
 
 ###############################################
-# Основные эндпоинты: регистрация, верификация, чат
+# Эндпоинты для регистрации, верификации, и диалога
 ###############################################
 @app.route('/register-client', methods=['POST'])
 def register_client():
@@ -171,11 +177,11 @@ def chat():
             logger.error("Ошибка: Сообщение и код клиента не могут быть пустыми")
             return jsonify({'error': 'Сообщение и код клиента не могут быть пустыми'}), 400
         
-        # Обновляем данные клиента (Last Visit и Activity Status)
+        # Обновляем данные клиента
         update_last_visit(client_code)
         update_activity_status()
         
-        # Если сообщение содержит ключевые слова о цене, обрабатываем запрос через модуль price_handler
+        # Если запрос содержит ключевые слова о цене, вызываем обработку через price_handler
         if is_price_query(user_message):
             vehicle_type = get_vehicle_type(user_message)
             if not vehicle_type:
@@ -184,7 +190,7 @@ def chat():
             else:
                 response_message = get_price_response(vehicle_type, direction="Ro_Ge")
         else:
-            # Стандартная обработка: формируем контекст (Bible.xlsx + история переписки)
+            # Стандартная обработка: формируем контекст (Bible.xlsx + история переписки) и вызываем OpenAI
             messages = prepare_chat_context(client_code)
             messages.append({"role": "user", "content": user_message})
             openai_response = openai.ChatCompletion.create(
