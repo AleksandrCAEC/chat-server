@@ -95,8 +95,10 @@ def check_ferry_price(vehicle_type, direction="Ro_Ge"):
       1. Получаем актуальные тарифы с сайта через get_ferry_prices() из модуля price.
       2. Загружаем данные из Price.xlsx с помощью load_price_data().
       3. Если для заданного типа транспортного средства данные отсутствуют хотя в одном из источников, возвращаем соответствующее сообщение.
-      4. Сравниваем цены из сайта и из Price.xlsx.
-         - Если цены совпадают, возвращаем сообщение с подтвержденной ценой, а также добавляем Remark и, если заполнено поле Condition, информацию о дополнительных условиях.
+      4. Сравниваем цены из сайта и из Price.xlsx:
+         - Если цены совпадают, возвращаем сообщение с подтвержденной ценой, включая Remark.
+           Если в колонке Condition указаны наводящие вопросы, ответ дополнительно содержит приглашение: 
+           "Для более точного расчёта, пожалуйста, ответьте на следующий вопрос: {Condition}"
          - Если цены различаются, возвращаем сообщение, что цена требует уточнения, и отправляем уведомление менеджеру.
     """
     try:
@@ -121,7 +123,7 @@ def check_ferry_price(vehicle_type, direction="Ro_Ge"):
             if sheet_prices[vehicle_type].get("remark"):
                 response_message += f" Примечание: {sheet_prices[vehicle_type]['remark']}"
             if sheet_prices[vehicle_type].get("condition"):
-                response_message += f" Дополнительно, обратите внимание: {sheet_prices[vehicle_type]['condition']}"
+                response_message += f" Для более точного расчёта, пожалуйста, ответьте на следующий вопрос: {sheet_prices[vehicle_type]['condition']}"
             return response_message
         else:
             message_to_manager = (f"ВНИМАНИЕ: Для транспортного средства '{vehicle_type}' цены различаются. "
