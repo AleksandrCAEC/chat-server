@@ -66,10 +66,17 @@ def generate_unique_code():
         raise
 
 def update_last_visit(client_code):
+    """
+    Обновляет дату/время последнего посещения (Last Visit) в файле ClientData.xlsx (Google Sheets)
+    для клиента с указанным кодом. Клиент ищется в колонке A (начиная со второй строки), а обновление
+    производится в колонке F.
+    """
     try:
         sheets_service = get_sheets_service()
+        if not sheets_service:
+            raise Exception("Google Sheets API не инициализирован.")
         last_visit = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        # Получаем список клиентских кодов из столбца A, начиная со второй строки
+        # Получаем данные из колонки A, начиная со второй строки
         range_name = "Sheet1!A2:A"
         result = sheets_service.spreadsheets().values().get(
             spreadsheetId=SPREADSHEET_ID,
@@ -77,22 +84,24 @@ def update_last_visit(client_code):
         ).execute()
         values = result.get("values", [])
         row_number = None
+        client_code = str(client_code).strip()
         for idx, row in enumerate(values):
-            if row and row[0] == client_code:
-                row_number = idx + 2  # +2: строка 1 – заголовок, далее индексация с 0
+            if row and row[0].strip() == client_code:
+                row_number = idx + 2  # строка 1 – заголовок, затем начинается индексирование
                 break
         if row_number is None:
             logger.warning(f"Клиент с кодом {client_code} не найден для обновления Last Visit.")
         else:
+            # Обновляем ячейку в колонке F (Last Visit) соответствующей строки
             range_update = f"Sheet1!F{row_number}"
             body = {"values": [[last_visit]]}
             sheets_service.spreadsheets().values().update(
                 spreadsheetId=SPREADSHEET_ID,
                 range=range_update,
-                valueInputOption="RAW",
+                valueInputOption="USER_ENTERED",
                 body=body
             ).execute()
-            logger.info(f"Last Visit обновлён для клиента {client_code}: {last_visit}")
+            logger.info(f"Last Visit обновлён для клиента {client_code} в строке {row_number}: {last_visit}")
         return True
     except Exception as e:
         logger.error(f"Ошибка обновления Last Visit для клиента {client_code}: {e}")
@@ -176,7 +185,6 @@ def register_or_update_client(data):
                     activity_status=activity_status
                 )
             else:
-                # Обновляем Last Visit в Google Sheets
                 update_last_visit(client_code)
                 df.loc[df["Client Code"] == str(client_code), "Last Visit"] = last_visit
                 df.astype(str).to_excel(CLIENT_DATA_PATH, index=False)
