@@ -184,8 +184,9 @@ def add_message_to_client_file(client_code, message, is_assistant=False):
     Если сообщение от клиента, создаётся новая строка с текстом в столбце A (вопрос),
     а столбец B оставляется пустым.
     
-    Если сообщение от ассистента, обновляется ячейка столбца B в последней добавленной строке,
-    то есть ответ записывается напротив последнего вопроса.
+    Если сообщение от ассистента, производится анализ всех строк (начиная с 3-й),
+    чтобы найти последнюю строку, в которой записан вопрос без ответа, и затем
+    обновляется ячейка столбца B именно в этой строке.
     """
     try:
         sheets_service = get_sheets_service()
@@ -204,8 +205,9 @@ def add_message_to_client_file(client_code, message, is_assistant=False):
         current_time = datetime.now().strftime("%d.%m.%y %H:%M")
         
         if not is_assistant:
-            # Добавляем новую строку с вопросом в столбце A, а столбец B оставляем пустым.
+            # Добавляем новую строку: в столбце A записываем вопрос, в столбце B оставляем пустым.
             new_row = [f"{current_time} - {message}", ""]
+            # Дополняем до 7 столбцов, если нужно
             while len(new_row) < 7:
                 new_row.append("")
             body = {"values": [new_row]}
@@ -218,26 +220,37 @@ def add_message_to_client_file(client_code, message, is_assistant=False):
             ).execute()
             logger.info(f"Запрос клиента добавлен в файл клиента {client_code}.")
         else:
-            # Обновляем ячейку столбца B в последней строке для записи ответа ассистента.
+            # Считываем все значения из диапазона A:B
             result = sheets_service.spreadsheets().values().get(
                 spreadsheetId=spreadsheet_id,
                 range="Sheet1!A:B"
             ).execute()
             values = result.get("values", [])
+            # Если записей меньше двух строк (заголовок и данные клиента), переписка отсутствует.
             if len(values) < 3:
                 logger.error("Нет записей переписки для обновления ответа ассистента.")
                 return
-            # Номер строки для обновления равен общему количеству строк
-            row_number = len(values)
-            range_update = f"Sheet1!B{row_number}"
-            body = {"values": [[f"{current_time} - {message}"]]}
-            sheets_service.spreadsheets().values().update(
-                spreadsheetId=spreadsheet_id,
-                range=range_update,
-                valueInputOption="RAW",
-                body=body
-            ).execute()
-            logger.info(f"Ответ ассистента обновлен в строке {row_number} файла клиента {client_code}.")
+            # Проходим по строкам, начиная с 3-й (индекс 2), чтобы найти последнюю строку, где:
+            # - в столбце A есть текст (вопрос)
+            # - в столбце B отсутствует текст (нет ответа)
+            target_row = None
+            conversation_rows = values[2:]  # начиная с 3-й строки
+            for idx, row in enumerate(conversation_rows):
+                # Номер строки в таблице = idx + 3
+                if row and row[0].strip() and (len(row) < 2 or not row[1].strip()):
+                    target_row = idx + 3
+            if target_row is not None:
+                range_update = f"Sheet1!B{target_row}"
+                body = {"values": [[f"{current_time} - {message}"]]}
+                sheets_service.spreadsheets().values().update(
+                    spreadsheetId=spreadsheet_id,
+                    range=range_update,
+                    valueInputOption="RAW",
+                    body=body
+                ).execute()
+                logger.info(f"Ответ ассистента обновлен в строке {target_row} файла клиента {client_code}.")
+            else:
+                logger.error("Не найдена строка с вопросом без ответа для обновления.")
     except Exception as e:
         logger.error(f"Ошибка при добавлении сообщения в файл клиента {client_code}: {e}")
         send_notification(f"Ошибка при добавлении сообщения в файл клиента {client_code}: {e}")
