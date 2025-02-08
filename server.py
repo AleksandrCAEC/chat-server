@@ -31,7 +31,7 @@ os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = "/etc/secrets/service_account_jso
 # Инициализация OpenAI
 openai.api_key = os.getenv("OPENAI_API_KEY")
 
-# Инициализация Flask-приложения
+# Инициализация Flask-приложения и CORS
 app = Flask(__name__)
 CORS(app)
 
@@ -64,16 +64,14 @@ def send_telegram_notification(message):
         logger.error(f"❌ Ошибка при отправке Telegram уведомления: {e}")
 
 ###############################################
-# Вспомогательные функции для обработки запросов о цене
+# ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ДЛЯ ОБРАБОТКИ ЗАПРОСОВ О ЦЕНЕ
 ###############################################
 PRICE_KEYWORDS = ["цена", "прайс", "сколько стоит", "во сколько обойдется"]
 
 def is_price_query(text):
-    lower_text = text.lower()
-    return any(keyword in lower_text for keyword in PRICE_KEYWORDS)
+    return any(keyword in text.lower() for keyword in PRICE_KEYWORDS)
 
 def get_vehicle_type(text):
-    # Простая логика извлечения типа транспортного средства
     known_types = {"truck": "Truck", "грузовик": "Truck", "fura": "Fura", "фура": "Fura"}
     for key, standard in known_types.items():
         if key in text.lower():
@@ -82,14 +80,13 @@ def get_vehicle_type(text):
 
 def get_price_response(vehicle_type, direction="Ro_Ge"):
     try:
-        response = check_ferry_price(vehicle_type, direction)
-        return response
+        return check_ferry_price(vehicle_type, direction)
     except Exception as e:
         logger.error(f"Ошибка при получении цены для {vehicle_type}: {e}")
         return "Произошла ошибка при получении актуальной цены. Пожалуйста, попробуйте позже."
 
 ###############################################
-# Функция подготовки контекста для диалога (память ассистента)
+# ФУНКЦИЯ ПОДГОТОВКИ КОНТЕКСТА ДЛЯ ДИАЛОГА (ПАМЯТЬ АССИСТЕНТА)
 ###############################################
 def prepare_chat_context(client_code):
     messages = []
@@ -101,9 +98,7 @@ def prepare_chat_context(client_code):
     for index, row in bible_df.iterrows():
         faq = row.get("FAQ", "")
         answer = row.get("Answers", "")
-        # Приводим Verification к верхнему регистру
         verification = str(row.get("Verification", "")).strip().upper()
-        # Используем запись, если есть FAQ и Answer и если Verification не равен "CHECK"
         if faq and answer and verification != "CHECK":
             bible_context += f"Вопрос: {faq}\nОтвет: {answer}\n\n"
     system_message = {
@@ -112,7 +107,7 @@ def prepare_chat_context(client_code):
     }
     messages.append(system_message)
     
-    # Чтение истории переписки из уникального файла клиента (начиная со 3-й строки)
+    # Чтение истории переписки из файла клиента (начиная со 3-й строки)
     spreadsheet_id = find_client_file_id(client_code)
     if spreadsheet_id:
         sheets_service = get_sheets_service()
@@ -134,7 +129,7 @@ def prepare_chat_context(client_code):
     return messages
 
 ###############################################
-# Эндпоинты для регистрации, верификации, и диалога
+# ЭНДПОИНТЫ РЕГИСТРАЦИИ, ВЕРИФИКАЦИИ И ЧАТА
 ###############################################
 @app.route('/register-client', methods=['POST'])
 def register_client():
@@ -177,11 +172,10 @@ def chat():
             logger.error("Ошибка: Сообщение и код клиента не могут быть пустыми")
             return jsonify({'error': 'Сообщение и код клиента не могут быть пустыми'}), 400
         
-        # Обновляем данные клиента
         update_last_visit(client_code)
         update_activity_status()
         
-        # Если запрос содержит ключевые слова о цене, вызываем обработку через price_handler
+        # Если сообщение содержит ключевые слова о цене, вызываем специальную обработку
         if is_price_query(user_message):
             vehicle_type = get_vehicle_type(user_message)
             if not vehicle_type:
@@ -190,7 +184,6 @@ def chat():
             else:
                 response_message = get_price_response(vehicle_type, direction="Ro_Ge")
         else:
-            # Стандартная обработка: формируем контекст (Bible.xlsx + история переписки) и вызываем OpenAI
             messages = prepare_chat_context(client_code)
             messages.append({"role": "user", "content": user_message})
             openai_response = openai.ChatCompletion.create(
@@ -200,7 +193,6 @@ def chat():
             )
             response_message = openai_response['choices'][0]['message']['content'].strip()
         
-        # Сохраняем переписку: сначала сообщение клиента, затем ответ ассистента
         add_message_to_client_file(client_code, user_message, is_assistant=False)
         add_message_to_client_file(client_code, response_message, is_assistant=True)
         
