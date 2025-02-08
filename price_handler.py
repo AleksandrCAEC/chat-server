@@ -27,14 +27,14 @@ def load_price_data():
       B: Price_Ro_Ge (направление: Romania -> Georgia)
       C: Price_Ge_Ro (направление: Georgia -> Romania)
       D: Remark
-      E: Condition
+      E: Condition (наводящие вопросы, могут быть разделены символом новой строки)
     Возвращает словарь вида:
       {
          "VehicleType1": {
              "price_Ro_Ge": "...",
              "price_Ge_Ro": "...",
              "remark": "...",
-             "condition": "..."
+             "condition": "..."  # исходный текст из ячейки
          },
          ...
       }
@@ -83,6 +83,17 @@ def send_telegram_notification(message):
     except Exception as ex:
         logger.error(f"Ошибка при отправке уведомления: {ex}")
 
+def parse_guiding_questions(condition_text):
+    """
+    Если в текстовом поле Condition записано более одного вопроса, пытается разбить их по символу новой строки.
+    Возвращает список вопросов.
+    """
+    if not condition_text:
+        return []
+    # Предполагаем, что вопросы разделены символом новой строки
+    questions = [q.strip() for q in condition_text.split("\n") if q.strip()]
+    return questions
+
 def check_ferry_price(vehicle_type, direction="Ro_Ge"):
     """
     Сравнивает тарифы для указанного типа транспортного средства и направления.
@@ -94,11 +105,11 @@ def check_ferry_price(vehicle_type, direction="Ro_Ge"):
     Логика:
       1. Получаем актуальные тарифы с сайта через get_ferry_prices() из модуля price.
       2. Загружаем данные из Price.xlsx с помощью load_price_data().
-      3. Если для заданного типа транспортного средства данные отсутствуют хотя в одном из источников, возвращаем соответствующее сообщение.
+      3. Если для заданного типа транспортного средства данные отсутствуют в одном из источников, возвращаем соответствующее сообщение.
       4. Сравниваем цены из сайта и из Price.xlsx:
-         - Если цены совпадают, возвращаем сообщение с подтвержденной ценой, включая Remark.
-           Если в колонке Condition указаны наводящие вопросы, ответ дополнительно содержит приглашение: 
-           "Для более точного расчёта, пожалуйста, ответьте на следующий вопрос: {Condition}"
+         - Если цены совпадают, формируем ответ с подтвержденной ценой и добавляем Remark.
+           Если в колонке Condition указаны guiding questions, в ответ добавляется приглашение ответить на первую из них:
+           «Для более точного расчёта, пожалуйста, ответьте на следующий вопрос: {guiding_question}»
          - Если цены различаются, возвращаем сообщение, что цена требует уточнения, и отправляем уведомление менеджеру.
     """
     try:
@@ -123,7 +134,10 @@ def check_ferry_price(vehicle_type, direction="Ro_Ge"):
             if sheet_prices[vehicle_type].get("remark"):
                 response_message += f" Примечание: {sheet_prices[vehicle_type]['remark']}"
             if sheet_prices[vehicle_type].get("condition"):
-                response_message += f" Для более точного расчёта, пожалуйста, ответьте на следующий вопрос: {sheet_prices[vehicle_type]['condition']}"
+                # Парсим наводящие вопросы
+                guiding_questions = parse_guiding_questions(sheet_prices[vehicle_type]['condition'])
+                if guiding_questions:
+                    response_message += f" Для более точного расчёта, пожалуйста, ответьте на следующий вопрос: {guiding_questions[0]}"
             return response_message
         else:
             message_to_manager = (f"ВНИМАНИЕ: Для транспортного средства '{vehicle_type}' цены различаются. "
@@ -137,7 +151,7 @@ def check_ferry_price(vehicle_type, direction="Ro_Ge"):
 
 if __name__ == "__main__":
     # Пример вызова функции для тестирования
-    vehicle = "Truck"  # пример: заменить на реальный тип транспортного средства, как в таблице
+    vehicle = "Truck"  # Пример: заменить на реальный тип транспортного средства, как в таблице Price.xlsx
     direction = "Ro_Ge"  # или "Ge_Ro"
     message = check_ferry_price(vehicle, direction)
     print(message)
