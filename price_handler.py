@@ -27,21 +27,24 @@ def load_price_data():
       B: Price_Ro_Ge (направление: Romania -> Georgia)
       C: Price_Ge_Ro (направление: Georgia -> Romania)
       D: Remark
-      E: Condition (наводящие вопросы, могут быть разделены символом новой строки)
+      E: Condition1
+      F: Condition2
+      G: Condition3
     Возвращает словарь вида:
       {
          "VehicleType1": {
              "price_Ro_Ge": "...",
              "price_Ge_Ro": "...",
              "remark": "...",
-             "condition": "..."  # исходный текст из ячейки
+             "conditions": [ "Condition1 текст", "Condition2 текст", "Condition3 текст" ]
          },
          ...
       }
     """
     try:
         service = get_sheets_service()
-        range_name = "Sheet1!A2:E"
+        # Измените диапазон, если количество столбцов больше
+        range_name = "Sheet1!A2:G"
         result = service.spreadsheets().values().get(
             spreadsheetId=PRICE_SPREADSHEET_ID,
             range=range_name
@@ -49,18 +52,24 @@ def load_price_data():
         values = result.get("values", [])
         price_data = {}
         for row in values:
-            if len(row) < 5:
+            if len(row) < 4:
                 continue
             vehicle_type = row[0].strip()
             price_Ro_Ge = row[1].strip() if len(row) > 1 else ""
             price_Ge_Ro = row[2].strip() if len(row) > 2 else ""
             remark = row[3].strip() if len(row) > 3 else ""
-            condition = row[4].strip() if len(row) > 4 else ""
+            conditions = []
+            if len(row) > 4 and row[4].strip():
+                conditions.append(row[4].strip())
+            if len(row) > 5 and row[5].strip():
+                conditions.append(row[5].strip())
+            if len(row) > 6 and row[6].strip():
+                conditions.append(row[6].strip())
             price_data[vehicle_type] = {
                 "price_Ro_Ge": price_Ro_Ge,
                 "price_Ge_Ro": price_Ge_Ro,
                 "remark": remark,
-                "condition": condition
+                "conditions": conditions
             }
         logger.info(f"Данные из Price.xlsx загружены: {price_data}")
         return price_data
@@ -83,17 +92,6 @@ def send_telegram_notification(message):
     except Exception as ex:
         logger.error(f"Ошибка при отправке уведомления: {ex}")
 
-def parse_guiding_questions(condition_text):
-    """
-    Если в текстовом поле Condition записано более одного вопроса, пытается разбить их по символу новой строки.
-    Возвращает список вопросов.
-    """
-    if not condition_text:
-        return []
-    # Предполагаем, что вопросы разделены символом новой строки
-    questions = [q.strip() for q in condition_text.split("\n") if q.strip()]
-    return questions
-
 def check_ferry_price(vehicle_type, direction="Ro_Ge"):
     """
     Сравнивает тарифы для указанного типа транспортного средства и направления.
@@ -107,9 +105,13 @@ def check_ferry_price(vehicle_type, direction="Ro_Ge"):
       2. Загружаем данные из Price.xlsx с помощью load_price_data().
       3. Если для заданного типа транспортного средства данные отсутствуют в одном из источников, возвращаем соответствующее сообщение.
       4. Сравниваем цены из сайта и из Price.xlsx:
-         - Если цены совпадают, формируем ответ с подтвержденной ценой и добавляем Remark.
-           Если в колонке Condition указаны guiding questions, в ответ добавляется приглашение ответить на первую из них:
-           «Для более точного расчёта, пожалуйста, ответьте на следующий вопрос: {guiding_question}»
+         - Если цены совпадают, формируем ответ с подтверждённой ценой и добавляем Remark.
+           Если для данного типа транспортного средства в столбцах Condition* (conditions) указаны наводящие вопросы, 
+           к ответу добавляется приглашение для уточнения, например:
+           «Для более точного расчёта, пожалуйста, ответьте на следующие вопросы:
+            {Condition1}
+            {Condition2}
+            ...»
          - Если цены различаются, возвращаем сообщение, что цена требует уточнения, и отправляем уведомление менеджеру.
     """
     try:
@@ -121,7 +123,6 @@ def check_ferry_price(vehicle_type, direction="Ro_Ge"):
         if vehicle_type not in sheet_prices:
             return f"Извините, информация о тарифах для '{vehicle_type}' отсутствует в нашей базе."
         
-        # Выбор цены по направлению
         if direction == "Ro_Ge":
             website_price = website_prices[vehicle_type].get("price_Ro_Ge", "")
             sheet_price = sheet_prices[vehicle_type].get("price_Ro_Ge", "")
@@ -133,11 +134,11 @@ def check_ferry_price(vehicle_type, direction="Ro_Ge"):
             response_message = f"Цена перевозки для '{vehicle_type}' ({direction.replace('_', ' ')}) составляет {website_price}."
             if sheet_prices[vehicle_type].get("remark"):
                 response_message += f" Примечание: {sheet_prices[vehicle_type]['remark']}"
-            if sheet_prices[vehicle_type].get("condition"):
-                # Парсим наводящие вопросы
-                guiding_questions = parse_guiding_questions(sheet_prices[vehicle_type]['condition'])
-                if guiding_questions:
-                    response_message += f" Для более точного расчёта, пожалуйста, ответьте на следующий вопрос: {guiding_questions[0]}"
+            conditions = sheet_prices[vehicle_type].get("conditions", [])
+            if conditions:
+                response_message += "\nДля более точного расчёта, пожалуйста, ответьте на следующие вопросы:"
+                for question in conditions:
+                    response_message += f"\n{question}"
             return response_message
         else:
             message_to_manager = (f"ВНИМАНИЕ: Для транспортного средства '{vehicle_type}' цены различаются. "
