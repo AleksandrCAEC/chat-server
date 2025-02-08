@@ -85,7 +85,9 @@ def prepare_chat_context(client_code):
     for index, row in bible_df.iterrows():
         faq = row.get("FAQ", "")
         answer = row.get("Answers", "")
-        if faq and answer:
+        verification = row.get("Verification", "").strip()
+        # Используем строку только если есть вопрос и ответ, и если статус проверки не равен "Check"
+        if faq and answer and verification.upper() != "CHECK":
             bible_context += f"Вопрос: {faq}\nОтвет: {answer}\n\n"
     system_message = {
         "role": "system",
@@ -99,7 +101,8 @@ def prepare_chat_context(client_code):
         try:
             wb = openpyxl.load_workbook(client_file_path, data_only=True)
             ws = wb.active
-            for row in ws.iter_rows(min_row=2, values_only=True):
+            # Изменено: начинаем с 3-й строки, чтобы пропустить заголовок и строку с данными клиента.
+            for row in ws.iter_rows(min_row=3, values_only=True):
                 client_msg = row[0]
                 assistant_msg = row[1]
                 if client_msg and isinstance(client_msg, str):
