@@ -80,7 +80,11 @@ def get_vehicle_type(text):
 
 def get_price_response(vehicle_type, direction="Ro_Ge"):
     try:
-        return check_ferry_price(vehicle_type, direction)
+        response = check_ferry_price(vehicle_type, direction)
+        if response.strip().upper() == "PRICE_QUERY":
+            # Если получен маркер, значит информация не доступна
+            return "Информация о цене не доступна. Пожалуйста, свяжитесь с менеджером."
+        return response
     except Exception as e:
         logger.error(f"Ошибка при получении цены для {vehicle_type}: {e}")
         return "Произошла ошибка при получении актуальной цены. Пожалуйста, попробуйте позже."
@@ -107,7 +111,7 @@ def prepare_chat_context(client_code):
     }
     messages.append(system_message)
     
-    # Чтение истории переписки из файла клиента (начиная со 3-й строки)
+    # Чтение истории переписки из уникального файла клиента (начиная со 3-й строки)
     spreadsheet_id = find_client_file_id(client_code)
     if spreadsheet_id:
         sheets_service = get_sheets_service()
@@ -175,7 +179,7 @@ def chat():
         update_last_visit(client_code)
         update_activity_status()
         
-        # Если сообщение содержит ключевые слова о цене, вызываем специальную обработку
+        # Если сообщение содержит ключевые слова о цене, используем обработку через price_handler
         if is_price_query(user_message):
             vehicle_type = get_vehicle_type(user_message)
             if not vehicle_type:
