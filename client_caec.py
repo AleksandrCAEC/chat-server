@@ -140,9 +140,10 @@ def create_client_file(client_code, client_data):
             addParents=GOOGLE_DRIVE_FOLDER_ID,
             fields="id, parents"
         ).execute()
-        # Устанавливаем ширину столбцов A и B равной 450 пикселей
-        set_column_width(spreadsheet_id, 0, 450)
-        set_column_width(spreadsheet_id, 1, 450)
+        # Устанавливаем ширину столбцов A и B равной 650 пикселей и включаем перенос текста
+        set_column_width(spreadsheet_id, 0, 650)
+        set_column_width(spreadsheet_id, 1, 650)
+        set_text_wrap(spreadsheet_id, 0, 2)
         return spreadsheet_id
     except Exception as e:
         logger.error(f"Ошибка при создании файла клиента {file_title}: {e}")
@@ -177,6 +178,40 @@ def set_column_width(spreadsheet_id, column_index, width):
         logger.error(f"Ошибка при установке ширины столбца: {e}")
         send_notification(f"Ошибка при установке ширины столбца в файле {spreadsheet_id}: {e}")
 
+def set_text_wrap(spreadsheet_id, start_column_index, end_column_index):
+    """
+    Устанавливает перенос текста (wrap text) для столбцов от start_column_index до end_column_index (не включая end_column_index).
+    """
+    try:
+        sheets_service = get_sheets_service()
+        requests_body = {
+            "requests": [
+                {
+                    "repeatCell": {
+                        "range": {
+                            "sheetId": 0,
+                            "startColumnIndex": start_column_index,
+                            "endColumnIndex": end_column_index
+                        },
+                        "cell": {
+                            "userEnteredFormat": {
+                                "wrapStrategy": "WRAP"
+                            }
+                        },
+                        "fields": "userEnteredFormat.wrapStrategy"
+                    }
+                }
+            ]
+        }
+        sheets_service.spreadsheets().batchUpdate(
+            spreadsheetId=spreadsheet_id,
+            body=requests_body
+        ).execute()
+        logger.info(f"Текст в столбцах с {start_column_index} по {end_column_index - 1} настроен на перенос по словам.")
+    except Exception as e:
+        logger.error(f"Ошибка при установке переноса текста в столбцах {start_column_index} - {end_column_index - 1}: {e}")
+        send_notification(f"Ошибка при установке переноса текста в столбцах {start_column_index} - {end_column_index - 1}: {e}")
+
 def add_message_to_client_file(client_code, message, is_assistant=False):
     """
     Добавляет новое сообщение в Google Sheets файл клиента Client_{client_code}.xlsx.
@@ -198,16 +233,16 @@ def add_message_to_client_file(client_code, message, is_assistant=False):
                 raise Exception(f"Данные клиента {client_code} не найдены.")
             spreadsheet_id = create_client_file(client_code, client_data)
         
-        # Обновляем ширину столбцов A и B до 450 пикселей
-        set_column_width(spreadsheet_id, 0, 450)
-        set_column_width(spreadsheet_id, 1, 450)
+        # Устанавливаем ширину столбцов A и B равной 650 пикселей и включаем перенос текста
+        set_column_width(spreadsheet_id, 0, 650)
+        set_column_width(spreadsheet_id, 1, 650)
+        set_text_wrap(spreadsheet_id, 0, 2)
         
         current_time = datetime.now().strftime("%d.%m.%y %H:%M")
         
         if not is_assistant:
             # Добавляем новую строку: в столбце A записываем вопрос, в столбце B оставляем пустым.
             new_row = [f"{current_time} - {message}", ""]
-            # Дополняем до 7 столбцов, если нужно
             while len(new_row) < 7:
                 new_row.append("")
             body = {"values": [new_row]}
@@ -226,19 +261,15 @@ def add_message_to_client_file(client_code, message, is_assistant=False):
                 range="Sheet1!A:B"
             ).execute()
             values = result.get("values", [])
-            # Если записей меньше двух строк (заголовок и данные клиента), переписка отсутствует.
             if len(values) < 3:
                 logger.error("Нет записей переписки для обновления ответа ассистента.")
                 return
-            # Проходим по строкам, начиная с 3-й (индекс 2), чтобы найти последнюю строку, где:
-            # - в столбце A есть текст (вопрос)
-            # - в столбце B отсутствует текст (нет ответа)
+            # Проходим по строкам, начиная с 3-й, чтобы найти последнюю строку, где в столбце A есть текст (вопрос) и столбец B пуст
             target_row = None
             conversation_rows = values[2:]  # начиная с 3-й строки
             for idx, row in enumerate(conversation_rows):
-                # Номер строки в таблице = idx + 3
                 if row and row[0].strip() and (len(row) < 2 or not row[1].strip()):
-                    target_row = idx + 3
+                    target_row = idx + 3  # нумерация строк: первые две строки заняты
             if target_row is not None:
                 range_update = f"Sheet1!B{target_row}"
                 body = {"values": [[f"{current_time} - {message}"]]}
