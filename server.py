@@ -8,10 +8,11 @@ import openai
 import requests
 from datetime import datetime
 from clientdata import register_or_update_client, verify_client_code, update_last_visit, update_activity_status
-from client_caec import add_message_to_client_file
+from client_caec import add_message_to_client_file, CLIENT_FILES_DIR
 from bible import load_bible_data
 from price_handler import check_ferry_price
 from flask_cors import CORS
+import openpyxl
 
 # Импорты для Telegram Bot (python-telegram-bot v20+)
 from telegram import Update, Bot
@@ -27,6 +28,7 @@ from telegram.ext import (
 # Установка пути к файлу service_account_json
 os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = "/etc/secrets/service_account_json"
 openai.api_key = os.getenv("OPENAI_API_KEY")
+
 app = Flask(__name__)
 CORS(app)
 
@@ -39,20 +41,52 @@ logger = logging.getLogger(__name__)
 logger.info("Текущие переменные окружения:")
 pprint.pprint(dict(os.environ))
 
-# Ключевые слова для распознавания запроса о цене
+# Функция подготовки контекста для диалога: читает Bible.xlsx и историю переписки клиента.
+def prepare_chat_context(client_code):
+    messages = []
+    bible_df = load_bible_data()
+    if bible_df is None:
+        raise Exception("Bible.xlsx не найден или недоступен.")
+    bible_context = "Информация о компании (FAQ):\n"
+    for index, row in bible_df.iterrows():
+        faq = row.get("FAQ", "")
+        answer = row.get("Answers", "")
+        verification = str(row.get("Verification", "")).strip().upper()
+        # Если в Verification НЕ стоит "CHECK", пара считается подтвержденной.
+        if faq and answer and verification != "CHECK":
+            bible_context += f"Вопрос: {faq}\nОтвет: {answer}\n\n"
+    system_message = {
+        "role": "system",
+        "content": f"Вы – умный ассистент компании CAEC. Используйте следующую информацию для ответов:\n{bible_context}"
+    }
+    messages.append(system_message)
+    
+    client_file_path = os.path.join(CLIENT_FILES_DIR, f"Client_{client_code}.xlsx")
+    if os.path.exists(client_file_path):
+        try:
+            wb = openpyxl.load_workbook(client_file_path, data_only=True)
+            ws = wb.active
+            # Предполагается, что первые две строки содержат заголовок и базовые данные клиента,
+            # а переписка начинается с 3-й строки.
+            for row in ws.iter_rows(min_row=3, values_only=True):
+                client_msg = row[0]
+                assistant_msg = row[1]
+                if client_msg and isinstance(client_msg, str):
+                    messages.append({"role": "user", "content": client_msg})
+                if assistant_msg and isinstance(assistant_msg, str):
+                    messages.append({"role": "assistant", "content": assistant_msg})
+        except Exception as e:
+            logger.error(f"Ошибка при чтении файла клиента {client_file_path}: {e}")
+    return messages
+
+# Ключевые слова для распознавания запроса о цене.
 PRICE_KEYWORDS = ["цена", "прайс", "сколько стоит", "во сколько обойдется"]
 
 def is_price_query(text):
-    """Проверяет, содержит ли текст ключевые слова, связанные с ценой."""
     lower_text = text.lower()
     return any(keyword in lower_text for keyword in PRICE_KEYWORDS)
 
 def get_vehicle_type(text):
-    """
-    Пробует извлечь тип транспортного средства из текста.
-    Пример: если в сообщении встречается слово "фура" или "грузовик", возвращает стандартизированное название.
-    """
-    # Список известных типов (можно расширять)
     known_types = {"truck": "Truck", "грузовик": "Truck", "fura": "Fura", "фура": "Fura"}
     for key, standard in known_types.items():
         if key in text.lower():
@@ -60,9 +94,6 @@ def get_vehicle_type(text):
     return None
 
 def get_price_response(vehicle_type, direction="Ro_Ge"):
-    """
-    Вызывает функцию check_ferry_price из price_handler для получения актуальной цены.
-    """
     try:
         response = check_ferry_price(vehicle_type, direction)
         return response
@@ -111,16 +142,16 @@ def chat():
         user_message = data.get("message", "")
         client_code = data.get("client_code", "")
         
-        # Обновляем данные клиента
+        # Обновляем данные клиента (Last Visit и активность)
         update_last_visit(client_code)
         update_activity_status()
         
-        # Если сообщение содержит ключевые слова о цене
+        # Если запрос содержит ключевые слова о цене и в Bible.xlsx найден маркер PRICE_QUERY,
+        # то используем специальную обработку для цены.
         if is_price_query(user_message):
-            # Проверяем, есть ли в Bible.xlsx маркер для запроса цены (например, PRICE_QUERY).
-            # Рекомендуется хранить маркер как текст PRICE_QUERY без кавычек.
             bible_df = load_bible_data()
             price_marker_found = False
+            # Ищем среди FAQ ответы, в которых указан маркер PRICE_QUERY (без кавычек)
             for idx, row in bible_df.iterrows():
                 faq = row.get("FAQ", "").lower()
                 answer = row.get("Answers", "").lower()
@@ -133,21 +164,29 @@ def chat():
                     response_message = ("Для определения цены, пожалуйста, уточните тип транспортного средства "
                                         "(например, грузовик или фура).")
                 else:
-                    # По умолчанию выбираем направление "Ro_Ge". Это можно доработать при необходимости.
                     response_message = get_price_response(vehicle_type, direction="Ro_Ge")
             else:
-                response_message = "Стандартный ответ на ваш запрос."  # Либо вызываем генерацию OpenAI
+                # Если маркер не найден, продолжаем стандартную обработку через OpenAI
+                context_messages = prepare_chat_context(client_code)
+                context_messages.append({"role": "user", "content": user_message})
+                openai_response = openai.ChatCompletion.create(
+                    model="gpt-3.5-turbo",
+                    messages=context_messages,
+                    max_tokens=150
+                )
+                response_message = openai_response['choices'][0]['message']['content'].strip()
         else:
-            # Если не ценовой запрос – используем стандартную обработку (например, OpenAI)
-            messages = [{"role": "user", "content": user_message}]
+            # Стандартная обработка: собираем весь контекст (Bible.xlsx + история переписки)
+            context_messages = prepare_chat_context(client_code)
+            context_messages.append({"role": "user", "content": user_message})
             openai_response = openai.ChatCompletion.create(
                 model="gpt-3.5-turbo",
-                messages=messages,
+                messages=context_messages,
                 max_tokens=150
             )
             response_message = openai_response['choices'][0]['message']['content'].strip()
         
-        # Запись переписки в файл клиента
+        # Сохраняем переписку (сначала запрос клиента, затем ответ ассистента)
         add_message_to_client_file(client_code, user_message, is_assistant=False)
         add_message_to_client_file(client_code, response_message, is_assistant=True)
         
@@ -157,7 +196,7 @@ def chat():
         logger.error(f"Ошибка в /chat: {e}")
         return jsonify({"error": str(e)}), 500
 
-# Telegram Bot (Webhook) integration
+# Telegram Bot Integration
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 if not TELEGRAM_BOT_TOKEN:
     logger.error("Переменная окружения TELEGRAM_BOT_TOKEN не задана!")
