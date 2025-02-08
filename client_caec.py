@@ -1,4 +1,3 @@
-# client_caec.py
 import os
 import pandas as pd
 from datetime import datetime
@@ -182,7 +181,8 @@ def add_message_to_client_file(client_code, message, is_assistant=False):
     """
     Добавляет новое сообщение в Google Sheets файл клиента Client_{client_code}.xlsx.
     Если сообщение от клиента, создаётся новая строка с текстом в столбце A.
-    Если сообщение от ассистента, обновляется ячейка в столбце B той же строки, где указан вопрос без ответа.
+    Если сообщение от ассистента, ищется последняя строка (начиная с 3-й строки), где указан вопрос (столбец A) без ответа (столбец B),
+    и обновляется ячейка B этой строки.
     """
     try:
         sheets_service = get_sheets_service()
@@ -193,7 +193,7 @@ def add_message_to_client_file(client_code, message, is_assistant=False):
             if not client_data:
                 raise Exception(f"Данные клиента {client_code} не найдены.")
             spreadsheet_id = create_client_file(client_code, client_data)
-        # Обновляем ширину столбцов A и B до 450 пикселей (на случай, если файл уже существует)
+        # Обновляем ширину столбцов A и B до 450 пикселей
         set_column_width(spreadsheet_id, 0, 450)
         set_column_width(spreadsheet_id, 1, 450)
         current_time = datetime.now().strftime("%d.%m.%y %H:%M")
@@ -210,42 +210,36 @@ def add_message_to_client_file(client_code, message, is_assistant=False):
             ).execute()
             logger.info(f"Запрос клиента добавлен в файл клиента {client_code}.")
         else:
-            # Сообщение от ассистента – пытаемся дописать ответ в ту же строку, где есть вопрос без ответа.
-            # Используем диапазон, начиная с 3-й строки, чтобы пропустить заголовок и строку с данными клиента.
+            # Сообщение от ассистента – ищем последнюю строку (начиная с 3-й) с вопросом без ответа
             result = sheets_service.spreadsheets().values().get(
                 spreadsheetId=spreadsheet_id,
-                range="Sheet1!A3:B"
+                range="Sheet1!A:B"
             ).execute()
             values = result.get("values", [])
-            # По умолчанию готовим новую строку с ответом в столбце B
-            new_row = ["", f"{current_time} - {message}", "", "", "", "", ""]
-            if values and len(values) > 0:
-                last_row = values[-1]
-                # Если в последней строке в столбце A есть текст, а столбец B отсутствует или пуст, обновляем ячейку B.
-                if len(last_row) >= 1 and last_row[0] and (len(last_row) < 2 or not last_row[1].strip()):
-                    row_number = len(values) + 2  # учитываем первые две строки (заголовок и данные клиента)
-                    range_update = f"Sheet1!B{row_number}"
-                    body = {"values": [[f"{current_time} - {message}"]]}
-                    sheets_service.spreadsheets().values().update(
-                        spreadsheetId=spreadsheet_id,
-                        range=range_update,
-                        valueInputOption="RAW",
-                        body=body
-                    ).execute()
-                    logger.info(f"Ответ ассистента добавлен в строку {row_number} файла клиента {client_code}.")
-                else:
-                    # Иначе добавляем новую строку с ответом в столбце B
-                    body = {"values": [new_row]}
-                    sheets_service.spreadsheets().values().append(
-                        spreadsheetId=spreadsheet_id,
-                        range="Sheet1!A:G",
-                        valueInputOption="RAW",
-                        insertDataOption="INSERT_ROWS",
-                        body=body
-                    ).execute()
-                    logger.info(f"Ответ ассистента добавлен в новую строку файла клиента {client_code}.")
+            # Пропускаем первые 2 строки (заголовок и данные клиента)
+            conversation_rows = values[2:] if len(values) >= 2 else []
+            unanswered_row = None
+            # Ищем последнюю строку, где в столбце A есть текст, а столбец B отсутствует или пуст
+            for i in range(len(conversation_rows)-1, -1, -1):
+                row = conversation_rows[i]
+                if row and row[0].strip() and (len(row) < 2 or not row[1].strip()):
+                    unanswered_row = i
+                    break
+            if unanswered_row is not None:
+                # Номер строки в таблице = (индекс в conversation_rows + 3)
+                row_number = unanswered_row + 3
+                range_update = f"Sheet1!B{row_number}"
+                body = {"values": [[f"{current_time} - {message}"]]}
+                sheets_service.spreadsheets().values().update(
+                    spreadsheetId=spreadsheet_id,
+                    range=range_update,
+                    valueInputOption="RAW",
+                    body=body
+                ).execute()
+                logger.info(f"Ответ ассистента добавлен в строку {row_number} файла клиента {client_code}.")
             else:
-                # Если лист пуст, добавляем новую строку
+                # Если не найдено строки без ответа – добавляем новую строку (хотя такое случаться не должно)
+                new_row = ["", f"{current_time} - {message}", "", "", "", "", ""]
                 body = {"values": [new_row]}
                 sheets_service.spreadsheets().values().append(
                     spreadsheetId=spreadsheet_id,
@@ -254,7 +248,7 @@ def add_message_to_client_file(client_code, message, is_assistant=False):
                     insertDataOption="INSERT_ROWS",
                     body=body
                 ).execute()
-                logger.info(f"Ответ ассистента добавлен в файл клиента {client_code}.")
+                logger.info(f"Ответ ассистента добавлен в новую строку файла клиента {client_code}.")
     except Exception as e:
         logger.error(f"Ошибка при добавлении сообщения в файл клиента {client_code}: {e}")
         send_notification(f"Ошибка при добавлении сообщения в файл клиента {client_code}: {e}")
