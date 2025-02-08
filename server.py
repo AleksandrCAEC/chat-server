@@ -7,7 +7,7 @@ import openai
 import requests
 from datetime import datetime
 from clientdata import register_or_update_client, verify_client_code, update_last_visit, update_activity_status
-from client_caec import add_message_to_client_file
+from client_caec import add_message_to_client_file, find_client_file_id, get_sheets_service
 from bible import load_bible_data, save_bible_pair  # Функция save_bible_pair должна быть реализована в bible.py
 from flask_cors import CORS
 
@@ -85,32 +85,36 @@ def prepare_chat_context(client_code):
     for index, row in bible_df.iterrows():
         faq = row.get("FAQ", "")
         answer = row.get("Answers", "")
-        verification = row.get("Verification", "").strip()
-        # Используем строку только если есть вопрос и ответ, и если статус проверки не равен "Check"
-        if faq and answer and verification.upper() != "CHECK":
+        # Приводим значение столбца Verification к строке и верхнему регистру
+        verification = str(row.get("Verification", "")).strip().upper()
+        # Используем строку только если есть вопрос и ответ, и если Verification не равен "CHECK"
+        if faq and answer and verification != "CHECK":
             bible_context += f"Вопрос: {faq}\nОтвет: {answer}\n\n"
     system_message = {
         "role": "system",
         "content": f"Вы – умный ассистент компании CAEC. Используйте следующую информацию для ответов:\n{bible_context}"
     }
     messages.append(system_message)
-    import openpyxl
-    from client_caec import CLIENT_FILES_DIR
-    client_file_path = os.path.join(CLIENT_FILES_DIR, f"Client_{client_code}.xlsx")
-    if os.path.exists(client_file_path):
-        try:
-            wb = openpyxl.load_workbook(client_file_path, data_only=True)
-            ws = wb.active
-            # Изменено: начинаем с 3-й строки, чтобы пропустить заголовок и строку с данными клиента.
-            for row in ws.iter_rows(min_row=3, values_only=True):
-                client_msg = row[0]
-                assistant_msg = row[1]
-                if client_msg and isinstance(client_msg, str):
-                    messages.append({"role": "user", "content": client_msg})
-                if assistant_msg and isinstance(assistant_msg, str):
-                    messages.append({"role": "assistant", "content": assistant_msg})
-        except Exception as e:
-            logger.error(f"Ошибка при чтении файла клиента {client_file_path}: {e}")
+    
+    # Чтение истории переписки из Google Sheets клиентского файла
+    spreadsheet_id = find_client_file_id(client_code)
+    if spreadsheet_id:
+        sheets_service = get_sheets_service()
+        result = sheets_service.spreadsheets().values().get(
+            spreadsheetId=spreadsheet_id,
+            range="Sheet1!A:B"
+        ).execute()
+        values = result.get("values", [])
+        # Пропускаем первые 2 строки (заголовок и строка с данными клиента)
+        if len(values) >= 2:
+            conversation_rows = values[2:]
+            for row in conversation_rows:
+                if len(row) >= 1 and row[0].strip():
+                    messages.append({"role": "user", "content": row[0].strip()})
+                if len(row) >= 2 and row[1].strip():
+                    messages.append({"role": "assistant", "content": row[1].strip()})
+    else:
+        logger.info(f"Файл клиента с кодом {client_code} не найден.")
     return messages
 
 @app.route('/register-client', methods=['POST'])
@@ -184,13 +188,11 @@ def home():
 ##############################################
 # Интеграция Telegram Bot для команды /bible
 ##############################################
-# Получаем TELEGRAM_BOT_TOKEN (уже использовался выше)
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 if not TELEGRAM_BOT_TOKEN:
     logger.error("Переменная окружения TELEGRAM_BOT_TOKEN не задана!")
     exit(1)
 
-# Состояния для ConversationHandler команды /bible
 BIBLE_ASK_ACTION, BIBLE_ASK_QUESTION, BIBLE_ASK_ANSWER = range(3)
 
 async def bible_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -233,7 +235,6 @@ async def cancel_bible(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
 bible_conv_handler = ConversationHandler(
     entry_points=[CommandHandler("bible", bible_start)],
     states={
-        # Убираем ограничение регулярным выражением – теперь любое текстовое сообщение обрабатывается функцией ask_action
         BIBLE_ASK_ACTION: [MessageHandler(filters.TEXT & ~filters.COMMAND, ask_action)],
         BIBLE_ASK_QUESTION: [MessageHandler(filters.TEXT & ~filters.COMMAND, ask_question)],
         BIBLE_ASK_ANSWER: [MessageHandler(filters.TEXT & ~filters.COMMAND, ask_answer)],
@@ -241,12 +242,10 @@ bible_conv_handler = ConversationHandler(
     fallbacks=[CommandHandler("cancel", cancel_bible)]
 )
 
-# Создаем приложение Telegram через ApplicationBuilder и добавляем обработчик
 application = ApplicationBuilder().token(TELEGRAM_BOT_TOKEN).build()
-bot = application.bot  # Получаем объект бота из приложения
+bot = application.bot
 application.add_handler(bible_conv_handler)
 
-# Маршрут для вебхука Telegram (POST)
 @app.route('/webhook', methods=['POST'])
 def telegram_webhook():
     try:
