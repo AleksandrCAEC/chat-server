@@ -84,7 +84,7 @@ def get_vehicle_type(text):
 
 def get_price_response(vehicle_type, direction="Ro_Ge"):
     attempt = 0
-    while attempt < 2:
+    while attempt < 3:
         try:
             response = check_ferry_price(vehicle_type, direction)
             if response.strip().upper() == "PRICE_QUERY":
@@ -93,7 +93,7 @@ def get_price_response(vehicle_type, direction="Ro_Ge"):
         except Exception as e:
             logger.error(f"Попытка {attempt+1} при получении цены для {vehicle_type}: {e}")
             attempt += 1
-            time.sleep(1)
+            time.sleep(2)
     return "Произошла ошибка при получении актуальной цены. Пожалуйста, попробуйте позже."
 
 def get_guiding_question(condition_marker):
@@ -208,23 +208,24 @@ def chat():
             if pending["current_index"] < len(pending["guiding_questions"]):
                 response_message = pending["guiding_questions"][pending["current_index"]]
             else:
-                # Получаем базовый тариф
-                base_price_str = get_price_response(pending["vehicle_type"], direction="Ro_Ge")
+                final_price_str = get_price_response(pending["vehicle_type"], direction="Ro_Ge")
                 try:
-                    base_price = float(base_price_str)
+                    base_price = float(final_price_str)
                     multiplier = 1.0
                     for ans in pending["answers"]:
                         if "adr" in ans.lower():
                             multiplier = 1.2
                             break
                     final_cost = base_price * multiplier
-                    final_price = f"Базовый тариф: {base_price}. Итоговая стоимость с учетом ваших ответов: {final_cost}."
+                    final_price = f"Базовый тариф: {base_price}. Итоговая стоимость: {final_cost}."
                 except Exception as ex:
-                    final_price = f"Базовый тариф: {base_price_str}. Ваши ответы: {', '.join(pending['answers'])}."
+                    final_price = f"Базовый тариф: {final_price_str}. Ваши ответы: {', '.join(pending['answers'])}."
                 response_message = f"Спасибо, ваши ответы приняты. {final_price}"
                 del pending_guiding[client_code]
         elif is_price_query(user_message):
             vehicle_type = get_vehicle_type(user_message)
+            if not vehicle_type and client_code in pending_guiding:
+                vehicle_type = pending_guiding[client_code]["vehicle_type"]
             if not vehicle_type:
                 response_message = ("Для определения цены, пожалуйста, уточните тип транспортного средства "
                                     "(например, грузовик или фура).")
@@ -233,12 +234,10 @@ def chat():
                 if vehicle_type not in price_data:
                     response_message = f"Извините, информация о тарифах для '{vehicle_type}' отсутствует в нашей базе."
                 else:
-                    # Ожидаем, что load_price_data() возвращает список активных condition-маркировок
-                    # Например, если в столбцах Condition1, Condition2,... значение равно "1", то активны
                     conditions = price_data[vehicle_type].get("conditions", [])
                     active_markers = []
+                    # Предполагается, что load_price_data() уже возвращает только активные метки (например, ["Condition1", "Condition3"])
                     for marker in conditions:
-                        # marker должен быть уже сформирован как активная метка, например, "Condition1"
                         active_markers.append(marker)
                     if active_markers:
                         guiding_questions = []
@@ -268,7 +267,7 @@ def chat():
                         model="gpt-3.5-turbo",
                         messages=messages,
                         max_tokens=150,
-                        timeout=20  # увеличиваем таймаут до 20 секунд
+                        timeout=20
                     )
                     break
                 except Exception as e:
