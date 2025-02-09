@@ -99,8 +99,7 @@ def get_price_response(vehicle_type, direction="Ro_Ge"):
 def get_guiding_question(condition_marker):
     """
     Ищет в Bible.xlsx строку, где Verification соответствует condition_marker (например, "CONDITION1")
-    и возвращает guiding question из столбца FAQ.
-    Если не найдено, возвращает None.
+    и возвращает guiding question из столбца FAQ. Если не найдено, возвращает None.
     """
     bible_df = load_bible_data()
     if bible_df is None:
@@ -209,8 +208,20 @@ def chat():
             if pending["current_index"] < len(pending["guiding_questions"]):
                 response_message = pending["guiding_questions"][pending["current_index"]]
             else:
-                final_price = get_price_response(pending["vehicle_type"], direction="Ro_Ge")
-                response_message = f"Спасибо, ваши ответы приняты. {final_price} (Ваши ответы: {', '.join(pending['answers'])})"
+                # Получаем базовый тариф
+                base_price_str = get_price_response(pending["vehicle_type"], direction="Ro_Ge")
+                try:
+                    base_price = float(base_price_str)
+                    multiplier = 1.0
+                    for ans in pending["answers"]:
+                        if "adr" in ans.lower():
+                            multiplier = 1.2
+                            break
+                    final_cost = base_price * multiplier
+                    final_price = f"Базовый тариф: {base_price}. Итоговая стоимость с учетом ваших ответов: {final_cost}."
+                except Exception as ex:
+                    final_price = f"Базовый тариф: {base_price_str}. Ваши ответы: {', '.join(pending['answers'])}."
+                response_message = f"Спасибо, ваши ответы приняты. {final_price}"
                 del pending_guiding[client_code]
         elif is_price_query(user_message):
             vehicle_type = get_vehicle_type(user_message)
@@ -222,12 +233,16 @@ def chat():
                 if vehicle_type not in price_data:
                     response_message = f"Извините, информация о тарифах для '{vehicle_type}' отсутствует в нашей базе."
                 else:
-                    # Ожидаем, что load_price_data() вернет список активных condition-маркировок
+                    # Ожидаем, что load_price_data() возвращает список активных condition-маркировок
+                    # Например, если в столбцах Condition1, Condition2,... значение равно "1", то активны
                     conditions = price_data[vehicle_type].get("conditions", [])
-                    if conditions:
+                    active_markers = []
+                    for marker in conditions:
+                        # marker должен быть уже сформирован как активная метка, например, "Condition1"
+                        active_markers.append(marker)
+                    if active_markers:
                         guiding_questions = []
-                        for marker in conditions:
-                            # marker содержит, например, "Condition1"
+                        for marker in active_markers:
                             question = get_guiding_question(marker)
                             if question:
                                 guiding_questions.append(question)
@@ -247,18 +262,19 @@ def chat():
             messages = prepare_chat_context(client_code)
             messages.append({"role": "user", "content": user_message})
             attempt = 0
-            while attempt < 2:
+            while attempt < 3:
                 try:
                     openai_response = openai.ChatCompletion.create(
                         model="gpt-3.5-turbo",
                         messages=messages,
-                        max_tokens=150
+                        max_tokens=150,
+                        timeout=20  # увеличиваем таймаут до 20 секунд
                     )
                     break
                 except Exception as e:
                     logger.error(f"Попытка {attempt+1} ошибки в OpenAI: {e}")
                     attempt += 1
-                    time.sleep(1)
+                    time.sleep(2)
             response_message = openai_response['choices'][0]['message']['content'].strip()
         
         add_message_to_client_file(client_code, user_message, is_assistant=False)
