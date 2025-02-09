@@ -92,6 +92,23 @@ def get_price_response(vehicle_type, direction="Ro_Ge"):
         logger.error(f"Ошибка при получении цены для {vehicle_type}: {e}")
         return "Произошла ошибка при получении актуальной цены. Пожалуйста, попробуйте позже."
 
+def get_guiding_question(condition_marker):
+    """
+    Ищет в Bible.xlsx строку, где Verification соответствует condition_marker (например, "Condition1"),
+    и возвращает guiding question (из FAQ) и дополнительную информацию (из Answer).
+    Если не найдено, возвращает (None, None).
+    """
+    bible_df = load_bible_data()
+    if bible_df is None:
+        return None, None
+    for index, row in bible_df.iterrows():
+        ver = str(row.get("Verification", "")).strip().upper()
+        if ver == condition_marker.upper():
+            question = row.get("FAQ", "").strip()
+            answer = row.get("Answers", "").strip()
+            return question, answer
+    return None, None
+
 ###############################################
 # ФУНКЦИЯ ПОДГОТОВКИ КОНТЕКСТА (ПАМЯТЬ АССИСТЕНТА)
 ###############################################
@@ -114,7 +131,7 @@ def prepare_chat_context(client_code):
     }
     messages.append(system_message)
     
-    # Чтение истории переписки из файла клиента (начиная со 3-й строки)
+    # Чтение истории переписки из уникального файла клиента (начиная со 3-й строки)
     spreadsheet_id = find_client_file_id(client_code)
     if spreadsheet_id:
         sheets_service = get_sheets_service()
@@ -187,12 +204,13 @@ def chat():
             pending = pending_guiding[client_code]
             pending.setdefault("answers", []).append(user_message)
             pending["current_index"] += 1
-            if pending["current_index"] < len(pending["conditions"]):
-                response_message = pending["conditions"][pending["current_index"]]
+            if pending["current_index"] < len(pending["guiding_questions"]):
+                response_message = pending["guiding_questions"][pending["current_index"]]
             else:
                 final_price = get_price_response(pending["vehicle_type"], direction="Ro_Ge")
                 response_message = f"Спасибо, ваши ответы приняты. {final_price} (Ваши ответы: {', '.join(pending['answers'])})"
                 del pending_guiding[client_code]
+        # Если запрос содержит ключевые слова о цене и клиент не в режиме guiding
         elif is_price_query(user_message):
             vehicle_type = get_vehicle_type(user_message)
             if not vehicle_type:
@@ -203,21 +221,36 @@ def chat():
                 if vehicle_type not in price_data:
                     response_message = f"Извините, информация о тарифах для '{vehicle_type}' отсутствует в нашей базе."
                 else:
-                    conditions = price_data[vehicle_type].get("conditions", [])
-                    if conditions:
-                        pending_guiding[client_code] = {
-                            "vehicle_type": vehicle_type,
-                            "conditions": conditions,
-                            "current_index": 0,
-                            "answers": []
-                        }
-                        response_message = conditions[0]
+                    # Собираем активные guiding markers: если значение в столбце равно "1", то добавляем соответствующую метку
+                    condition_markers = []
+                    # Предполагаем, что данные загружаются с Condition1, Condition2, Condition3 в столбцах E, F, G соответственно
+                    row = price_data[vehicle_type]
+                    # Здесь мы ожидаем, что row["conditions"] содержит уже флаги, установленные в load_price_data()
+                    # Обновим load_price_data() так, чтобы она возвращала список меток, если значение равно "1"
+                    condition_markers = row.get("conditions", [])
+                    if condition_markers:
+                        # Преобразуем каждый активный marker в guiding question через функцию get_guiding_question()
+                        guiding_questions = []
+                        for marker in condition_markers:
+                            # marker содержит, например, "Condition1" (если значение равно "1")
+                            question, extra = get_guiding_question(marker)
+                            if question:
+                                guiding_questions.append(question)
+                        if guiding_questions:
+                            pending_guiding[client_code] = {
+                                "vehicle_type": vehicle_type,
+                                "guiding_questions": guiding_questions,
+                                "current_index": 0,
+                                "answers": []
+                            }
+                            response_message = guiding_questions[0]
+                        else:
+                            response_message = get_price_response(vehicle_type, direction="Ro_Ge")
                     else:
                         response_message = get_price_response(vehicle_type, direction="Ro_Ge")
         else:
             messages = prepare_chat_context(client_code)
             messages.append({"role": "user", "content": user_message})
-            # Добавляем повторную попытку запроса к OpenAI (до 2 попыток)
             attempt = 0
             while attempt < 2:
                 try:
