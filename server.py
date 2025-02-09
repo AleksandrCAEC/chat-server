@@ -87,8 +87,11 @@ def get_price_response(vehicle_type, direction="Ro_Ge"):
     while attempt < 3:
         try:
             response = check_ferry_price(vehicle_type, direction)
-            if response.strip().upper() == "PRICE_QUERY":
+            # Если в ответе присутствуют PLACEHOLDER, возвращаем информативное сообщение
+            if "PRICE_QUERY" in response.upper():
                 return "Информация о цене не доступна. Пожалуйста, свяжитесь с менеджером."
+            if "BASE_PRICE" in response.upper():
+                return "Базовая цена не установлена. Пожалуйста, свяжитесь с менеджером."
             return response
         except Exception as e:
             logger.error(f"Попытка {attempt+1} при получении цены для {vehicle_type}: {e}")
@@ -224,6 +227,7 @@ def chat():
                 del pending_guiding[client_code]
         elif is_price_query(user_message):
             vehicle_type = get_vehicle_type(user_message)
+            # Если тип не удалось извлечь, а клиент уже в guiding режиме – используем сохранённый тип
             if not vehicle_type and client_code in pending_guiding:
                 vehicle_type = pending_guiding[client_code]["vehicle_type"]
             if not vehicle_type:
@@ -235,13 +239,10 @@ def chat():
                     response_message = f"Извините, информация о тарифах для '{vehicle_type}' отсутствует в нашей базе."
                 else:
                     conditions = price_data[vehicle_type].get("conditions", [])
-                    active_markers = []
-                    # Предполагается, что load_price_data() уже возвращает только активные метки (например, ["Condition1", "Condition3"])
-                    for marker in conditions:
-                        active_markers.append(marker)
-                    if active_markers:
+                    # Здесь предполагается, что load_price_data() возвращает только активные метки (например, ["Condition1", "Condition3"])
+                    if conditions:
                         guiding_questions = []
-                        for marker in active_markers:
+                        for marker in conditions:
                             question = get_guiding_question(marker)
                             if question:
                                 guiding_questions.append(question)
