@@ -50,24 +50,6 @@ pprint.pprint(dict(os.environ))
 pending_guiding = {}
 
 ###############################################
-# ФУНКЦИЯ ОТПРАВКИ УВЕДОМЛЕНИЙ ЧЕРЕЗ TELEGRAM
-###############################################
-def send_telegram_notification(message):
-    telegram_bot_token = os.getenv("TELEGRAM_BOT_TOKEN")
-    telegram_chat_id = os.getenv("TELEGRAM_CHAT_ID")
-    if not telegram_bot_token or not telegram_chat_id:
-        logger.error("Переменные окружения TELEGRAM_BOT_TOKEN и TELEGRAM_CHAT_ID не настроены.")
-        return
-    url = f"https://api.telegram.org/bot{telegram_bot_token}/sendMessage"
-    payload = {"chat_id": telegram_chat_id, "text": message, "parse_mode": "HTML"}
-    try:
-        response = requests.post(url, json=payload)
-        response.raise_for_status()
-        logger.info(f"✅ Telegram уведомление отправлено: {response.json()}")
-    except requests.exceptions.RequestException as e:
-        logger.error(f"❌ Ошибка при отправке Telegram уведомления: {e}")
-
-###############################################
 # ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ДЛЯ ОБРАБОТКИ ЗАПРОСОВ О ЦЕНЕ
 ###############################################
 PRICE_KEYWORDS = ["цена", "прайс", "сколько стоит", "во сколько обойдется"]
@@ -82,11 +64,21 @@ def get_vehicle_type(text):
             return standard
     return None
 
+def parse_price(price_str):
+    """Извлекает число из строки цены, удаляя лишние символы."""
+    try:
+        cleaned = re.sub(r'[^\d.]', '', price_str)
+        return float(cleaned)
+    except Exception as e:
+        logger.error(f"Ошибка парсинга цены из '{price_str}': {e}")
+        return None
+
 def get_price_response(vehicle_type, direction="Ro_Ge"):
     attempt = 0
     while attempt < 3:
         try:
             response = check_ferry_price(vehicle_type, direction)
+            # Если в ответе присутствуют PLACEHOLDER, возвращаем сообщение
             if "PRICE_QUERY" in response.upper():
                 return "Информация о цене не доступна. Пожалуйста, свяжитесь с менеджером."
             if "BASE_PRICE" in response.upper():
@@ -202,7 +194,7 @@ def chat():
         update_last_visit(client_code)
         update_activity_status()
         
-        # Если клиент уже в режиме последовательного уточнения guiding questions
+        # Если клиент уже находится в режиме последовательного уточнения guiding questions
         if client_code in pending_guiding:
             pending = pending_guiding[client_code]
             pending.setdefault("answers", []).append(user_message)
@@ -210,10 +202,9 @@ def chat():
             if pending["current_index"] < len(pending["guiding_questions"]):
                 response_message = pending["guiding_questions"][pending["current_index"]]
             else:
-                # Все guiding questions отвечены – финальное получение цены с учетом ответов
-                base_price_str = get_price_response(pending["vehicle_type"], direction="Ro_Ge")
+                base_price_str = pending.get("base_price", get_price_response(pending["vehicle_type"], direction="Ro_Ge"))
                 try:
-                    base_price = float(base_price_str)
+                    base_price = parse_price(base_price_str)
                     multiplier = 1.0
                     for ans in pending["answers"]:
                         if "adr" in ans.lower():
@@ -227,9 +218,6 @@ def chat():
                 del pending_guiding[client_code]
         elif is_price_query(user_message):
             vehicle_type = get_vehicle_type(user_message)
-            # Если тип не определился, используем сохраненный тип, если есть
-            if not vehicle_type and client_code in pending_guiding:
-                vehicle_type = pending_guiding[client_code]["vehicle_type"]
             if not vehicle_type:
                 response_message = ("Для определения цены, пожалуйста, уточните тип транспортного средства "
                                     "(например, грузовик или фура).")
@@ -238,27 +226,29 @@ def chat():
                 if vehicle_type not in price_data:
                     response_message = f"Извините, информация о тарифах для '{vehicle_type}' отсутствует в нашей базе."
                 else:
+                    # Получаем базовую цену из поля "price_Ro_Ge"
+                    base_price_str = price_data[vehicle_type].get("price_Ro_Ge", "")
+                    # Получаем список активных condition-маркировок (например, ["Condition1", "Condition2"])
                     conditions = price_data[vehicle_type].get("conditions", [])
-                    # Здесь предполагается, что load_price_data() возвращает список активных меток, например, ["Condition1", "Condition3"]
                     if conditions:
                         guiding_questions = []
                         for marker in conditions:
                             question = get_guiding_question(marker)
                             if question:
                                 guiding_questions.append(question)
-                        # Первым шагом возвращаем базовую цену
-                        base_price_str = get_price_response(vehicle_type, direction="Ro_Ge")
-                        # Сохраняем состояние pending_guiding
-                        pending_guiding[client_code] = {
-                            "vehicle_type": vehicle_type,
-                            "guiding_questions": guiding_questions,
-                            "current_index": 0,
-                            "answers": [],
-                            "base_price": base_price_str
-                        }
-                        response_message = f"Базовая цена: {base_price_str}. Дополнительный вопрос: {guiding_questions[0]}"
+                        if guiding_questions:
+                            pending_guiding[client_code] = {
+                                "vehicle_type": vehicle_type,
+                                "guiding_questions": guiding_questions,
+                                "current_index": 0,
+                                "answers": [],
+                                "base_price": base_price_str
+                            }
+                            response_message = f"Базовая цена: {base_price_str}. Дополнительное условие: {guiding_questions[0]}"
+                        else:
+                            response_message = base_price_str
                     else:
-                        response_message = get_price_response(vehicle_type, direction="Ro_Ge")
+                        response_message = base_price_str
         else:
             messages = prepare_chat_context(client_code)
             messages.append({"role": "user", "content": user_message})
