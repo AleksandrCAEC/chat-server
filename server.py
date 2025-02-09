@@ -3,6 +3,7 @@ import re
 import logging
 import asyncio
 import pprint
+import time
 from flask import Flask, request, jsonify
 import openai
 import requests
@@ -13,7 +14,6 @@ from bible import load_bible_data, save_bible_pair
 from price_handler import check_ferry_price, load_price_data
 from flask_cors import CORS
 import openpyxl
-import time
 
 # Импорты для Telegram Bot (python-telegram-bot v20+)
 from telegram import Update, Bot
@@ -83,31 +83,34 @@ def get_vehicle_type(text):
     return None
 
 def get_price_response(vehicle_type, direction="Ro_Ge"):
-    try:
-        response = check_ferry_price(vehicle_type, direction)
-        if response.strip().upper() == "PRICE_QUERY":
-            return "Информация о цене не доступна. Пожалуйста, свяжитесь с менеджером."
-        return response
-    except Exception as e:
-        logger.error(f"Ошибка при получении цены для {vehicle_type}: {e}")
-        return "Произошла ошибка при получении актуальной цены. Пожалуйста, попробуйте позже."
+    attempt = 0
+    while attempt < 2:
+        try:
+            response = check_ferry_price(vehicle_type, direction)
+            if response.strip().upper() == "PRICE_QUERY":
+                return "Информация о цене не доступна. Пожалуйста, свяжитесь с менеджером."
+            return response
+        except Exception as e:
+            logger.error(f"Попытка {attempt+1} при получении цены для {vehicle_type}: {e}")
+            attempt += 1
+            time.sleep(1)
+    return "Произошла ошибка при получении актуальной цены. Пожалуйста, попробуйте позже."
 
 def get_guiding_question(condition_marker):
     """
-    Ищет в Bible.xlsx строку, где Verification соответствует condition_marker (например, "Condition1"),
-    и возвращает guiding question (из FAQ) и дополнительную информацию (из Answer).
-    Если не найдено, возвращает (None, None).
+    Ищет в Bible.xlsx строку, где Verification соответствует condition_marker (например, "CONDITION1")
+    и возвращает guiding question из столбца FAQ.
+    Если не найдено, возвращает None.
     """
     bible_df = load_bible_data()
     if bible_df is None:
-        return None, None
+        return None
     for index, row in bible_df.iterrows():
         ver = str(row.get("Verification", "")).strip().upper()
         if ver == condition_marker.upper():
             question = row.get("FAQ", "").strip()
-            answer = row.get("Answers", "").strip()
-            return question, answer
-    return None, None
+            return question
+    return None
 
 ###############################################
 # ФУНКЦИЯ ПОДГОТОВКИ КОНТЕКСТА (ПАМЯТЬ АССИСТЕНТА)
@@ -131,7 +134,6 @@ def prepare_chat_context(client_code):
     }
     messages.append(system_message)
     
-    # Чтение истории переписки из уникального файла клиента (начиная со 3-й строки)
     spreadsheet_id = find_client_file_id(client_code)
     if spreadsheet_id:
         sheets_service = get_sheets_service()
@@ -199,7 +201,7 @@ def chat():
         update_last_visit(client_code)
         update_activity_status()
         
-        # Если клиент уже находится в режиме последовательного уточнения guiding questions
+        # Если клиент уже в режиме последовательного уточнения guiding questions
         if client_code in pending_guiding:
             pending = pending_guiding[client_code]
             pending.setdefault("answers", []).append(user_message)
@@ -210,7 +212,6 @@ def chat():
                 final_price = get_price_response(pending["vehicle_type"], direction="Ro_Ge")
                 response_message = f"Спасибо, ваши ответы приняты. {final_price} (Ваши ответы: {', '.join(pending['answers'])})"
                 del pending_guiding[client_code]
-        # Если запрос содержит ключевые слова о цене и клиент не в режиме guiding
         elif is_price_query(user_message):
             vehicle_type = get_vehicle_type(user_message)
             if not vehicle_type:
@@ -221,19 +222,13 @@ def chat():
                 if vehicle_type not in price_data:
                     response_message = f"Извините, информация о тарифах для '{vehicle_type}' отсутствует в нашей базе."
                 else:
-                    # Собираем активные guiding markers: если значение в столбце равно "1", то добавляем соответствующую метку
-                    condition_markers = []
-                    # Предполагаем, что данные загружаются с Condition1, Condition2, Condition3 в столбцах E, F, G соответственно
-                    row = price_data[vehicle_type]
-                    # Здесь мы ожидаем, что row["conditions"] содержит уже флаги, установленные в load_price_data()
-                    # Обновим load_price_data() так, чтобы она возвращала список меток, если значение равно "1"
-                    condition_markers = row.get("conditions", [])
-                    if condition_markers:
-                        # Преобразуем каждый активный marker в guiding question через функцию get_guiding_question()
+                    # Ожидаем, что load_price_data() вернет список активных condition-маркировок
+                    conditions = price_data[vehicle_type].get("conditions", [])
+                    if conditions:
                         guiding_questions = []
-                        for marker in condition_markers:
-                            # marker содержит, например, "Condition1" (если значение равно "1")
-                            question, extra = get_guiding_question(marker)
+                        for marker in conditions:
+                            # marker содержит, например, "Condition1"
+                            question = get_guiding_question(marker)
                             if question:
                                 guiding_questions.append(question)
                         if guiding_questions:
