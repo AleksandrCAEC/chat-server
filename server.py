@@ -10,7 +10,7 @@ from datetime import datetime
 from clientdata import register_or_update_client, verify_client_code, update_last_visit, update_activity_status
 from client_caec import add_message_to_client_file, find_client_file_id, get_sheets_service, CLIENT_FILES_DIR
 from bible import load_bible_data, save_bible_pair
-from price_handler import check_ferry_price, load_price_data  # load_price_data для получения данных из Price.xlsx
+from price_handler import check_ferry_price, load_price_data
 from flask_cors import CORS
 import openpyxl
 
@@ -45,7 +45,7 @@ logger = logging.getLogger(__name__)
 logger.info("Текущие переменные окружения:")
 pprint.pprint(dict(os.environ))
 
-# Глобальный словарь для хранения состояния последовательного уточнения (guiding questions)
+# Глобальный словарь для хранения состояния последовательного опроса guiding questions
 pending_guiding = {}
 
 ###############################################
@@ -83,10 +83,7 @@ def get_vehicle_type(text):
 
 def get_price_response(vehicle_type, direction="Ro_Ge"):
     try:
-        # Получаем окончательный ответ через check_ferry_price.
-        # Если guiding questions имеются, check_ferry_price должна вернуть только первый вопрос.
         response = check_ferry_price(vehicle_type, direction)
-        # Если ответ равен "PRICE_QUERY" (или содержит его как маркер), то это означает, что цена не окончательная.
         if response.strip().upper() == "PRICE_QUERY":
             return "Информация о цене не доступна. Пожалуйста, свяжитесь с менеджером."
         return response
@@ -184,36 +181,31 @@ def chat():
         update_last_visit(client_code)
         update_activity_status()
         
-        # Если клиент уже находится в режиме уточнения (pending guiding questions)
+        # Если клиент уже находится в режиме последовательного уточнения guiding questions
         if client_code in pending_guiding:
             pending = pending_guiding[client_code]
-            # Сохраняем ответ клиента на текущий guiding question
             pending.setdefault("answers", []).append(user_message)
             pending["current_index"] += 1
             if pending["current_index"] < len(pending["conditions"]):
-                # Если есть еще guiding questions, задаем следующую
                 response_message = pending["conditions"][pending["current_index"]]
             else:
-                # Все guiding вопросы отвечены; можно вычислить итоговую цену
+                # Все guiding вопросы отвечены; получаем финальный ответ
                 final_price = get_price_response(pending["vehicle_type"], direction="Ro_Ge")
-                response_message = f"Спасибо, ваши ответы приняты. {final_price}"
-                # Удаляем запись о guiding состоянии
+                response_message = f"Спасибо, ваши ответы приняты. {final_price} (Ваши ответы: {', '.join(pending['answers'])})"
                 del pending_guiding[client_code]
-        # Если запрос содержит ключевые слова о цене и клиент не в guiding режиме
+        # Если запрос содержит ключевые слова о цене и клиент не в режиме guiding
         elif is_price_query(user_message):
             vehicle_type = get_vehicle_type(user_message)
             if not vehicle_type:
                 response_message = ("Для определения цены, пожалуйста, уточните тип транспортного средства "
                                     "(например, грузовик или фура).")
             else:
-                # Загружаем данные из Price.xlsx через load_price_data() из price_handler
                 price_data = load_price_data()
                 if vehicle_type not in price_data:
                     response_message = f"Извините, информация о тарифах для '{vehicle_type}' отсутствует в нашей базе."
                 else:
                     conditions = price_data[vehicle_type].get("conditions", [])
                     if conditions:
-                        # Если guiding questions имеются, сохраняем состояние и задаем первый вопрос
                         pending_guiding[client_code] = {
                             "vehicle_type": vehicle_type,
                             "conditions": conditions,
@@ -224,7 +216,6 @@ def chat():
                     else:
                         response_message = get_price_response(vehicle_type, direction="Ro_Ge")
         else:
-            # Стандартная обработка: формируем контекст из Bible.xlsx и истории переписки, затем вызываем OpenAI
             messages = prepare_chat_context(client_code)
             messages.append({"role": "user", "content": user_message})
             openai_response = openai.ChatCompletion.create(
