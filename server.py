@@ -87,7 +87,6 @@ def get_price_response(vehicle_type, direction="Ro_Ge"):
     while attempt < 3:
         try:
             response = check_ferry_price(vehicle_type, direction)
-            # Если в ответе присутствуют PLACEHOLDER, возвращаем информативное сообщение
             if "PRICE_QUERY" in response.upper():
                 return "Информация о цене не доступна. Пожалуйста, свяжитесь с менеджером."
             if "BASE_PRICE" in response.upper():
@@ -211,23 +210,24 @@ def chat():
             if pending["current_index"] < len(pending["guiding_questions"]):
                 response_message = pending["guiding_questions"][pending["current_index"]]
             else:
-                final_price_str = get_price_response(pending["vehicle_type"], direction="Ro_Ge")
+                # Все guiding questions отвечены – финальное получение цены с учетом ответов
+                base_price_str = get_price_response(pending["vehicle_type"], direction="Ro_Ge")
                 try:
-                    base_price = float(final_price_str)
+                    base_price = float(base_price_str)
                     multiplier = 1.0
                     for ans in pending["answers"]:
                         if "adr" in ans.lower():
                             multiplier = 1.2
                             break
                     final_cost = base_price * multiplier
-                    final_price = f"Базовый тариф: {base_price}. Итоговая стоимость: {final_cost}."
+                    final_price = f"Базовая цена: {base_price}. Итоговая стоимость с учетом ваших ответов: {final_cost}."
                 except Exception as ex:
-                    final_price = f"Базовый тариф: {final_price_str}. Ваши ответы: {', '.join(pending['answers'])}."
+                    final_price = f"Базовая цена: {base_price_str}. Ваши ответы: {', '.join(pending['answers'])}."
                 response_message = f"Спасибо, ваши ответы приняты. {final_price}"
                 del pending_guiding[client_code]
         elif is_price_query(user_message):
             vehicle_type = get_vehicle_type(user_message)
-            # Если тип не удалось извлечь, а клиент уже в guiding режиме – используем сохранённый тип
+            # Если тип не определился, используем сохраненный тип, если есть
             if not vehicle_type and client_code in pending_guiding:
                 vehicle_type = pending_guiding[client_code]["vehicle_type"]
             if not vehicle_type:
@@ -239,23 +239,24 @@ def chat():
                     response_message = f"Извините, информация о тарифах для '{vehicle_type}' отсутствует в нашей базе."
                 else:
                     conditions = price_data[vehicle_type].get("conditions", [])
-                    # Здесь предполагается, что load_price_data() возвращает только активные метки (например, ["Condition1", "Condition3"])
+                    # Здесь предполагается, что load_price_data() возвращает список активных меток, например, ["Condition1", "Condition3"]
                     if conditions:
                         guiding_questions = []
                         for marker in conditions:
                             question = get_guiding_question(marker)
                             if question:
                                 guiding_questions.append(question)
-                        if guiding_questions:
-                            pending_guiding[client_code] = {
-                                "vehicle_type": vehicle_type,
-                                "guiding_questions": guiding_questions,
-                                "current_index": 0,
-                                "answers": []
-                            }
-                            response_message = guiding_questions[0]
-                        else:
-                            response_message = get_price_response(vehicle_type, direction="Ro_Ge")
+                        # Первым шагом возвращаем базовую цену
+                        base_price_str = get_price_response(vehicle_type, direction="Ro_Ge")
+                        # Сохраняем состояние pending_guiding
+                        pending_guiding[client_code] = {
+                            "vehicle_type": vehicle_type,
+                            "guiding_questions": guiding_questions,
+                            "current_index": 0,
+                            "answers": [],
+                            "base_price": base_price_str
+                        }
+                        response_message = f"Базовая цена: {base_price_str}. Дополнительный вопрос: {guiding_questions[0]}"
                     else:
                         response_message = get_price_response(vehicle_type, direction="Ro_Ge")
         else:
