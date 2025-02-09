@@ -13,6 +13,7 @@ from bible import load_bible_data, save_bible_pair
 from price_handler import check_ferry_price, load_price_data
 from flask_cors import CORS
 import openpyxl
+import time
 
 # Импорты для Telegram Bot (python-telegram-bot v20+)
 from telegram import Update, Bot
@@ -113,7 +114,7 @@ def prepare_chat_context(client_code):
     }
     messages.append(system_message)
     
-    # Чтение истории переписки из уникального файла клиента (начиная со 3-й строки)
+    # Чтение истории переписки из файла клиента (начиная со 3-й строки)
     spreadsheet_id = find_client_file_id(client_code)
     if spreadsheet_id:
         sheets_service = get_sheets_service()
@@ -189,11 +190,9 @@ def chat():
             if pending["current_index"] < len(pending["conditions"]):
                 response_message = pending["conditions"][pending["current_index"]]
             else:
-                # Все guiding вопросы отвечены; получаем финальный ответ
                 final_price = get_price_response(pending["vehicle_type"], direction="Ro_Ge")
                 response_message = f"Спасибо, ваши ответы приняты. {final_price} (Ваши ответы: {', '.join(pending['answers'])})"
                 del pending_guiding[client_code]
-        # Если запрос содержит ключевые слова о цене и клиент не в режиме guiding
         elif is_price_query(user_message):
             vehicle_type = get_vehicle_type(user_message)
             if not vehicle_type:
@@ -218,11 +217,20 @@ def chat():
         else:
             messages = prepare_chat_context(client_code)
             messages.append({"role": "user", "content": user_message})
-            openai_response = openai.ChatCompletion.create(
-                model="gpt-3.5-turbo",
-                messages=messages,
-                max_tokens=150
-            )
+            # Добавляем повторную попытку запроса к OpenAI (до 2 попыток)
+            attempt = 0
+            while attempt < 2:
+                try:
+                    openai_response = openai.ChatCompletion.create(
+                        model="gpt-3.5-turbo",
+                        messages=messages,
+                        max_tokens=150
+                    )
+                    break
+                except Exception as e:
+                    logger.error(f"Попытка {attempt+1} ошибки в OpenAI: {e}")
+                    attempt += 1
+                    time.sleep(1)
             response_message = openai_response['choices'][0]['message']['content'].strip()
         
         add_message_to_client_file(client_code, user_message, is_assistant=False)
