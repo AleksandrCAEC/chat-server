@@ -53,7 +53,10 @@ pending_guiding = {}
 # Функция парсинга цены и удаления временного штампа
 ###############################################
 def parse_price(price_str):
-    """Извлекает числовое значение из строки, например, '2200 (EUR)' -> 2200.0"""
+    """
+    Извлекает числовое значение из строки, удаляя все символы, кроме цифр и точки.
+    Пример: "2200 (EUR)" -> 2200.0
+    """
     try:
         cleaned = re.sub(r'[^\d.]', '', price_str)
         return float(cleaned)
@@ -62,7 +65,10 @@ def parse_price(price_str):
         return None
 
 def remove_timestamp(text):
-    """Удаляет временной штамп в начале строки, если он присутствует."""
+    """
+    Удаляет временной штамп в начале строки, если он присутствует.
+    Пример: "08.02.25 01:28 - 2200 (EUR)" -> "2200 (EUR)"
+    """
     return re.sub(r'^\d{2}\.\d{2}\.\d{2}\s+\d{2}:\d{2}\s*-\s*', '', text)
 
 ###############################################
@@ -108,43 +114,38 @@ def get_vehicle_type(text):
 
 def get_price_response(vehicle_type, direction="Ro_Ge"):
     """
-    Пытается получить цену с сайта в первую очередь.
-    Если в течение 3 минут не удается получить корректный ответ (числовую цену), менеджеру отправляется уведомление,
+    Получает цену с сайта (приоритетный источник). Ждёт до 3 минут повторными попытками каждые 5 секунд.
+    Если за это время не получено корректное числовое значение или возвращён PLACEHOLDER, менеджеру отправляется уведомление,
     и используется запасная цена из Price.xlsx.
     """
     start_time = time.time()
-    website_price_str = None
-    while True:
+    while time.time() - start_time < 180:
         try:
             website_price_str = check_ferry_price(vehicle_type, direction)
             website_price_str = remove_timestamp(website_price_str)
             logger.info(f"Цена с сайта для {vehicle_type}: '{website_price_str}'")
-            # Если возвращается PLACEHOLDER, считаем, что корректная цена не получена
             if "PRICE_QUERY" in website_price_str.upper() or "BASE_PRICE" in website_price_str.upper():
-                logger.info("Получен PLACEHOLDER, продолжаем ожидание...")
+                logger.info("Получен PLACEHOLDER с сайта, продолжаем ожидание...")
             else:
                 parsed = parse_price(website_price_str)
                 if parsed is not None:
-                    break
+                    return website_price_str  # Вернуть корректную цену с сайта
         except Exception as e:
             logger.error(f"Ошибка при получении цены для {vehicle_type}: {e}")
-        if time.time() - start_time > 180:
-            send_telegram_notification(
-                f"Ошибка соединения: для {vehicle_type} не удалось получить актуальную цену более 3 минут."
-            )
-            price_data = load_price_data()
-            if vehicle_type in price_data:
-                fallback_price_str = price_data[vehicle_type].get("price_Ro_Ge", "")
-                logger.info(f"Используем запасную цену для {vehicle_type}: '{fallback_price_str}'")
-                return fallback_price_str
-            else:
-                return "Информация о цене не доступна. Пожалуйста, свяжитесь с менеджером."
         time.sleep(5)
-    return website_price_str
+    # Если за 3 минуты не удалось получить корректное значение, уведомляем менеджера и используем запасную цену.
+    send_telegram_notification(f"Ошибка соединения: для {vehicle_type} не удалось получить актуальную цену более 3 минут.")
+    price_data = load_price_data()
+    if vehicle_type in price_data:
+        fallback_price_str = price_data[vehicle_type].get("price_Ro_Ge", "")
+        logger.info(f"Используем запасную цену для {vehicle_type}: '{fallback_price_str}'")
+        return fallback_price_str
+    else:
+        return "Информация о цене не доступна. Пожалуйста, свяжитесь с менеджером."
 
 def get_guiding_question(condition_marker):
     """
-    Ищет в Bible.xlsx строку, где Verification соответствует condition_marker (например, "CONDITION1"),
+    Ищет в Bible.xlsx строку, где Verification соответствует condition_marker (например, "CONDITION1")
     и возвращает guiding question из столбца FAQ. Если не найдено, возвращает None.
     """
     bible_df = load_bible_data()
@@ -158,12 +159,12 @@ def get_guiding_question(condition_marker):
     return None
 
 ###############################################
-# Функция получения ответа от OpenAI с ожиданием
+# Функция получения ответа от OpenAI с ожиданием (до 3 минут)
 ###############################################
 def get_openai_response(messages):
     start_time = time.time()
     attempt = 0
-    while True:
+    while time.time() - start_time < 180:
         try:
             response = openai.ChatCompletion.create(
                 model="gpt-3.5-turbo",
@@ -175,10 +176,9 @@ def get_openai_response(messages):
         except Exception as e:
             logger.error(f"Попытка {attempt+1} ошибки в OpenAI: {e}")
             attempt += 1
-            if time.time() - start_time > 180:
-                send_telegram_notification("Ошибка соединения: запрос к OpenAI длится более 3 минут.")
-                return None
             time.sleep(2)
+    send_telegram_notification("Ошибка соединения: запрос к OpenAI длится более 3 минут.")
+    return None
 
 ###############################################
 # Функция подготовки контекста (память ассистента)
@@ -275,7 +275,7 @@ def chat():
         update_last_visit(client_code)
         update_activity_status()
         
-        # Если клиент уже находится в режиме последовательного уточнения guiding questions
+        # Если клиент уже в режиме последовательного уточнения guiding questions
         if client_code in pending_guiding:
             pending = pending_guiding[client_code]
             pending.setdefault("answers", []).append(user_message)
@@ -314,7 +314,7 @@ def chat():
                             question = get_guiding_question(marker)
                             if question:
                                 guiding_questions.append(question)
-                        # Если среди guiding вопросов есть уточнение типа транспортного средства, фильтруем его
+                        # Фильтруем guiding вопросы, если они содержат уточнение типа транспортного средства
                         guiding_questions = [q for q in guiding_questions if "тип транспортного средства" not in q.lower()]
                         if not guiding_questions:
                             guiding_questions.append(f"Вы всё так же собираетесь отправить {vehicle_type.lower()}?")
