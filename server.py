@@ -50,6 +50,24 @@ pprint.pprint(dict(os.environ))
 pending_guiding = {}
 
 ###############################################
+# ФУНКЦИЯ ОТПРАВКИ УВЕДОМЛЕНИЙ ЧЕРЕЗ TELEGRAM
+###############################################
+def send_telegram_notification(message):
+    telegram_bot_token = os.getenv("TELEGRAM_BOT_TOKEN")
+    telegram_chat_id = os.getenv("TELEGRAM_CHAT_ID")
+    if not telegram_bot_token or not telegram_chat_id:
+        logger.error("Переменные окружения TELEGRAM_BOT_TOKEN и TELEGRAM_CHAT_ID не настроены.")
+        return
+    url = f"https://api.telegram.org/bot{telegram_bot_token}/sendMessage"
+    payload = {"chat_id": telegram_chat_id, "text": message, "parse_mode": "HTML"}
+    try:
+        response = requests.post(url, json=payload)
+        response.raise_for_status()
+        logger.info(f"✅ Telegram уведомление отправлено: {response.json()}")
+    except requests.exceptions.RequestException as e:
+        logger.error(f"❌ Ошибка при отправке Telegram уведомления: {e}")
+
+###############################################
 # ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ДЛЯ ОБРАБОТКИ ЗАПРОСОВ О ЦЕНЕ
 ###############################################
 PRICE_KEYWORDS = ["цена", "прайс", "сколько стоит", "во сколько обойдется"]
@@ -78,7 +96,6 @@ def get_price_response(vehicle_type, direction="Ro_Ge"):
     while attempt < 3:
         try:
             response = check_ferry_price(vehicle_type, direction)
-            # Если в ответе присутствуют PLACEHOLDER, возвращаем сообщение
             if "PRICE_QUERY" in response.upper():
                 return "Информация о цене не доступна. Пожалуйста, свяжитесь с менеджером."
             if "BASE_PRICE" in response.upper():
@@ -219,16 +236,13 @@ def chat():
         elif is_price_query(user_message):
             vehicle_type = get_vehicle_type(user_message)
             if not vehicle_type:
-                response_message = ("Для определения цены, пожалуйста, уточните тип транспортного средства "
-                                    "(например, грузовик или фура).")
+                response_message = ("Для определения цены, пожалуйста, уточните тип транспортного средства (например, грузовик или фура).")
             else:
                 price_data = load_price_data()
                 if vehicle_type not in price_data:
                     response_message = f"Извините, информация о тарифах для '{vehicle_type}' отсутствует в нашей базе."
                 else:
-                    # Получаем базовую цену из поля "price_Ro_Ge"
                     base_price_str = price_data[vehicle_type].get("price_Ro_Ge", "")
-                    # Получаем список активных condition-маркировок (например, ["Condition1", "Condition2"])
                     conditions = price_data[vehicle_type].get("conditions", [])
                     if conditions:
                         guiding_questions = []
