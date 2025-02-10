@@ -50,13 +50,10 @@ pprint.pprint(dict(os.environ))
 pending_guiding = {}
 
 ###############################################
-# Функция для парсинга цены из строки
+# Функция парсинга цены и удаления временного штампа
 ###############################################
 def parse_price(price_str):
-    """
-    Извлекает числовое значение из строки, удаляя все символы, кроме цифр и точки.
-    Пример: "2200 (EUR)" -> 2200.0
-    """
+    """Извлекает числовое значение из строки, например, '2200 (EUR)' -> 2200.0"""
     try:
         cleaned = re.sub(r'[^\d.]', '', price_str)
         return float(cleaned)
@@ -65,10 +62,7 @@ def parse_price(price_str):
         return None
 
 def remove_timestamp(text):
-    """
-    Удаляет временной штамп, если он присутствует в начале строки.
-    Пример: "10.02.25 09:33 - 2200 (EUR)" -> "2200 (EUR)"
-    """
+    """Удаляет временной штамп в начале строки, если он присутствует."""
     return re.sub(r'^\d{2}\.\d{2}\.\d{2}\s+\d{2}:\d{2}\s*-\s*', '', text)
 
 ###############################################
@@ -114,36 +108,26 @@ def get_vehicle_type(text):
 
 def get_price_response(vehicle_type, direction="Ro_Ge"):
     """
-    Получает цену с сайта (приоритетный источник).
-    Если цена с сайта не возвращается или содержит PLACEHOLDER, цикл повторяется до 3 минут ожидания.
-    Если за 3 минуты ответ не получен, менеджеру отправляется уведомление, и используется запасная цена из Price.xlsx.
+    Пытается получить цену с сайта в первую очередь.
+    Если в течение 3 минут не удается получить корректный ответ (числовую цену), менеджеру отправляется уведомление,
+    и используется запасная цена из Price.xlsx.
     """
     start_time = time.time()
+    website_price_str = None
     while True:
         try:
             website_price_str = check_ferry_price(vehicle_type, direction)
             website_price_str = remove_timestamp(website_price_str)
             logger.info(f"Цена с сайта для {vehicle_type}: '{website_price_str}'")
-            # Если полученный результат содержит PLACEHOLDER, считаем, что цена не получена
+            # Если возвращается PLACEHOLDER, считаем, что корректная цена не получена
             if "PRICE_QUERY" in website_price_str.upper() or "BASE_PRICE" in website_price_str.upper():
-                logger.info("Получен PLACEHOLDER, ожидаем повторной попытки...")
+                logger.info("Получен PLACEHOLDER, продолжаем ожидание...")
             else:
-                website_price = parse_price(website_price_str)
-                if website_price is not None:
-                    # Сравнение с данными из файла
-                    price_data = load_price_data()
-                    if vehicle_type in price_data:
-                        file_price_str = price_data[vehicle_type].get("price_Ro_Ge", "")
-                        logger.info(f"Цена из Price.xlsx для {vehicle_type}: '{file_price_str}'")
-                        file_price = parse_price(file_price_str)
-                        if file_price is not None and website_price != file_price:
-                            send_telegram_notification(
-                                f"ВНИМАНИЕ: Для {vehicle_type} цена с сайта ({website_price} евро) не совпадает с ценой из файла ({file_price} евро)!"
-                            )
-                    return website_price_str
+                parsed = parse_price(website_price_str)
+                if parsed is not None:
+                    break
         except Exception as e:
             logger.error(f"Ошибка при получении цены для {vehicle_type}: {e}")
-        # Если прошло более 3 минут, уведомляем менеджера и используем запасную цену
         if time.time() - start_time > 180:
             send_telegram_notification(
                 f"Ошибка соединения: для {vehicle_type} не удалось получить актуальную цену более 3 минут."
@@ -156,10 +140,11 @@ def get_price_response(vehicle_type, direction="Ro_Ge"):
             else:
                 return "Информация о цене не доступна. Пожалуйста, свяжитесь с менеджером."
         time.sleep(5)
+    return website_price_str
 
 def get_guiding_question(condition_marker):
     """
-    Ищет в Bible.xlsx строку, где Verification соответствует condition_marker (например, "CONDITION1")
+    Ищет в Bible.xlsx строку, где Verification соответствует condition_marker (например, "CONDITION1"),
     и возвращает guiding question из столбца FAQ. Если не найдено, возвращает None.
     """
     bible_df = load_bible_data()
@@ -171,6 +156,29 @@ def get_guiding_question(condition_marker):
             question = row.get("FAQ", "").strip()
             return question
     return None
+
+###############################################
+# Функция получения ответа от OpenAI с ожиданием
+###############################################
+def get_openai_response(messages):
+    start_time = time.time()
+    attempt = 0
+    while True:
+        try:
+            response = openai.ChatCompletion.create(
+                model="gpt-3.5-turbo",
+                messages=messages,
+                max_tokens=150,
+                timeout=40
+            )
+            return response
+        except Exception as e:
+            logger.error(f"Попытка {attempt+1} ошибки в OpenAI: {e}")
+            attempt += 1
+            if time.time() - start_time > 180:
+                send_telegram_notification("Ошибка соединения: запрос к OpenAI длится более 3 минут.")
+                return None
+            time.sleep(2)
 
 ###############################################
 # Функция подготовки контекста (память ассистента)
@@ -213,30 +221,6 @@ def prepare_chat_context(client_code):
     else:
         logger.info(f"Файл клиента с кодом {client_code} не найден.")
     return messages
-
-###############################################
-# Функция получения ответа от OpenAI с бесконечным ожиданием (но не выдающим ошибку клиенту)
-###############################################
-def get_openai_response(messages):
-    start_time = time.time()
-    attempt = 0
-    while True:
-        try:
-            response = openai.ChatCompletion.create(
-                model="gpt-3.5-turbo",
-                messages=messages,
-                max_tokens=150,
-                timeout=40
-            )
-            return response
-        except Exception as e:
-            logger.error(f"Попытка {attempt+1} ошибки в OpenAI: {e}")
-            attempt += 1
-            if time.time() - start_time > 180:
-                send_telegram_notification("Ошибка соединения: запрос к OpenAI длится более 3 минут.")
-                # После 3 минут можно вернуть резервный ответ
-                return None
-            time.sleep(2)
 
 ###############################################
 # Эндпоинты регистрации, верификации и чата
@@ -291,7 +275,7 @@ def chat():
         update_last_visit(client_code)
         update_activity_status()
         
-        # Если клиент уже в режиме последовательного уточнения guiding questions
+        # Если клиент уже находится в режиме последовательного уточнения guiding questions
         if client_code in pending_guiding:
             pending = pending_guiding[client_code]
             pending.setdefault("answers", []).append(user_message)
@@ -330,7 +314,7 @@ def chat():
                             question = get_guiding_question(marker)
                             if question:
                                 guiding_questions.append(question)
-                        # Если среди guiding вопросов присутствует уточнение типа, удалим его
+                        # Если среди guiding вопросов есть уточнение типа транспортного средства, фильтруем его
                         guiding_questions = [q for q in guiding_questions if "тип транспортного средства" not in q.lower()]
                         if not guiding_questions:
                             guiding_questions.append(f"Вы всё так же собираетесь отправить {vehicle_type.lower()}?")
@@ -349,7 +333,7 @@ def chat():
             messages.append({"role": "user", "content": user_message})
             openai_response = get_openai_response(messages)
             if openai_response is None:
-                response_message = "Извините, возникла проблема с подключением к сервису. Пожалуйста, повторите запрос позже."
+                response_message = "Сервис временно недоступен. Пожалуйста, повторите запрос позже."
             else:
                 response_message = openai_response['choices'][0]['message']['content'].strip()
         
@@ -361,26 +345,6 @@ def chat():
     except Exception as e:
         logger.error(f"❌ Ошибка в /chat: {e}")
         return jsonify({'error': str(e)}), 500
-
-def get_openai_response(messages):
-    start_time = time.time()
-    attempt = 0
-    while True:
-        try:
-            response = openai.ChatCompletion.create(
-                model="gpt-3.5-turbo",
-                messages=messages,
-                max_tokens=150,
-                timeout=40
-            )
-            return response
-        except Exception as e:
-            logger.error(f"Попытка {attempt+1} ошибки в OpenAI: {e}")
-            attempt += 1
-            if time.time() - start_time > 180:
-                send_telegram_notification("Ошибка соединения: запрос к OpenAI длится более 3 минут.")
-                return None
-            time.sleep(2)
 
 @app.route('/', methods=['GET'])
 def home():
