@@ -45,8 +45,8 @@ def load_price_data():
          },
          ...
       }
-    Добавляет в список "conditions" только те метки, для которых значение равно "1".
-    Приведение типа транспортного средства к нижнему регистру обеспечит корректное сравнение.
+    (Тип транспортного средства приводится к нижнему регистру.)
+    Добавляются только те условия, где значение равно "1".
     """
     try:
         service = get_sheets_service()
@@ -60,7 +60,7 @@ def load_price_data():
         for row in values:
             if len(row) < 4:
                 continue
-            vehicle_type = row[0].strip().lower()  # Приводим к нижнему регистру
+            vehicle_type = row[0].strip().lower()
             price_Ro_Ge = row[1].strip() if len(row) > 1 else ""
             price_Ge_Ro = row[2].strip() if len(row) > 2 else ""
             remark = row[3].strip() if len(row) > 3 else ""
@@ -125,15 +125,14 @@ def check_ferry_price(vehicle_type, direction="Ro_Ge"):
     Сравнивает тарифы для указанного типа транспортного средства и направления.
     
     Логика:
-      1. Получает актуальные тарифы с сайта через get_ferry_prices() из модуля price.
+      1. Получает актуальные тарифы с сайта через get_ferry_prices().
       2. Загружает данные из Price.xlsx через load_price_data().
-      3. Если для заданного vehicle_type данные отсутствуют, возвращает сообщение.
+      3. Если данные отсутствуют, возвращает сообщение.
       4. Обрабатывает полученную цену с сайта:
          - Удаляет временной штамп.
-         - Если полученное значение содержит подстроку "PRICE_QUERY" или "BASE_PRICE" (без учёта регистра),
-           используется запасная цена из Price.xlsx.
+         - Если в полученной строке нет цифр или она содержит PLACEHOLDER, используется запасная цена.
          - Иначе парсит цену и сравнивает с ценой из файла.
-         - Если цены не совпадают (точное совпадение требуется), уведомляет менеджера.
+         - Если цены не совпадают (требуется точное совпадение), менеджеру отправляется уведомление.
     """
     try:
         website_prices = get_ferry_prices()
@@ -159,15 +158,11 @@ def check_ferry_price(vehicle_type, direction="Ro_Ge"):
         website_price_str = remove_timestamp(website_price_str).strip()
         logger.info(f"Цена с сайта для {vehicle_type}: '{website_price_str}'")
         
-        # Если сайт возвращает PLACEHOLDER (вхождение подстроки)
-        if "PRICE_QUERY" in website_price_str.upper() or "BASE_PRICE" in website_price_str.upper():
-            price_data = load_price_data()
-            if vehicle_type in price_data:
-                fallback_price_str = price_data[vehicle_type].get("price_Ro_Ge", "")
-                logger.info(f"Сайт вернул PLACEHOLDER. Используем запасную цену для {vehicle_type}: '{fallback_price_str}'")
-                return fallback_price_str
-            else:
-                return "Информация о цене не доступна. Пожалуйста, свяжитесь с менеджером."
+        # Если строка не содержит цифр или является PLACEHOLDER, используем запасную цену
+        if not re.search(r'\d', website_price_str) or website_price_str.upper() in ["PRICE_QUERY", "BASE_PRICE"]:
+            fallback_price_str = sheet_prices[vehicle_type].get("price_Ro_Ge", "")
+            logger.info(f"Сайт не вернул корректную цену. Используем запасную цену для {vehicle_type}: '{fallback_price_str}'")
+            return fallback_price_str
         
         website_price_value = parse_price(website_price_str)
         sheet_price_value = parse_price(sheet_price_str)
@@ -199,7 +194,7 @@ def check_ferry_price(vehicle_type, direction="Ro_Ge"):
 
 if __name__ == "__main__":
     # Пример вызова функции для тестирования
-    vehicle = "truck"  # Используйте ключ в нижнем регистре, например, "truck" или "fura"
+    vehicle = "truck"  # Например, "truck" или "fura" (в нижнем регистре)
     direction = "Ro_Ge"  # или "Ge_Ro"
     message = check_ferry_price(vehicle, direction)
     print(message)
