@@ -45,11 +45,10 @@ def load_price_data():
          },
          ...
       }
-    Для условий добавляются только те столбцы, где значение равно "1".
+    Добавляет в список "conditions" только те метки, для которых значение равно "1".
     """
     try:
         service = get_sheets_service()
-        # Диапазон можно изменить, если столбцов больше
         range_name = "Sheet1!A2:G"
         result = service.spreadsheets().values().get(
             spreadsheetId=PRICE_SPREADSHEET_ID,
@@ -85,7 +84,7 @@ def load_price_data():
 
 def send_telegram_notification(message):
     """
-    Отправляет уведомление через Telegram, используя переменные окружения TELEGRAM_BOT_TOKEN и TELEGRAM_CHAT_ID.
+    Отправляет уведомление через Telegram.
     """
     try:
         telegram_bot_token = os.getenv("TELEGRAM_BOT_TOKEN")
@@ -93,23 +92,19 @@ def send_telegram_notification(message):
         if telegram_bot_token and telegram_chat_id:
             url = f"https://api.telegram.org/bot{telegram_bot_token}/sendMessage"
             payload = {"chat_id": telegram_chat_id, "text": message, "parse_mode": "HTML"}
-            response = requests.post(url, json=payload)
-            response.raise_for_status()
-            logger.info(f"Уведомление отправлено: {response.json()}")
+            requests.post(url, json=payload)
     except Exception as ex:
         logger.error(f"Ошибка при отправке уведомления: {ex}")
 
 def remove_timestamp(text):
     """
-    Удаляет временной штамп в начале строки, если он присутствует.
-    Пример: "10.02.25 09:33 - 2200 (EUR)" -> "2200 (EUR)"
+    Удаляет временной штамп из начала строки, если он присутствует.
     """
     return re.sub(r'^\d{2}\.\d{2}\.\d{2}\s+\d{2}:\d{2}\s*-\s*', '', text)
 
 def parse_price(price_str):
     """
-    Извлекает числовое значение из строки, удаляя все символы, кроме цифр и точки.
-    Пример: "2200 (EUR)" -> 2200.0
+    Извлекает числовое значение из строки цены, например, "2200 (EUR)" -> 2200.0
     """
     try:
         cleaned = re.sub(r'[^\d.]', '', price_str)
@@ -126,21 +121,19 @@ def check_ferry_price(vehicle_type, direction="Ro_Ge"):
     
     Логика:
       1. Получает актуальные тарифы с сайта через get_ferry_prices() из модуля price.
-      2. Загружает данные из Price.xlsx с помощью load_price_data().
+      2. Загружает данные из Price.xlsx через load_price_data().
       3. Если для заданного vehicle_type данные отсутствуют в одном из источников, возвращает соответствующее сообщение.
-      4. Сравнивает цены из сайта и из Price.xlsx:
-         - Если цены совпадают (точное числовое совпадение), формирует ответ с подтверждённой ценой, добавляет Remark и (при наличии) guiding conditions.
-         - Если цены не совпадают, отправляет уведомление менеджеру и возвращает сообщение о необходимости уточнения.
+      4. Сравнивает цены:
+         - Если цены совпадают (точное числовое совпадение), формирует ответ с подтверждённой ценой, добавляет Remark и (при наличии) условия.
+         - Если цены различаются, уведомляет менеджера и возвращает сообщение об уточнении.
     """
     try:
-        # Получаем цены с сайта (при этом get_ferry_prices() возвращает словарь)
         website_prices = get_ferry_prices()
         logger.info(f"Получены цены с сайта: {website_prices}")
-        # Загружаем цены из файла
         sheet_prices = load_price_data()
         
         if vehicle_type not in website_prices:
-            msg = f"Извините, актуальная цена для транспортного средства '{vehicle_type}' не найдена на сайте."
+            msg = f"Извините, актуальная цена для '{vehicle_type}' не найдена на сайте."
             logger.error(msg)
             return msg
         if vehicle_type not in sheet_prices:
@@ -174,22 +167,22 @@ def check_ferry_price(vehicle_type, direction="Ro_Ge"):
             if conditions:
                 response_message += "\nДля более точного расчёта, пожалуйста, ответьте на следующие вопросы:"
                 for marker in conditions:
-                    logger.info(f"Активное условие: {marker}")
-                    # Здесь можно возвращать маркер или, при необходимости, дополнительно обработанный текст guiding question
+                    # Здесь можно дополнительно обрабатывать guiding вопросы
                     response_message += f"\n{marker}"
             return response_message
         else:
             message_to_manager = (f"ВНИМАНИЕ: Для '{vehicle_type}' цены различаются. "
                                   f"Сайт: {website_price_str}, База: {sheet_price_str}. Требуется уточнение!")
             send_telegram_notification(message_to_manager)
-            return (f"Цена для '{vehicle_type}' требует уточнения. Пожалуйста, свяжитесь с менеджером.")
+            return (f"Цена для '{vehicle_type}' требует уточнения. Пожалуйста, свяжитесь с менеджером по телефонам: "
+                    "+995595198228 или +4367763198228.")
     except Exception as e:
         logger.error(f"Ошибка при сравнении цен: {e}")
         return "Произошла ошибка при получении цены. Пожалуйста, попробуйте позже."
 
 if __name__ == "__main__":
     # Пример вызова функции для тестирования
-    vehicle = "Truck"  # Замените на реальный тип транспортного средства, как указано в Price.xlsx
+    vehicle = "Truck"  # Замените на нужный тип
     direction = "Ro_Ge"  # или "Ge_Ro"
     message = check_ferry_price(vehicle, direction)
     print(message)
