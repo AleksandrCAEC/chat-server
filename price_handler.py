@@ -45,7 +45,7 @@ def load_price_data():
          },
          ...
       }
-    (Тип транспортного средства приводится к нижнему регистру.)
+    Тип транспортного средства приводится к нижнему регистру.
     Добавляются только те условия, где значение равно "1".
     """
     try:
@@ -123,14 +123,10 @@ def parse_price(price_str):
 def check_ferry_price(vehicle_type, direction="Ro_Ge"):
     """
     Получает актуальные тарифы с сайта и сравнивает с данными из Price.xlsx.
-    
-    Логика:
-      1. Получает цены с сайта через get_ferry_prices() из модуля price.
-      2. Загружает данные из Price.xlsx через load_price_data().
-      3. Если полученная с сайта цена содержит PLACEHOLDER ("PRICE_QUERY" или "BASE_PRICE") или не содержит цифр,
-         используется запасная цена из Price.xlsx.
-      4. Иначе парсится цена и, если цена с сайта не совпадает с ценой из файла (требуется точное совпадение),
-         отправляется уведомление менеджеру.
+    Если сайт не возвращает корректное число (например, возвращается PLACEHOLDER),
+    используется запасная цена из Price.xlsx.
+    Если цена с сайта отличается от цены из файла, менеджеру отправляется уведомление,
+    а в ответ возвращается именно цена из файла.
     """
     try:
         website_prices = get_ferry_prices()
@@ -156,10 +152,10 @@ def check_ferry_price(vehicle_type, direction="Ro_Ge"):
         website_price_str = remove_timestamp(website_price_str).strip()
         logger.info(f"Цена с сайта для {vehicle_type}: '{website_price_str}'")
         
-        # Если сайт возвращает PLACEHOLDER или строка не содержит цифр, используем запасную цену
+        # Если строка с сайта не содержит цифр или является PLACEHOLDER, используем запасную цену
         if not re.search(r'\d', website_price_str) or website_price_str.upper() in ["PRICE_QUERY", "BASE_PRICE"]:
-            fallback_price_str = sheet_prices[vehicle_type].get("price_Ro_Ge", "")
-            logger.info(f"Сайт вернул PLACEHOLDER или некорректное значение. Используем запасную цену для {vehicle_type}: '{fallback_price_str}'")
+            fallback_price_str = sheet_price_str  # Используем значение из файла
+            logger.info(f"Сайт вернул некорректное значение. Используем запасную цену: '{fallback_price_str}'")
             return fallback_price_str
         
         website_price_value = parse_price(website_price_str)
@@ -169,7 +165,14 @@ def check_ferry_price(vehicle_type, direction="Ro_Ge"):
             logger.error("Не удалось распарсить цену.")
             return "Произошла ошибка при получении цены. Пожалуйста, попробуйте позже."
         
-        if website_price_value == sheet_price_value:
+        # Если цены не совпадают, отправляем уведомление, но возвращаем цену из файла (считаем её корректной)
+        if website_price_value != sheet_price_value:
+            message_to_manager = (f"ВНИМАНИЕ: Для '{vehicle_type}' цены различаются. "
+                                  f"Сайт: {website_price_str}, Файл: {sheet_price_str}.")
+            send_telegram_notification(message_to_manager)
+            logger.info("Возвращаем запасную цену из файла.")
+            return sheet_price_str
+        else:
             response_message = f"Цена перевозки для '{vehicle_type}' ({direction.replace('_', ' ')}) составляет {website_price_str}."
             remark = sheet_prices[vehicle_type].get("remark", "")
             if remark:
@@ -180,19 +183,13 @@ def check_ferry_price(vehicle_type, direction="Ro_Ge"):
                 for marker in conditions:
                     response_message += f"\n{marker}"
             return response_message
-        else:
-            message_to_manager = (f"ВНИМАНИЕ: Для '{vehicle_type}' цены различаются. "
-                                  f"Сайт: {website_price_str}, Файл: {sheet_price_str}. Требуется уточнение!")
-            send_telegram_notification(message_to_manager)
-            return (f"Цена для '{vehicle_type}' требует уточнения. Пожалуйста, свяжитесь с менеджером по телефонам: "
-                    "+995595198228 или +4367763198228.")
     except Exception as e:
         logger.error(f"Ошибка при сравнении цен: {e}")
         return "Произошла ошибка при получении цены. Пожалуйста, попробуйте позже."
 
 if __name__ == "__main__":
     # Пример вызова функции для тестирования
-    vehicle = "truck"  # Используйте "truck" или "fura" (в нижнем регистре)
+    vehicle = "fura"  # Используйте "truck" или "fura" (в нижнем регистре)
     direction = "Ro_Ge"  # или "Ge_Ro"
     message = check_ferry_price(vehicle, direction)
     print(message)
