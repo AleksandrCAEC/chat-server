@@ -53,10 +53,6 @@ pending_guiding = {}
 # Функция парсинга цены и удаления временного штампа
 ###############################################
 def parse_price(price_str):
-    """
-    Извлекает числовое значение из строки, удаляя все символы, кроме цифр и точки.
-    Пример: "2200 (EUR)" -> 2200.0
-    """
     try:
         cleaned = re.sub(r'[^\d.]', '', price_str)
         return float(cleaned)
@@ -65,10 +61,6 @@ def parse_price(price_str):
         return None
 
 def remove_timestamp(text):
-    """
-    Удаляет временной штамп в начале строки, если он присутствует.
-    Пример: "08.02.25 01:28 - 2200 (EUR)" -> "2200 (EUR)"
-    """
     return re.sub(r'^\d{2}\.\d{2}\.\d{2}\s+\d{2}:\d{2}\s*-\s*', '', text)
 
 ###############################################
@@ -99,12 +91,12 @@ def is_price_query(text):
 
 def get_vehicle_type(text):
     known_types = {
-        "truck": "Truck", 
-        "грузовик": "Truck", 
-        "fura": "Fura", 
-        "фура": "Fura",
-        "фуры": "Fura",
-        "фуру": "Fura"
+        "truck": "truck", 
+        "грузовик": "truck", 
+        "fura": "fura", 
+        "фура": "fura",
+        "фуры": "fura",
+        "фуру": "fura"
     }
     text_lower = text.lower()
     for key, standard in known_types.items():
@@ -114,34 +106,48 @@ def get_vehicle_type(text):
 
 def get_price_response(vehicle_type, direction="Ro_Ge"):
     """
-    Получает цену с сайта (приоритетный источник). Ждёт до 3 минут повторными попытками каждые 5 секунд.
-    Если за это время не получено корректное числовое значение или возвращён PLACEHOLDER, менеджеру отправляется уведомление,
-    и используется запасная цена из Price.xlsx.
+    Получает цену с сайта в первую очередь.
+    Если за 3 минуты не получен корректный ответ (числовая цена), используется запасная цена из Price.xlsx,
+    а менеджеру отправляется уведомление.
     """
     start_time = time.time()
-    while time.time() - start_time < 180:
+    website_price_str = None
+    while True:
         try:
             website_price_str = check_ferry_price(vehicle_type, direction)
-            website_price_str = remove_timestamp(website_price_str)
+            website_price_str = remove_timestamp(website_price_str).strip()
             logger.info(f"Цена с сайта для {vehicle_type}: '{website_price_str}'")
-            if "PRICE_QUERY" in website_price_str.upper() or "BASE_PRICE" in website_price_str.upper():
-                logger.info("Получен PLACEHOLDER с сайта, продолжаем ожидание...")
+            if re.search(r'\d', website_price_str) and website_price_str.upper() not in ["PRICE_QUERY", "BASE_PRICE"]:
+                break
             else:
-                parsed = parse_price(website_price_str)
-                if parsed is not None:
-                    return website_price_str  # Вернуть корректную цену с сайта
+                logger.info("Получен PLACEHOLDER или некорректное значение, продолжаем ожидание...")
         except Exception as e:
             logger.error(f"Ошибка при получении цены для {vehicle_type}: {e}")
+        if time.time() - start_time > 180:
+            send_telegram_notification(f"Ошибка соединения: для {vehicle_type} не удалось получить актуальную цену более 3 минут.")
+            price_data = load_price_data()
+            if vehicle_type in price_data:
+                fallback_price_str = price_data[vehicle_type].get("price_Ro_Ge", "")
+                logger.info(f"Используем запасную цену для {vehicle_type}: '{fallback_price_str}'")
+                return fallback_price_str
+            else:
+                return "Информация о цене не доступна. Пожалуйста, свяжитесь с менеджером."
         time.sleep(5)
-    # Если за 3 минуты не удалось получить корректное значение, уведомляем менеджера и используем запасную цену.
-    send_telegram_notification(f"Ошибка соединения: для {vehicle_type} не удалось получить актуальную цену более 3 минут.")
+    # Сравнение с запасной ценой
+    website_price_value = parse_price(website_price_str)
     price_data = load_price_data()
     if vehicle_type in price_data:
-        fallback_price_str = price_data[vehicle_type].get("price_Ro_Ge", "")
-        logger.info(f"Используем запасную цену для {vehicle_type}: '{fallback_price_str}'")
-        return fallback_price_str
+        file_price_str = price_data[vehicle_type].get("price_Ro_Ge", "")
+        logger.info(f"Цена из Price.xlsx для {vehicle_type}: '{file_price_str}'")
+        file_price_value = parse_price(file_price_str)
+        if website_price_value is not None and file_price_value is not None:
+            if website_price_value != file_price_value:
+                send_telegram_notification(
+                    f"ВНИМАНИЕ: Для {vehicle_type} цена с сайта ({website_price_value} евро) не совпадает с ценой из файла ({file_price_value} евро)!"
+                )
+        return website_price_str
     else:
-        return "Информация о цене не доступна. Пожалуйста, свяжитесь с менеджером."
+        return website_price_str
 
 def get_guiding_question(condition_marker):
     """
@@ -158,13 +164,10 @@ def get_guiding_question(condition_marker):
             return question
     return None
 
-###############################################
-# Функция получения ответа от OpenAI с ожиданием (до 3 минут)
-###############################################
 def get_openai_response(messages):
     start_time = time.time()
     attempt = 0
-    while time.time() - start_time < 180:
+    while True:
         try:
             response = openai.ChatCompletion.create(
                 model="gpt-3.5-turbo",
@@ -176,13 +179,11 @@ def get_openai_response(messages):
         except Exception as e:
             logger.error(f"Попытка {attempt+1} ошибки в OpenAI: {e}")
             attempt += 1
+            if time.time() - start_time > 180:
+                send_telegram_notification("Ошибка соединения: запрос к OpenAI длится более 3 минут.")
+                return None
             time.sleep(2)
-    send_telegram_notification("Ошибка соединения: запрос к OpenAI длится более 3 минут.")
-    return None
 
-###############################################
-# Функция подготовки контекста (память ассистента)
-###############################################
 def prepare_chat_context(client_code):
     messages = []
     bible_df = load_bible_data()
@@ -275,7 +276,7 @@ def chat():
         update_last_visit(client_code)
         update_activity_status()
         
-        # Если клиент уже в режиме последовательного уточнения guiding questions
+        # Если клиент уже находится в режиме уточнения guiding questions
         if client_code in pending_guiding:
             pending = pending_guiding[client_code]
             pending.setdefault("answers", []).append(user_message)
@@ -287,12 +288,19 @@ def chat():
                 try:
                     base_price = parse_price(base_price_str)
                     multiplier = 1.0
+                    fee = 0
+                    driver_info = None
                     for ans in pending["answers"]:
+                        if "без водителя" in ans.lower():
+                            driver_info = "without"
+                        elif "с водителем" in ans.lower():
+                            driver_info = "with"
                         if "adr" in ans.lower():
                             multiplier = 1.2
-                            break
-                    final_cost = base_price * multiplier
-                    final_price = f"Базовая цена: {base_price}. Итоговая стоимость с учетом ваших ответов: {final_cost}."
+                    if driver_info == "without":
+                        fee = 100
+                    final_cost = (base_price + fee) * multiplier
+                    final_price = f"Базовая цена: {base_price} евро. Итоговая стоимость с учетом ваших ответов: {final_cost} евро."
                 except Exception as ex:
                     final_price = f"Базовая цена: {base_price_str}. Ваши ответы: {', '.join(pending['answers'])}."
                 response_message = f"Спасибо, ваши ответы приняты. {final_price}"
@@ -314,10 +322,10 @@ def chat():
                             question = get_guiding_question(marker)
                             if question:
                                 guiding_questions.append(question)
-                        # Фильтруем guiding вопросы, если они содержат уточнение типа транспортного средства
+                        # Фильтруем guiding вопросы, связанные с уточнением типа
                         guiding_questions = [q for q in guiding_questions if "тип транспортного средства" not in q.lower()]
                         if not guiding_questions:
-                            guiding_questions.append(f"Вы всё так же собираетесь отправить {vehicle_type.lower()}?")
+                            guiding_questions.append(f"Вы всё так же собираетесь отправить {vehicle_type}?")
                         pending_guiding[client_code] = {
                             "vehicle_type": vehicle_type,
                             "guiding_questions": guiding_questions,
