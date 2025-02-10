@@ -50,7 +50,7 @@ pprint.pprint(dict(os.environ))
 pending_guiding = {}
 
 ###############################################
-# Функция парсинга цены и удаления временного штампа
+# Функции для парсинга цены и удаления временных меток
 ###############################################
 def parse_price(price_str):
     try:
@@ -105,11 +105,6 @@ def get_vehicle_type(text):
     return None
 
 def get_price_response(vehicle_type, direction="Ro_Ge"):
-    """
-    Получает цену с сайта в первую очередь.
-    Если за 3 минуты не получен корректный ответ (числовая цена), используется запасная цена из Price.xlsx,
-    а менеджеру отправляется уведомление.
-    """
     start_time = time.time()
     website_price_str = None
     while True:
@@ -133,7 +128,6 @@ def get_price_response(vehicle_type, direction="Ro_Ge"):
             else:
                 return "Информация о цене не доступна. Пожалуйста, свяжитесь с менеджером."
         time.sleep(5)
-    # Сравнение с запасной ценой
     website_price_value = parse_price(website_price_str)
     price_data = load_price_data()
     if vehicle_type in price_data:
@@ -143,17 +137,15 @@ def get_price_response(vehicle_type, direction="Ro_Ge"):
         if website_price_value is not None and file_price_value is not None:
             if website_price_value != file_price_value:
                 send_telegram_notification(
-                    f"ВНИМАНИЕ: Для {vehicle_type} цена с сайта ({website_price_value} евро) не совпадает с ценой из файла ({file_price_value} евро)!"
+                    f"ВНИМАНИЕ: Для {vehicle_type} цены различаются. Сайт: {website_price_value} евро, Файл: {file_price_value} евро."
                 )
+                # Возвращаем запасную цену, считая, что файл содержит актуальное значение (например, 2200)
+                return file_price_str
         return website_price_str
     else:
         return website_price_str
 
 def get_guiding_question(condition_marker):
-    """
-    Ищет в Bible.xlsx строку, где Verification соответствует condition_marker (например, "CONDITION1")
-    и возвращает guiding question из столбца FAQ. Если не найдено, возвращает None.
-    """
     bible_df = load_bible_data()
     if bible_df is None:
         return None
@@ -276,7 +268,7 @@ def chat():
         update_last_visit(client_code)
         update_activity_status()
         
-        # Если клиент уже находится в режиме уточнения guiding questions
+        # Если клиент уже в режиме уточнения guiding questions
         if client_code in pending_guiding:
             pending = pending_guiding[client_code]
             pending.setdefault("answers", []).append(user_message)
@@ -322,7 +314,6 @@ def chat():
                             question = get_guiding_question(marker)
                             if question:
                                 guiding_questions.append(question)
-                        # Фильтруем guiding вопросы, связанные с уточнением типа
                         guiding_questions = [q for q in guiding_questions if "тип транспортного средства" not in q.lower()]
                         if not guiding_questions:
                             guiding_questions.append(f"Вы всё так же собираетесь отправить {vehicle_type}?")
