@@ -91,20 +91,30 @@ def is_price_query(text):
     return any(keyword in text.lower() for keyword in PRICE_KEYWORDS)
 
 def get_vehicle_type(text):
-    known_types = {"truck": "Truck", "грузовик": "Truck", "fura": "Fura", "фура": "Fura"}
+    # Расширяем словарь вариантов для "фура"
+    known_types = {
+        "truck": "Truck", 
+        "грузовик": "Truck", 
+        "fura": "Fura", 
+        "фура": "Fura",
+        "фуры": "Fura",
+        "фуру": "Fura"
+    }
+    text_lower = text.lower()
     for key, standard in known_types.items():
-        if key in text.lower():
+        if key in text_lower:
             return standard
     return None
 
 def get_price_response(vehicle_type, direction="Ro_Ge"):
     """
-    Получает цену с сайта в первую очередь. Если получение с сайта прошло успешно,
-    сравнивает её с данными из Price.xlsx. Если разница хотя бы не равна 0, менеджер уведомляется.
-    Если получение с сайта не удалось, используется цена из Price.xlsx.
+    Получает цену с сайта. Если результат содержит PLACEHOLDER,
+    пытается использовать запасную цену из Price.xlsx.
+    Если с сайта получена цена, сравнивает её с данными из Price.xlsx;
+    если они не совпадают (разница не равна 0), уведомляет менеджера.
     """
-    website_price_str = None
     attempt = 0
+    website_price_str = None
     while attempt < 3:
         try:
             website_price_str = check_ferry_price(vehicle_type, direction)
@@ -115,15 +125,24 @@ def get_price_response(vehicle_type, direction="Ro_Ge"):
             attempt += 1
             time.sleep(2)
     if not website_price_str or website_price_str.strip() == "":
-        # Если не удалось получить цену с сайта, используем данные из файла
+        # Если цена с сайта не получена, используем запасную цену из файла Price.xlsx
         price_data = load_price_data()
         if vehicle_type in price_data:
             fallback_price_str = price_data[vehicle_type].get("price_Ro_Ge", "")
-            logger.info(f"Используем запасную цену из файла для {vehicle_type}: '{fallback_price_str}'")
+            logger.info(f"Используем запасную цену для {vehicle_type}: '{fallback_price_str}'")
             return fallback_price_str
         else:
             return "Информация о цене не доступна. Пожалуйста, свяжитесь с менеджером."
-    # Если цена с сайта получена, проверяем ее соответствие с файлом
+    # Если цена с сайта возвращается как PLACEHOLDER, используем запасную цену
+    if "PRICE_QUERY" in website_price_str.upper() or "BASE_PRICE" in website_price_str.upper():
+        price_data = load_price_data()
+        if vehicle_type in price_data:
+            fallback_price_str = price_data[vehicle_type].get("price_Ro_Ge", "")
+            logger.info(f"Цена с сайта недоступна, используем запасную цену для {vehicle_type}: '{fallback_price_str}'")
+            return fallback_price_str
+        else:
+            return "Информация о цене не доступна. Пожалуйста, свяжитесь с менеджером."
+    # Если получена корректная цена, сравним с файлом
     website_price = parse_price(website_price_str)
     price_data = load_price_data()
     if vehicle_type in price_data:
@@ -133,7 +152,7 @@ def get_price_response(vehicle_type, direction="Ro_Ge"):
         if website_price is not None and file_price is not None:
             if website_price != file_price:
                 send_telegram_notification(
-                    f"Точная цена для {vehicle_type} отличается: с сайта: {website_price} евро, из Price.xlsx: {file_price} евро. Требуется проверка!"
+                    f"ВНИМАНИЕ: Для {vehicle_type} цена с сайта ({website_price} евро) не совпадает с ценой из файла ({file_price} евро)!"
                 )
         return website_price_str
     else:
@@ -243,7 +262,7 @@ def chat():
         update_last_visit(client_code)
         update_activity_status()
         
-        # Если клиент уже в режиме последовательного уточнения guiding questions
+        # Если клиент уже находится в режиме последовательного уточнения guiding questions
         if client_code in pending_guiding:
             pending = pending_guiding[client_code]
             pending.setdefault("answers", []).append(user_message)
@@ -267,8 +286,9 @@ def chat():
                 del pending_guiding[client_code]
         elif is_price_query(user_message):
             vehicle_type = get_vehicle_type(user_message)
+            # Если тип не определился, не запрашиваем его повторно, а выдаем сообщение об ошибке
             if not vehicle_type:
-                response_message = ("Для определения цены, пожалуйста, уточните тип транспортного средства (например, грузовик или фура).")
+                response_message = ("Извините, не удалось определить тип транспортного средства. Пожалуйста, укажите, например, 'фура'.")
             else:
                 price_data = load_price_data()
                 if vehicle_type not in price_data:
@@ -292,9 +312,9 @@ def chat():
                             }
                             response_message = f"Базовая цена: {base_price_str}. Дополнительное условие: {guiding_questions[0]}"
                         else:
-                            response_message = get_price_response(vehicle_type, direction="Ro_Ge")
+                            response_message = base_price_str
                     else:
-                        response_message = get_price_response(vehicle_type, direction="Ro_Ge")
+                        response_message = base_price_str
         else:
             messages = prepare_chat_context(client_code)
             messages.append({"role": "user", "content": user_message})
