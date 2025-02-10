@@ -9,9 +9,11 @@ logger.setLevel(logging.INFO)
 def get_ferry_prices():
     """
     Получает актуальные тарифы с сайта https://e60shipping.com/en/32/static/tariff.html.
+    
     Для примера предполагается, что на странице цены для Truck и Fura находятся в элементах с классами:
       - "price-truck" для Truck
       - "price-fura" для Fura
+    
     Если парсинг не удаётся, возвращается PLACEHOLDER "PRICE_QUERY".
     """
     url = "https://e60shipping.com/en/32/static/tariff.html"
@@ -25,7 +27,6 @@ def get_ferry_prices():
         truck_elem = soup.find("div", class_="price-truck")
         if truck_elem:
             price_text = truck_elem.get_text(strip=True)
-            # Приводим ключ к нижнему регистру
             prices["truck"] = {"price_Ro_Ge": price_text, "price_Ge_Ro": price_text}
         fura_elem = soup.find("div", class_="price-fura")
         if fura_elem:
