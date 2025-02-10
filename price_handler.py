@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
 # Замените на актуальный Spreadsheet ID для файла Price.xlsx
-PRICE_SPREADSHEET_ID = "YOUR_PRICE_SPREADSHEET_ID"
+PRICE_SPREADSHEET_ID = "1N4VpU1rBw3_MPx6GJRDiSQ03iHhS24noTq5-i6V01z8"
 
 def get_sheets_service():
     try:
