@@ -99,12 +99,14 @@ def send_telegram_notification(message):
 def remove_timestamp(text):
     """
     Удаляет временной штамп из начала строки, если он присутствует.
+    Пример: "10.02.25 09:33 - 2200 (EUR)" -> "2200 (EUR)"
     """
     return re.sub(r'^\d{2}\.\d{2}\.\d{2}\s+\d{2}:\d{2}\s*-\s*', '', text)
 
 def parse_price(price_str):
     """
-    Извлекает числовое значение из строки цены, например, "2200 (EUR)" -> 2200.0
+    Извлекает числовое значение из строки цены.
+    Пример: "2200 (EUR)" -> 2200.0
     """
     try:
         cleaned = re.sub(r'[^\d.]', '', price_str)
@@ -123,9 +125,11 @@ def check_ferry_price(vehicle_type, direction="Ro_Ge"):
       1. Получает актуальные тарифы с сайта через get_ferry_prices() из модуля price.
       2. Загружает данные из Price.xlsx через load_price_data().
       3. Если для заданного vehicle_type данные отсутствуют в одном из источников, возвращает соответствующее сообщение.
-      4. Сравнивает цены:
-         - Если цены совпадают (точное числовое совпадение), формирует ответ с подтверждённой ценой, добавляет Remark и (при наличии) условия.
-         - Если цены различаются, уведомляет менеджера и возвращает сообщение об уточнении.
+      4. Обрабатывает полученную цену с сайта:
+         - Удаляет временной штамп.
+         - Если результат равен ровно "PRICE_QUERY" или "BASE_PRICE", возвращает запасную цену из Price.xlsx.
+         - Иначе парсит цену и сравнивает с данными из файла.
+         - Если цены не совпадают (требуется точное совпадение), уведомляет менеджера.
     """
     try:
         website_prices = get_ferry_prices()
@@ -148,8 +152,18 @@ def check_ferry_price(vehicle_type, direction="Ro_Ge"):
             website_price_str = website_prices[vehicle_type].get("price_Ge_Ro", "")
             sheet_price_str = sheet_prices[vehicle_type].get("price_Ge_Ro", "")
         
-        website_price_str = remove_timestamp(website_price_str)
+        website_price_str = remove_timestamp(website_price_str).strip()
         logger.info(f"Цена с сайта для {vehicle_type}: '{website_price_str}'")
+        
+        # Если сайт вернул PLACEHOLDER, используем запасную цену
+        if website_price_str.upper() in ["PRICE_QUERY", "BASE_PRICE"]:
+            price_data = load_price_data()
+            if vehicle_type in price_data:
+                fallback_price_str = price_data[vehicle_type].get("price_Ro_Ge", "")
+                logger.info(f"Сайт вернул PLACEHOLDER. Используем запасную цену для {vehicle_type}: '{fallback_price_str}'")
+                return fallback_price_str
+            else:
+                return "Информация о цене не доступна. Пожалуйста, свяжитесь с менеджером."
         
         website_price_value = parse_price(website_price_str)
         sheet_price_value = parse_price(sheet_price_str)
@@ -167,7 +181,7 @@ def check_ferry_price(vehicle_type, direction="Ro_Ge"):
             if conditions:
                 response_message += "\nДля более точного расчёта, пожалуйста, ответьте на следующие вопросы:"
                 for marker in conditions:
-                    # Здесь можно дополнительно обрабатывать guiding вопросы
+                    # Здесь можно дополнительно обработать guiding вопросы
                     response_message += f"\n{marker}"
             return response_message
         else:
@@ -182,7 +196,7 @@ def check_ferry_price(vehicle_type, direction="Ro_Ge"):
 
 if __name__ == "__main__":
     # Пример вызова функции для тестирования
-    vehicle = "Truck"  # Замените на нужный тип
+    vehicle = "Truck"  # Замените на реальный тип транспортного средства, как указано в Price.xlsx
     direction = "Ro_Ge"  # или "Ge_Ro"
     message = check_ferry_price(vehicle, direction)
     print(message)
