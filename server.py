@@ -50,7 +50,22 @@ pprint.pprint(dict(os.environ))
 pending_guiding = {}
 
 ###############################################
-# ФУНКЦИЯ ОТПРАВКИ УВЕДОМЛЕНИЙ ЧЕРЕЗ TELEGRAM
+# Вспомогательная функция для парсинга цены из строки
+###############################################
+def parse_price(price_str):
+    """
+    Извлекает числовое значение из строки, удаляя лишние символы.
+    Пример: "2200 (EUR)" -> 2200.0
+    """
+    try:
+        cleaned = re.sub(r'[^\d.]', '', price_str)
+        return float(cleaned)
+    except Exception as e:
+        logger.error(f"Ошибка парсинга цены из '{price_str}': {e}")
+        return None
+
+###############################################
+# Функция отправки уведомлений через Telegram
 ###############################################
 def send_telegram_notification(message):
     telegram_bot_token = os.getenv("TELEGRAM_BOT_TOKEN")
@@ -68,7 +83,7 @@ def send_telegram_notification(message):
         logger.error(f"❌ Ошибка при отправке Telegram уведомления: {e}")
 
 ###############################################
-# ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ДЛЯ ОБРАБОТКИ ЗАПРОСОВ О ЦЕНЕ
+# Вспомогательные функции для обработки запросов о цене
 ###############################################
 PRICE_KEYWORDS = ["цена", "прайс", "сколько стоит", "во сколько обойдется"]
 
@@ -82,25 +97,34 @@ def get_vehicle_type(text):
             return standard
     return None
 
-def parse_price(price_str):
-    """Извлекает число из строки цены, удаляя лишние символы."""
-    try:
-        cleaned = re.sub(r'[^\d.]', '', price_str)
-        return float(cleaned)
-    except Exception as e:
-        logger.error(f"Ошибка парсинга цены из '{price_str}': {e}")
-        return None
-
 def get_price_response(vehicle_type, direction="Ro_Ge"):
+    """
+    Получает цену с сайта и сравнивает её с ценой из Price.xlsx.
+    Если разница превышает 5%, менеджеру отправляется уведомление.
+    Возвращается базовая цена, полученная с сайта.
+    """
     attempt = 0
     while attempt < 3:
         try:
-            response = check_ferry_price(vehicle_type, direction)
-            if "PRICE_QUERY" in response.upper():
+            website_price_str = check_ferry_price(vehicle_type, direction)
+            logger.info(f"Цена с сайта для {vehicle_type}: '{website_price_str}'")
+            if "PRICE_QUERY" in website_price_str.upper():
                 return "Информация о цене не доступна. Пожалуйста, свяжитесь с менеджером."
-            if "BASE_PRICE" in response.upper():
+            if "BASE_PRICE" in website_price_str.upper():
                 return "Базовая цена не установлена. Пожалуйста, свяжитесь с менеджером."
-            return response
+            website_price = parse_price(website_price_str)
+            price_data = load_price_data()
+            if vehicle_type in price_data:
+                xls_price_str = price_data[vehicle_type].get("price_Ro_Ge", "")
+                logger.info(f"Цена из Price.xlsx для {vehicle_type}: '{xls_price_str}'")
+                xls_price = parse_price(xls_price_str)
+                if website_price is not None and xls_price is not None:
+                    diff_ratio = abs(website_price - xls_price) / xls_price
+                    if diff_ratio > 0.05:
+                        msg = (f"Разница в цене для {vehicle_type}: с сайта: {website_price} евро, "
+                               f"из Price.xlsx: {xls_price} евро. Проверьте актуальность тарифов.")
+                        send_telegram_notification(msg)
+            return website_price_str
         except Exception as e:
             logger.error(f"Попытка {attempt+1} при получении цены для {vehicle_type}: {e}")
             attempt += 1
@@ -123,7 +147,7 @@ def get_guiding_question(condition_marker):
     return None
 
 ###############################################
-# ФУНКЦИЯ ПОДГОТОВКИ КОНТЕКСТА (ПАМЯТЬ АССИСТЕНТА)
+# Функция подготовки контекста (память ассистента)
 ###############################################
 def prepare_chat_context(client_code):
     messages = []
@@ -165,7 +189,7 @@ def prepare_chat_context(client_code):
     return messages
 
 ###############################################
-# ЭНДПОИНТЫ РЕГИСТРАЦИИ, ВЕРИФИКАЦИИ И ЧАТА
+# Эндпоинты регистрации, верификации и чата
 ###############################################
 @app.route('/register-client', methods=['POST'])
 def register_client():
@@ -273,7 +297,7 @@ def chat():
                         model="gpt-3.5-turbo",
                         messages=messages,
                         max_tokens=150,
-                        timeout=20
+                        timeout=30  # увеличен таймаут до 30 секунд
                     )
                     break
                 except Exception as e:
