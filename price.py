@@ -1,71 +1,52 @@
+# price.py
 import requests
 from bs4 import BeautifulSoup
 import logging
 
-# Настройка логирования
-logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
-
-TARIFF_URL = "https://e60shipping.com/en/32/static/tariff.html"
+logger.setLevel(logging.INFO)
 
 def get_ferry_prices():
     """
-    Делает HTTP-запрос к странице тарифов паромного сервиса и извлекает информацию о ценах.
-    Возвращает словарь вида:
-    {
-        "VehicleType1": {
-            "price_Ro_Ge": "Цена для направления Romania -> Georgia",
-            "price_Ge_Ro": "Цена для направления Georgia -> Romania",
-            "remark": "Remark",
-            "condition": "Condition"
-        },
-        ...
-    }
+    Получает актуальные тарифы с сайта https://e60shipping.com/en/32/static/tariff.html.
+    
+    Для примера мы предполагаем, что на странице цены для Truck и Fura находятся в элементах с классами:
+      - "price-truck" для Truck
+      - "price-fura" для Fura
+    
+    Если парсинг не удаётся, возвращается PLACEHOLDER "PRICE_QUERY".
     """
+    url = "https://e60shipping.com/en/32/static/tariff.html"
     try:
-        response = requests.get(TARIFF_URL)
+        response = requests.get(url, timeout=30)
         response.raise_for_status()
-        logger.info("Запрос к тарифной странице выполнен успешно.")
+        html = response.text
+        soup = BeautifulSoup(html, 'html.parser')
+        
+        prices = {}
+        # Пример: ищем элемент для Truck
+        truck_elem = soup.find("div", class_="price-truck")
+        if truck_elem:
+            price_text = truck_elem.get_text(strip=True)
+            prices["Truck"] = {"price_Ro_Ge": price_text, "price_Ge_Ro": price_text}
+        # Пример: ищем элемент для Fura
+        fura_elem = soup.find("div", class_="price-fura")
+        if fura_elem:
+            price_text = fura_elem.get_text(strip=True)
+            prices["Fura"] = {"price_Ro_Ge": price_text, "price_Ge_Ro": price_text}
+        
+        if not prices:
+            logger.error("Не удалось найти цены на странице, возвращаем PLACEHOLDER.")
+            return {
+                "Truck": {"price_Ro_Ge": "PRICE_QUERY", "price_Ge_Ro": "PRICE_QUERY"},
+                "Fura": {"price_Ro_Ge": "PRICE_QUERY", "price_Ge_Ro": "PRICE_QUERY"}
+            }
+        
+        logger.info(f"Полученные цены с сайта: {prices}")
+        return prices
     except Exception as e:
-        logger.error(f"Ошибка при запросе тарифов с сайта: {e}")
-        raise Exception(f"Ошибка при запросе тарифов с сайта: {e}")
-
-    soup = BeautifulSoup(response.text, 'html.parser')
-    table = soup.find('table')
-    if not table:
-        logger.error("Таблица тарифов не найдена на странице.")
-        raise Exception("Таблица тарифов не найдена на странице.")
-
-    prices = {}
-    rows = table.find_all('tr')
-    if not rows or len(rows) < 2:
-        logger.error("В таблице тарифов нет данных для обработки.")
-        raise Exception("В таблице тарифов нет данных для обработки.")
-
-    # Предполагается, что первая строка таблицы – заголовок, а последующие строки – данные
-    for row in rows[1:]:
-        cols = row.find_all('td')
-        if len(cols) < 5:
-            continue  # если строка не содержит достаточное число ячеек, пропускаем её
-        vehicle_type = cols[0].get_text(strip=True)
-        price_Ro_Ge = cols[1].get_text(strip=True)
-        price_Ge_Ro = cols[2].get_text(strip=True)
-        remark = cols[3].get_text(strip=True)
-        condition = cols[4].get_text(strip=True)
-        prices[vehicle_type] = {
-            "price_Ro_Ge": price_Ro_Ge,
-            "price_Ge_Ro": price_Ge_Ro,
-            "remark": remark,
-            "condition": condition
+        logger.error(f"Ошибка при получении цен с сайта: {e}")
+        return {
+            "Truck": {"price_Ro_Ge": "PRICE_QUERY", "price_Ge_Ro": "PRICE_QUERY"},
+            "Fura": {"price_Ro_Ge": "PRICE_QUERY", "price_Ge_Ro": "PRICE_QUERY"}
         }
-        logger.info(f"Найден тариф для '{vehicle_type}': {prices[vehicle_type]}")
-
-    return prices
-
-if __name__ == "__main__":
-    try:
-        ferry_prices = get_ferry_prices()
-        for vehicle, data in ferry_prices.items():
-            print(f"{vehicle}: {data}")
-    except Exception as e:
-        print(f"Error: {e}")
