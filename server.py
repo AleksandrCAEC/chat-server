@@ -1,5 +1,6 @@
 import os
 import re
+import difflib
 import logging
 import asyncio
 import pprint
@@ -11,7 +12,7 @@ from datetime import datetime
 from clientdata import register_or_update_client, verify_client_code, update_last_visit, update_activity_status
 from client_caec import add_message_to_client_file, find_client_file_id, get_sheets_service, CLIENT_FILES_DIR
 from bible import load_bible_data, save_bible_pair
-from price_handler import check_ferry_price, load_price_data
+from price_handler import check_ferry_price, load_price_data, parse_price, remove_timestamp, get_guiding_question, get_openai_response
 from flask_cors import CORS
 import openpyxl
 
@@ -46,7 +47,7 @@ logger = logging.getLogger(__name__)
 logger.info("Текущие переменные окружения:")
 pprint.pprint(dict(os.environ))
 
-# Глобальный словарь для хранения состояния последовательного опроса guiding questions
+# Глобальный словарь для хранения состояния guiding questions
 pending_guiding = {}
 
 ###############################################
@@ -82,79 +83,36 @@ def send_telegram_notification(message):
         logger.error(f"❌ Ошибка при отправке Telegram уведомления: {e}")
 
 ###############################################
-# Вспомогательные функции для обработки запросов о цене
+# Функции для обработки запросов о цене
 ###############################################
 PRICE_KEYWORDS = ["цена", "прайс", "сколько стоит", "во сколько обойдется"]
 
 def is_price_query(text):
     return any(keyword in text.lower() for keyword in PRICE_KEYWORDS)
 
-def get_vehicle_type(text):
-    known_types = {
-        "truck": "truck", 
-        "грузовик": "truck", 
-        "fura": "fura", 
-        "фура": "fura",
-        "фуры": "fura",
-        "фуру": "fura"
-    }
-    text_lower = text.lower()
-    for key, standard in known_types.items():
-        if key in text_lower:
-            return standard
+def get_vehicle_type(client_text):
+    """
+    Определяет тип транспортного средства по сообщению клиента, используя данные из Price.xlsx.
+    Функция загружает список типов (ключей) из Price.xlsx (приводится к нижнему регистру) и 
+    с помощью difflib.get_close_matches ищет наиболее близкое совпадение.
+    Если найдено, возвращается совпадающее значение; иначе – None.
+    """
+    price_data = load_price_data()
+    vehicle_types = list(price_data.keys())
+    client_text_lower = client_text.lower()
+    # Используем difflib для поиска близкого совпадения
+    matches = difflib.get_close_matches(client_text_lower, [vt.lower() for vt in vehicle_types], n=1, cutoff=0.3)
+    if matches:
+        # Вернем оригинальное значение (ключ) из price_data, найденное по нижнему регистру
+        for vt in vehicle_types:
+            if vt.lower() == matches[0]:
+                logger.info(f"Определен тип транспортного средства: {vt}")
+                return vt.lower()
+    logger.info("Тип транспортного средства не определен из сообщения клиента.")
     return None
 
 def get_price_response(vehicle_type, direction="Ro_Ge"):
-    start_time = time.time()
-    website_price_str = None
-    while True:
-        try:
-            website_price_str = check_ferry_price(vehicle_type, direction)
-            website_price_str = remove_timestamp(website_price_str).strip()
-            logger.info(f"Цена с сайта для {vehicle_type}: '{website_price_str}'")
-            if re.search(r'\d', website_price_str) and website_price_str.upper() not in ["PRICE_QUERY", "BASE_PRICE"]:
-                break
-            else:
-                logger.info("Получен PLACEHOLDER или некорректное значение, продолжаем ожидание...")
-        except Exception as e:
-            logger.error(f"Ошибка при получении цены для {vehicle_type}: {e}")
-        if time.time() - start_time > 180:
-            send_telegram_notification(f"Ошибка соединения: для {vehicle_type} не удалось получить актуальную цену более 3 минут.")
-            price_data = load_price_data()
-            if vehicle_type in price_data:
-                fallback_price_str = price_data[vehicle_type].get("price_Ro_Ge", "")
-                logger.info(f"Используем запасную цену для {vehicle_type}: '{fallback_price_str}'")
-                return fallback_price_str
-            else:
-                return "Информация о цене не доступна. Пожалуйста, свяжитесь с менеджером."
-        time.sleep(5)
-    website_price_value = parse_price(website_price_str)
-    price_data = load_price_data()
-    if vehicle_type in price_data:
-        file_price_str = price_data[vehicle_type].get("price_Ro_Ge", "")
-        logger.info(f"Цена из Price.xlsx для {vehicle_type}: '{file_price_str}'")
-        file_price_value = parse_price(file_price_str)
-        if website_price_value is not None and file_price_value is not None:
-            if website_price_value != file_price_value:
-                send_telegram_notification(
-                    f"ВНИМАНИЕ: Для {vehicle_type} цены различаются. Сайт: {website_price_value} евро, Файл: {file_price_value} евро."
-                )
-                # Возвращаем запасную цену, считая, что файл содержит актуальное значение (например, 2200)
-                return file_price_str
-        return website_price_str
-    else:
-        return website_price_str
-
-def get_guiding_question(condition_marker):
-    bible_df = load_bible_data()
-    if bible_df is None:
-        return None
-    for index, row in bible_df.iterrows():
-        ver = str(row.get("Verification", "")).strip().upper()
-        if ver == condition_marker.upper():
-            question = row.get("FAQ", "").strip()
-            return question
-    return None
+    return check_ferry_price(vehicle_type, direction)
 
 def get_openai_response(messages):
     start_time = time.time()
@@ -268,7 +226,6 @@ def chat():
         update_last_visit(client_code)
         update_activity_status()
         
-        # Если клиент уже в режиме уточнения guiding questions
         if client_code in pending_guiding:
             pending = pending_guiding[client_code]
             pending.setdefault("answers", []).append(user_message)
