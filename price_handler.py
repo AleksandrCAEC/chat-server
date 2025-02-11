@@ -7,7 +7,7 @@ from price import get_ferry_prices
 from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
 import requests
-from bible import load_bible_data  # функция для работы с Bible.xlsx
+from bible import load_bible_data  # Функция для работы с Bible.xlsx
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -46,7 +46,7 @@ def load_price_data():
          },
          ...
       }
-    Тип транспортного средства приводится к нижнему регистру.
+    (Тип транспортного средства приводится к нижнему регистру.)
     Добавляются только те условия, где значение равно "1".
     """
     try:
@@ -86,7 +86,7 @@ def load_price_data():
 
 def send_telegram_notification(message):
     """
-    Отправляет уведомление через Telegram.
+    Отправляет уведомление через Telegram, используя переменные окружения.
     """
     try:
         telegram_bot_token = os.getenv("TELEGRAM_BOT_TOKEN")
@@ -142,8 +142,8 @@ def get_guiding_question(condition_marker):
 def check_ferry_price(vehicle_type, direction="Ro_Ge"):
     """
     Получает актуальные тарифы с сайта и сравнивает с данными из Price.xlsx.
-    Если сайт возвращает некорректное значение, используется запасная цена из файла.
-    Если цена с сайта не совпадает с ценой из файла, менеджеру отправляется уведомление, а возвращается цена из файла.
+    Если сайт возвращает некорректное значение (PLACEHOLDER или без цифр), используется запасная цена.
+    Если цены не совпадают, менеджеру отправляется уведомление, а возвращается цена из файла.
     """
     try:
         website_prices = get_ferry_prices()
