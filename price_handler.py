@@ -7,12 +7,12 @@ from price import get_ferry_prices
 from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
 import requests
-from bible import load_bible_data  # Функция для работы с Bible.xlsx
+from bible import load_bible_data  # функция для работы с Bible.xlsx
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
-# Используйте предоставленный Spreadsheet ID для файла Price.xlsx
+# Используем предоставленный Spreadsheet ID для файла Price.xlsx
 PRICE_SPREADSHEET_ID = "1N4VpU1rBw3_MPx6GJRDiSQ03iHhS24noTq5-i6V01z8"
 
 def get_sheets_service():
@@ -46,7 +46,7 @@ def load_price_data():
          },
          ...
       }
-    (Тип транспортного средства приводится к нижнему регистру.)
+    Тип транспортного средства приводится к нижнему регистру.
     Добавляются только те условия, где значение равно "1".
     """
     try:
@@ -86,7 +86,7 @@ def load_price_data():
 
 def send_telegram_notification(message):
     """
-    Отправляет уведомление через Telegram, используя переменные окружения.
+    Отправляет уведомление через Telegram.
     """
     try:
         telegram_bot_token = os.getenv("TELEGRAM_BOT_TOKEN")
@@ -123,9 +123,9 @@ def parse_price(price_str):
 
 def get_guiding_question(condition_marker):
     """
-    Ищет в Bible.xlsx строку, где значение в столбце Verification совпадает с condition_marker
-    (например, "CONDITION1") и возвращает вопрос из столбца FAQ.
-    Если не найдено, возвращает None.
+    Ищет в файле Bible.xlsx строку, где значение в столбце Verification совпадает с condition_marker
+    (например, "CONDITION1") и возвращает соответствующий вопрос из столбца FAQ.
+    Если ничего не найдено, возвращает None.
     """
     bible_df = load_bible_data()
     if bible_df is None:
@@ -134,14 +134,16 @@ def get_guiding_question(condition_marker):
         ver = str(row.get("Verification", "")).strip().upper()
         if ver == condition_marker.upper():
             question = row.get("FAQ", "").strip()
+            logger.info(f"Найден guiding вопрос для {condition_marker}: {question}")
             return question
+    logger.info(f"Guiding вопрос для {condition_marker} не найден.")
     return None
 
 def check_ferry_price(vehicle_type, direction="Ro_Ge"):
     """
-    Получает цены с сайта и сравнивает их с данными из Price.xlsx.
-    Если сайт возвращает PLACEHOLDER или некорректное значение, используется запасная цена из файла.
-    Если цена с сайта не совпадает с ценой из файла, уведомляется менеджер, а возвращается цена из файла.
+    Получает актуальные тарифы с сайта и сравнивает с данными из Price.xlsx.
+    Если сайт возвращает некорректное значение, используется запасная цена из файла.
+    Если цена с сайта не совпадает с ценой из файла, менеджеру отправляется уведомление, а возвращается цена из файла.
     """
     try:
         website_prices = get_ferry_prices()
@@ -167,7 +169,6 @@ def check_ferry_price(vehicle_type, direction="Ro_Ge"):
         website_price_str = remove_timestamp(website_price_str).strip()
         logger.info(f"Цена с сайта для {vehicle_type}: '{website_price_str}'")
         
-        # Если строка с сайта не содержит цифр или содержит PLACEHOLDER, используем запасную цену
         if not re.search(r'\d', website_price_str) or website_price_str.upper() in ["PRICE_QUERY", "BASE_PRICE"]:
             fallback_price_str = sheet_price_str
             logger.info(f"Сайт вернул некорректное значение. Используем запасную цену: '{fallback_price_str}'")
