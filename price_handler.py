@@ -51,7 +51,8 @@ def load_price_data():
     """
     try:
         service = get_sheets_service()
-        range_name = "Sheet1!A2:G"
+        # Обновлённый диапазон – задаём явно максимальное число строк
+        range_name = "Sheet1!A2:G1000"
         result = service.spreadsheets().values().get(
             spreadsheetId=PRICE_SPREADSHEET_ID,
             range=range_name
@@ -141,9 +142,9 @@ def get_guiding_question(condition_marker):
 
 def check_ferry_price(vehicle_type, direction="Ro_Ge"):
     """
-    Получает актуальные тарифы с сайта и сравнивает с данными из Price.xlsx.
-    Если сайт возвращает некорректное значение (PLACEHOLDER или без цифр), используется запасная цена.
-    Если цены не совпадают, менеджеру отправляется уведомление, а возвращается цена из файла.
+    Получает актуальные тарифы с сайта и сравнивает их с данными из Price.xlsx.
+    Если сайт возвращает некорректное значение (PLACEHOLDER или без цифр), используется запасная цена из файла.
+    Если цена с сайта не совпадает с ценой из файла, менеджеру отправляется уведомление, а возвращается цена из файла.
     """
     try:
         website_prices = get_ferry_prices()
@@ -223,7 +224,7 @@ def get_openai_response(messages):
             time.sleep(2)
 
 if __name__ == "__main__":
-    vehicle = "fura"  # Используйте "truck" или "fura" (в нижнем регистре)
+    vehicle = "fura"  # "truck" или "fura" (в нижнем регистре)
     direction = "Ro_Ge"  # или "Ge_Ro"
     message = check_ferry_price(vehicle, direction)
     print(message)
