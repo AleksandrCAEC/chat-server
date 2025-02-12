@@ -1,10 +1,8 @@
 import os
 import re
-import difflib
 import logging
 import asyncio
 import pprint
-import time
 from flask import Flask, request, jsonify
 import openai
 import requests
@@ -12,7 +10,7 @@ from datetime import datetime
 from clientdata import register_or_update_client, verify_client_code, update_last_visit, update_activity_status
 from client_caec import add_message_to_client_file, find_client_file_id, get_sheets_service, CLIENT_FILES_DIR
 from bible import load_bible_data, save_bible_pair
-from price_handler import check_ferry_price, load_price_data, parse_price, remove_timestamp, get_guiding_question, get_openai_response
+from price_handler import check_ferry_price, load_price_data  # load_price_data для получения данных из Price.xlsx
 from flask_cors import CORS
 import openpyxl
 
@@ -47,25 +45,11 @@ logger = logging.getLogger(__name__)
 logger.info("Текущие переменные окружения:")
 pprint.pprint(dict(os.environ))
 
-# Глобальный словарь для хранения состояния guiding questions
+# Глобальный словарь для хранения состояния последовательного уточнения (guiding questions)
 pending_guiding = {}
 
 ###############################################
-# Функции для парсинга цены и удаления временных меток
-###############################################
-def parse_price(price_str):
-    try:
-        cleaned = re.sub(r'[^\d.]', '', price_str)
-        return float(cleaned)
-    except Exception as e:
-        logger.error(f"Ошибка парсинга цены из '{price_str}': {e}")
-        return None
-
-def remove_timestamp(text):
-    return re.sub(r'^\d{2}\.\d{2}\.\d{2}\s+\d{2}:\d{2}\s*-\s*', '', text)
-
-###############################################
-# Функция отправки уведомлений через Telegram
+# ФУНКЦИЯ ОТПРАВКИ УВЕДОМЛЕНИЙ ЧЕРЕЗ TELEGRAM
 ###############################################
 def send_telegram_notification(message):
     telegram_bot_token = os.getenv("TELEGRAM_BOT_TOKEN")
@@ -83,57 +67,36 @@ def send_telegram_notification(message):
         logger.error(f"❌ Ошибка при отправке Telegram уведомления: {e}")
 
 ###############################################
-# Функции для обработки запросов о цене
+# ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ДЛЯ ОБРАБОТКИ ЗАПРОСОВ О ЦЕНЕ
 ###############################################
 PRICE_KEYWORDS = ["цена", "прайс", "сколько стоит", "во сколько обойдется"]
 
 def is_price_query(text):
     return any(keyword in text.lower() for keyword in PRICE_KEYWORDS)
 
-def get_vehicle_type(client_text):
-    """
-    Определяет тип транспортного средства по сообщению клиента, используя данные из Price.xlsx.
-    Функция загружает список типов (ключей) из Price.xlsx (приводится к нижнему регистру) и 
-    с помощью difflib.get_close_matches ищет наиболее близкое совпадение.
-    Если найдено, возвращается совпадающее значение; иначе – None.
-    """
-    price_data = load_price_data()
-    vehicle_types = list(price_data.keys())
-    client_text_lower = client_text.lower()
-    # Используем difflib для поиска близкого совпадения
-    matches = difflib.get_close_matches(client_text_lower, [vt.lower() for vt in vehicle_types], n=1, cutoff=0.3)
-    if matches:
-        # Вернем оригинальное значение (ключ) из price_data, найденное по нижнему регистру
-        for vt in vehicle_types:
-            if vt.lower() == matches[0]:
-                logger.info(f"Определен тип транспортного средства: {vt}")
-                return vt.lower()
-    logger.info("Тип транспортного средства не определен из сообщения клиента.")
+def get_vehicle_type(text):
+    known_types = {"truck": "Truck", "грузовик": "Truck", "fura": "Fura", "фура": "Fura"}
+    for key, standard in known_types.items():
+        if key in text.lower():
+            return standard
     return None
 
 def get_price_response(vehicle_type, direction="Ro_Ge"):
-    return check_ferry_price(vehicle_type, direction)
+    try:
+        # Получаем окончательный ответ через check_ferry_price.
+        # Если guiding questions имеются, check_ferry_price должна вернуть только первый вопрос.
+        response = check_ferry_price(vehicle_type, direction)
+        # Если ответ равен "PRICE_QUERY" (или содержит его как маркер), то это означает, что цена не окончательная.
+        if response.strip().upper() == "PRICE_QUERY":
+            return "Информация о цене не доступна. Пожалуйста, свяжитесь с менеджером."
+        return response
+    except Exception as e:
+        logger.error(f"Ошибка при получении цены для {vehicle_type}: {e}")
+        return "Произошла ошибка при получении актуальной цены. Пожалуйста, попробуйте позже."
 
-def get_openai_response(messages):
-    start_time = time.time()
-    attempt = 0
-    while True:
-        try:
-            response = openai.ChatCompletion.create(
-                model="gpt-3.5-turbo",
-                messages=messages,
-                max_tokens=150,
-                timeout=40
-            )
-            return response
-        except Exception as e:
-            logger.error(f"Попытка {attempt+1} ошибки в OpenAI: {e}")
-            attempt += 1
-            if time.time() - start_time > 180:
-                send_telegram_notification("Ошибка соединения: запрос к OpenAI длится более 3 минут.")
-                return None
-            time.sleep(2)
-
+###############################################
+# ФУНКЦИЯ ПОДГОТОВКИ КОНТЕКСТА (ПАМЯТЬ АССИСТЕНТА)
+###############################################
 def prepare_chat_context(client_code):
     messages = []
     bible_df = load_bible_data()
@@ -153,6 +116,7 @@ def prepare_chat_context(client_code):
     }
     messages.append(system_message)
     
+    # Чтение истории переписки из уникального файла клиента (начиная со 3-й строки)
     spreadsheet_id = find_client_file_id(client_code)
     if spreadsheet_id:
         sheets_service = get_sheets_service()
@@ -174,7 +138,7 @@ def prepare_chat_context(client_code):
     return messages
 
 ###############################################
-# Эндпоинты регистрации, верификации и чата
+# ЭНДПОИНТЫ РЕГИСТРАЦИИ, ВЕРИФИКАЦИИ И ЧАТА
 ###############################################
 @app.route('/register-client', methods=['POST'])
 def register_client():
@@ -183,13 +147,9 @@ def register_client():
         logger.info(f"Получен запрос на регистрацию клиента: {data}")
         result = register_or_update_client(data)
         if result.get("isNewClient", True):
-            send_telegram_notification(
-                f"🆕 Новый пользователь зарегистрирован: {result['name']}, {result['email']}, {result['phone']}, Код: {result['uniqueCode']}"
-            )
+            send_telegram_notification(f"🆕 Новый пользователь зарегистрирован: {result['name']}, {result['email']}, {result['phone']}, Код: {result['uniqueCode']}")
         else:
-            send_telegram_notification(
-                f"🔙 Пользователь вернулся: {result['name']}, {result['email']}, {result['phone']}, Код: {result['uniqueCode']}"
-            )
+            send_telegram_notification(f"🔙 Пользователь вернулся: {result['name']}, {result['email']}, {result['phone']}, Код: {result['uniqueCode']}")
         return jsonify(result), 200
     except Exception as e:
         logger.error(f"❌ Ошибка в /register-client: {e}")
@@ -203,9 +163,7 @@ def verify_code():
         code = data.get('code', '')
         client_data = verify_client_code(code)
         if client_data:
-            send_telegram_notification(
-                f"🔙 Пользователь вернулся: {client_data['Name']}, {client_data['Email']}, {client_data['Phone']}, Код: {code}"
-            )
+            send_telegram_notification(f"🔙 Пользователь вернулся: {client_data['Name']}, {client_data['Email']}, {client_data['Phone']}, Код: {code}")
             return jsonify({'status': 'success', 'clientData': client_data}), 200
         return jsonify({'status': 'error', 'message': 'Неверный код'}), 404
     except Exception as e:
@@ -226,72 +184,55 @@ def chat():
         update_last_visit(client_code)
         update_activity_status()
         
+        # Если клиент уже находится в режиме уточнения (pending guiding questions)
         if client_code in pending_guiding:
             pending = pending_guiding[client_code]
+            # Сохраняем ответ клиента на текущий guiding question
             pending.setdefault("answers", []).append(user_message)
             pending["current_index"] += 1
-            if pending["current_index"] < len(pending["guiding_questions"]):
-                response_message = pending["guiding_questions"][pending["current_index"]]
+            if pending["current_index"] < len(pending["conditions"]):
+                # Если есть еще guiding questions, задаем следующую
+                response_message = pending["conditions"][pending["current_index"]]
             else:
-                base_price_str = pending.get("base_price", get_price_response(pending["vehicle_type"], direction="Ro_Ge"))
-                try:
-                    base_price = parse_price(base_price_str)
-                    multiplier = 1.0
-                    fee = 0
-                    driver_info = None
-                    for ans in pending["answers"]:
-                        if "без водителя" in ans.lower():
-                            driver_info = "without"
-                        elif "с водителем" in ans.lower():
-                            driver_info = "with"
-                        if "adr" in ans.lower():
-                            multiplier = 1.2
-                    if driver_info == "without":
-                        fee = 100
-                    final_cost = (base_price + fee) * multiplier
-                    final_price = f"Базовая цена: {base_price} евро. Итоговая стоимость с учетом ваших ответов: {final_cost} евро."
-                except Exception as ex:
-                    final_price = f"Базовая цена: {base_price_str}. Ваши ответы: {', '.join(pending['answers'])}."
+                # Все guiding вопросы отвечены; можно вычислить итоговую цену
+                final_price = get_price_response(pending["vehicle_type"], direction="Ro_Ge")
                 response_message = f"Спасибо, ваши ответы приняты. {final_price}"
+                # Удаляем запись о guiding состоянии
                 del pending_guiding[client_code]
+        # Если запрос содержит ключевые слова о цене и клиент не в guiding режиме
         elif is_price_query(user_message):
             vehicle_type = get_vehicle_type(user_message)
             if not vehicle_type:
-                response_message = ("Извините, не удалось определить тип транспортного средства. Пожалуйста, укажите, например, 'фура'.")
+                response_message = ("Для определения цены, пожалуйста, уточните тип транспортного средства "
+                                    "(например, грузовик или фура).")
             else:
+                # Загружаем данные из Price.xlsx через load_price_data() из price_handler
                 price_data = load_price_data()
                 if vehicle_type not in price_data:
                     response_message = f"Извините, информация о тарифах для '{vehicle_type}' отсутствует в нашей базе."
                 else:
-                    base_price_str = price_data[vehicle_type].get("price_Ro_Ge", "")
                     conditions = price_data[vehicle_type].get("conditions", [])
                     if conditions:
-                        guiding_questions = []
-                        for marker in conditions:
-                            question = get_guiding_question(marker)
-                            if question:
-                                guiding_questions.append(question)
-                        guiding_questions = [q for q in guiding_questions if "тип транспортного средства" not in q.lower()]
-                        if not guiding_questions:
-                            guiding_questions.append(f"Вы всё так же собираетесь отправить {vehicle_type}?")
+                        # Если guiding questions имеются, сохраняем состояние и задаем первый вопрос
                         pending_guiding[client_code] = {
                             "vehicle_type": vehicle_type,
-                            "guiding_questions": guiding_questions,
+                            "conditions": conditions,
                             "current_index": 0,
-                            "answers": [],
-                            "base_price": base_price_str
+                            "answers": []
                         }
-                        response_message = f"Базовая цена: {base_price_str}. Дополнительное условие: {guiding_questions[0]}"
+                        response_message = conditions[0]
                     else:
-                        response_message = base_price_str
+                        response_message = get_price_response(vehicle_type, direction="Ro_Ge")
         else:
+            # Стандартная обработка: формируем контекст из Bible.xlsx и истории переписки, затем вызываем OpenAI
             messages = prepare_chat_context(client_code)
             messages.append({"role": "user", "content": user_message})
-            openai_response = get_openai_response(messages)
-            if openai_response is None:
-                response_message = "Сервис временно недоступен. Пожалуйста, повторите запрос позже."
-            else:
-                response_message = openai_response['choices'][0]['message']['content'].strip()
+            openai_response = openai.ChatCompletion.create(
+                model="gpt-3.5-turbo",
+                messages=messages,
+                max_tokens=150
+            )
+            response_message = openai_response['choices'][0]['message']['content'].strip()
         
         add_message_to_client_file(client_code, user_message, is_assistant=False)
         add_message_to_client_file(client_code, response_message, is_assistant=True)
