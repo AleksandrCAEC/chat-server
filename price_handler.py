@@ -9,6 +9,9 @@ from googleapiclient.discovery import build
 import requests
 from bible import load_bible_data  # Функция для работы с Bible.xlsx
 
+# Импортируем исключение из библиотеки python-telegram-bot
+from telegram.error import RetryAfter
+
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
@@ -51,7 +54,7 @@ def load_price_data():
     """
     try:
         service = get_sheets_service()
-        # Обновлённый диапазон с указанием строк до 1000
+        # Используем диапазон с указанием строк до 1000
         range_name = "Sheet1!A2:G1000"
         result = service.spreadsheets().values().get(
             spreadsheetId=PRICE_SPREADSHEET_ID,
@@ -87,7 +90,8 @@ def load_price_data():
 
 def send_telegram_notification(message):
     """
-    Отправляет уведомление через Telegram, используя переменные окружения.
+    Отправляет уведомление через Telegram.
+    Если возникает исключение RetryAfter (ограничение частоты), ждет указанное время и повторяет отправку.
     """
     try:
         telegram_bot_token = os.getenv("TELEGRAM_BOT_TOKEN")
@@ -99,7 +103,14 @@ def send_telegram_notification(message):
             response.raise_for_status()
             logger.info(f"Уведомление отправлено: {response.json()}")
     except Exception as ex:
-        logger.error(f"Ошибка при отправке уведомления: {ex}")
+        # Если исключение содержит атрибут retry_after, ждем указанное время
+        if hasattr(ex, 'retry_after'):
+            delay = ex.retry_after
+            logger.warning(f"Flood control exceeded. Retrying in {delay} seconds")
+            time.sleep(delay)
+            send_telegram_notification(message)
+        else:
+            logger.error(f"Ошибка при отправке уведомления: {ex}")
 
 def remove_timestamp(text):
     """
