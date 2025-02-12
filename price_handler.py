@@ -46,12 +46,12 @@ def load_price_data():
          },
          ...
       }
-    (Тип транспортного средства приводится к нижнему регистру.)
+    Тип транспортного средства приводится к нижнему регистру.
     Добавляются только те условия, где значение равно "1".
     """
     try:
         service = get_sheets_service()
-        # Обновлённый диапазон – задаём явно максимальное число строк
+        # Обновлённый диапазон с указанием строк до 1000
         range_name = "Sheet1!A2:G1000"
         result = service.spreadsheets().values().get(
             spreadsheetId=PRICE_SPREADSHEET_ID,
@@ -224,7 +224,7 @@ def get_openai_response(messages):
             time.sleep(2)
 
 if __name__ == "__main__":
-    vehicle = "fura"  # "truck" или "fura" (в нижнем регистре)
+    vehicle = "fura"  # Используйте "truck" или "fura" (в нижнем регистре)
     direction = "Ro_Ge"  # или "Ge_Ro"
     message = check_ferry_price(vehicle, direction)
     print(message)
