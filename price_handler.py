@@ -1,122 +1,158 @@
+# price_handler.py
 import os
 import logging
-import re
-import string
-from price import get_ferry_prices  # Этот модуль должен возвращать данные с сайта тарифов
-# Мы отключаем работу с Price.xlsx и Bible.xlsx, так как сейчас собираем данные только с сайта
+from price import get_ferry_prices
+from google.oauth2.service_account import Credentials
+from googleapiclient.discovery import build
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
-def extract_numeric(price_str):
-    """
-    Извлекает числовое значение из строки с ценой, удаляя лишние символы.
-    Возвращает float или None, если преобразование невозможно.
-    """
-    if not price_str:
-        return None
-    cleaned = re.sub(r'[^\d.,]', '', price_str)
-    if cleaned.count(',') > 0 and cleaned.count('.') == 0:
-        cleaned = cleaned.replace(',', '.')
-    elif cleaned.count(',') > 0 and cleaned.count('.') > 0:
-        cleaned = cleaned.replace(',', '')
+# Замените на актуальный Spreadsheet ID для файла Price.xlsx
+PRICE_SPREADSHEET_ID = "1N4VpU1rBw3_MPx6GJRDiSQ03iHhS24noTq5-i6V01z8"
+
+def get_sheets_service():
     try:
-        return float(cleaned)
-    except ValueError:
-        return None
+        credentials = Credentials.from_service_account_file(os.getenv("GOOGLE_APPLICATION_CREDENTIALS"))
+        return build('sheets', 'v4', credentials=credentials)
+    except Exception as e:
+        logger.error(f"Ошибка инициализации Google Sheets API: {e}")
+        raise
 
-def extract_vehicle_size(query):
+def load_price_data():
     """
-    Извлекает размер (число метров) из запроса.
-    Например, "17 метров" или "17m" вернет число 17.
+    Загружает данные из Google Sheets (Price.xlsx) для тарифов.
+    Ожидается, что таблица имеет следующие столбцы:
+      A: Type of the vehicle
+      B: Price_Ro_Ge (направление: Romania -> Georgia)
+      C: Price_Ge_Ro (направление: Georgia -> Romania)
+      D: Remark
+      E: Condition1
+      F: Condition2
+      G: Condition3
+    Возвращает словарь вида:
+      {
+         "VehicleType1": {
+             "price_Ro_Ge": "...",
+             "price_Ge_Ro": "...",
+             "remark": "...",
+             "conditions": [ "Condition1 текст", "Condition2 текст", "Condition3 текст" ]
+         },
+         ...
+      }
     """
-    match = re.search(r'(\d{1,2})\s*(m|м|метр)', query.lower())
-    if match:
-        return int(match.group(1))
-    return None
+    try:
+        service = get_sheets_service()
+        # Измените диапазон, если количество столбцов больше
+        range_name = "Sheet1!A2:G"
+        result = service.spreadsheets().values().get(
+            spreadsheetId=PRICE_SPREADSHEET_ID,
+            range=range_name
+        ).execute()
+        values = result.get("values", [])
+        price_data = {}
+        for row in values:
+            if len(row) < 4:
+                continue
+            vehicle_type = row[0].strip()
+            price_Ro_Ge = row[1].strip() if len(row) > 1 else ""
+            price_Ge_Ro = row[2].strip() if len(row) > 2 else ""
+            remark = row[3].strip() if len(row) > 3 else ""
+            conditions = []
+            if len(row) > 4 and row[4].strip():
+                conditions.append(row[4].strip())
+            if len(row) > 5 and row[5].strip():
+                conditions.append(row[5].strip())
+            if len(row) > 6 and row[6].strip():
+                conditions.append(row[6].strip())
+            price_data[vehicle_type] = {
+                "price_Ro_Ge": price_Ro_Ge,
+                "price_Ge_Ro": price_Ge_Ro,
+                "remark": remark,
+                "conditions": conditions
+            }
+        logger.info(f"Данные из Price.xlsx загружены: {price_data}")
+        return price_data
+    except Exception as e:
+        logger.error(f"Ошибка загрузки данных из Price.xlsx: {e}")
+        raise
 
-def normalize_text(text):
+def send_telegram_notification(message):
     """
-    Приводит текст к нижнему регистру, удаляет пунктуацию и лишние пробелы.
+    Отправляет уведомление через Telegram, используя переменные окружения TELEGRAM_BOT_TOKEN и TELEGRAM_CHAT_ID.
     """
-    text = text.lower()
-    text = re.sub(f'[{re.escape(string.punctuation)}]', '', text)
-    text = re.sub(r'\s+', ' ', text).strip()
-    return text
+    try:
+        import requests
+        telegram_bot_token = os.getenv("TELEGRAM_BOT_TOKEN")
+        telegram_chat_id = os.getenv("TELEGRAM_CHAT_ID")
+        if telegram_bot_token and telegram_chat_id:
+            url = f"https://api.telegram.org/bot{telegram_bot_token}/sendMessage"
+            payload = {"chat_id": telegram_chat_id, "text": message, "parse_mode": "HTML"}
+            requests.post(url, json=payload)
+    except Exception as ex:
+        logger.error(f"Ошибка при отправке уведомления: {ex}")
 
-def select_vehicle_record(query, website_data):
+def check_ferry_price(vehicle_type, direction="Ro_Ge"):
     """
-    Определяет, какой тариф из данных, полученных с сайта, подходит для запроса.
-    Использует синонимы для грузовика и анализирует размер транспортного средства.
-    Если в запросе упоминается "trailer", тариф должен содержать это слово.
-    """
-    synonyms = ['truck', 'грузовик', 'фура', 'еврофура', 'трайлер', 'трас']
-    trailer_keywords = ['trailer', 'трейлер']
-    query_norm = normalize_text(query)
-    size = extract_vehicle_size(query)
+    Сравнивает тарифы для указанного типа транспортного средства и направления.
     
-    candidate = None
-    best_score = 0
-    for key in website_data.keys():
-        key_norm = normalize_text(key)
-        score = 0
-        # Проверяем совпадение с синонимами
-        for syn in synonyms:
-            if syn in query_norm and syn in key_norm:
-                score += 1
-        # Если запрос содержит "trailer", тариф должен содержать его
-        if any(t in query_norm for t in trailer_keywords):
-            if any(t in key_norm for t in trailer_keywords):
-                score += 1
-            else:
-                continue
-        # Если в названии тарифа указан размер, сравниваем с размером из запроса
-        size_match = re.search(r'(\d+)\s*(m|м)', key_norm)
-        if size_match:
-            max_size = int(size_match.group(1))
-            if size is not None and size <= max_size:
-                score += 1
-            else:
-                continue
-        if score > best_score:
-            best_score = score
-            candidate = key
-    logger.info(f"Выбран тариф: {candidate} для запроса: '{query_norm}', размер: {size}, score: {best_score}")
-    return candidate
-
-def check_ferry_price(query, direction="Ro_Ge"):
-    """
-    Функция получает данные с сайта (через get_ferry_prices()), выбирает нужный тариф
-    на основе запроса и возвращает стоимость, как она записана в источнике.
+    direction: 
+      - "Ro_Ge" для направления Romania -> Georgia,
+      - "Ge_Ro" для направления Georgia -> Romania.
+    
+    Логика:
+      1. Получаем актуальные тарифы с сайта через get_ferry_prices() из модуля price.
+      2. Загружаем данные из Price.xlsx с помощью load_price_data().
+      3. Если для заданного типа транспортного средства данные отсутствуют в одном из источников, возвращаем соответствующее сообщение.
+      4. Сравниваем цены из сайта и из Price.xlsx:
+         - Если цены совпадают, формируем ответ с подтверждённой ценой и добавляем Remark.
+           Если для данного типа транспортного средства в столбцах Condition* (conditions) указаны наводящие вопросы, 
+           к ответу добавляется приглашение для уточнения, например:
+           «Для более точного расчёта, пожалуйста, ответьте на следующие вопросы:
+            {Condition1}
+            {Condition2}
+            ...»
+         - Если цены различаются, возвращаем сообщение, что цена требует уточнения, и отправляем уведомление менеджеру.
     """
     try:
-        website_data = get_ferry_prices()
-        if not website_data:
-            return "Ошибка получения данных с сайта тарифов."
-        record_key = select_vehicle_record(query, website_data)
-        if not record_key:
-            return "Информация о тарифах для данного запроса отсутствует."
+        website_prices = get_ferry_prices()
+        sheet_prices = load_price_data()
         
-        tariff = website_data.get(record_key, {})
-        price = tariff.get("price_Ro_Ge", "").strip()
-        if price.upper() == "PRICE_QUERY":
-            return f"Тариф для '{record_key}' недоступен."
+        if vehicle_type not in website_prices:
+            return f"Извините, актуальная цена для транспортного средства '{vehicle_type}' не найдена на сайте."
+        if vehicle_type not in sheet_prices:
+            return f"Извините, информация о тарифах для '{vehicle_type}' отсутствует в нашей базе."
         
-        response_message = f"Стандартная цена для '{record_key}' составляет {price} евро."
-        return response_message
+        if direction == "Ro_Ge":
+            website_price = website_prices[vehicle_type].get("price_Ro_Ge", "")
+            sheet_price = sheet_prices[vehicle_type].get("price_Ro_Ge", "")
+        else:
+            website_price = website_prices[vehicle_type].get("price_Ge_Ro", "")
+            sheet_price = sheet_prices[vehicle_type].get("price_Ge_Ro", "")
+        
+        if website_price == sheet_price:
+            response_message = f"Цена перевозки для '{vehicle_type}' ({direction.replace('_', ' ')}) составляет {website_price}."
+            if sheet_prices[vehicle_type].get("remark"):
+                response_message += f" Примечание: {sheet_prices[vehicle_type]['remark']}"
+            conditions = sheet_prices[vehicle_type].get("conditions", [])
+            if conditions:
+                response_message += "\nДля более точного расчёта, пожалуйста, ответьте на следующие вопросы:"
+                for question in conditions:
+                    response_message += f"\n{question}"
+            return response_message
+        else:
+            message_to_manager = (f"ВНИМАНИЕ: Для транспортного средства '{vehicle_type}' цены различаются. "
+                                  f"Сайт: {website_price}, База: {sheet_price}. Требуется уточнение!")
+            send_telegram_notification(message_to_manager)
+            return (f"Цена для '{vehicle_type}' требует уточнения. Пожалуйста, свяжитесь с менеджером по телефонам: "
+                    "+995595198228 или +4367763198228.")
     except Exception as e:
-        logger.error(f"Ошибка при получении цены для запроса '{query}': {e}")
-        return "Произошла ошибка при получении цены."
-
-def get_price_response(vehicle_query, direction="Ro_Ge"):
-    try:
-        response = check_ferry_price(vehicle_query, direction)
-        return response
-    except Exception as e:
-        logger.error(f"Ошибка при получении цены для '{vehicle_query}': {e}")
-        return "Произошла ошибка при получении актуальной цены."
+        logger.error(f"Ошибка при сравнении цен: {e}")
+        return "Произошла ошибка при получении цены. Пожалуйста, попробуйте позже."
 
 if __name__ == "__main__":
-    test_query = "Standard truck with trailer (up to 17M)"
-    message = check_ferry_price(test_query, direction="Ro_Ge")
+    # Пример вызова функции для тестирования
+    vehicle = "Truck"  # Пример: заменить на реальный тип транспортного средства, как в таблице Price.xlsx
+    direction = "Ro_Ge"  # или "Ge_Ro"
+    message = check_ferry_price(vehicle, direction)
     print(message)
