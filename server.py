@@ -10,7 +10,7 @@ from datetime import datetime
 from clientdata import register_or_update_client, verify_client_code, update_last_visit, update_activity_status
 from client_caec import add_message_to_client_file, find_client_file_id, get_sheets_service, CLIENT_FILES_DIR
 from bible import load_bible_data, save_bible_pair
-from price_handler import get_price_response, load_price_data  # get_price_response для получения данных из price_handler.py
+from price_handler import get_price_response
 from flask_cors import CORS
 import openpyxl
 
