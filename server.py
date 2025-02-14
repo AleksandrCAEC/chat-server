@@ -10,7 +10,7 @@ from datetime import datetime
 from clientdata import register_or_update_client, verify_client_code, update_last_visit, update_activity_status
 from client_caec import add_message_to_client_file, find_client_file_id, get_sheets_service, CLIENT_FILES_DIR
 from bible import load_bible_data, save_bible_pair
-from price_handler import check_ferry_price, load_price_data  # load_price_data для получения данных из Price.xlsx
+from price_handler import get_price_response, load_price_data  # get_price_response для получения данных из price_handler.py
 from flask_cors import CORS
 import openpyxl
 
@@ -69,7 +69,7 @@ def send_telegram_notification(message):
 ###############################################
 # ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ДЛЯ ОБРАБОТКИ ЗАПРОСОВ О ЦЕНЕ
 ###############################################
-PRICE_KEYWORDS = ["цена", "прайс", "сколько стоит", "во сколько обойдется"]
+PRICE_KEYWORDS = ["цена", "прайс", "сколько стоит", "во сколько обойдется", "стандартный тариф"]
 
 def is_price_query(text):
     return any(keyword in text.lower() for keyword in PRICE_KEYWORDS)
@@ -81,9 +81,9 @@ def get_vehicle_type(text):
             return standard
     return None
 
-def get_price_response(vehicle_type, direction="Ro_Ge"):
+def get_price_response_wrapper(vehicle_type, direction="Ro_Ge", client_guiding_answers=None):
     try:
-        response = check_ferry_price(vehicle_type, direction)
+        response = get_price_response(vehicle_type, direction, client_guiding_answers)
         return response
     except Exception as e:
         logger.error(f"Ошибка при получении цены для {vehicle_type}: {e}")
@@ -99,11 +99,10 @@ def prepare_chat_context(client_code):
         raise Exception("Bible.xlsx не найден или недоступен.")
     logger.info(f"Bible.xlsx содержит {len(bible_df)} записей.")
     bible_context = "Информация о компании (FAQ):\n"
-    # Удаляем префиксы-временные метки из FAQ и Answers (например, "14.02.25 14:11 -")
+    # Удаляем временные метки из FAQ и Answers (например, "14.02.25 14:11 -")
     for index, row in bible_df.iterrows():
         faq = row.get("FAQ", "")
         answer = row.get("Answers", "")
-        # Очистка от временной метки
         faq = re.sub(r"^\d{2}\.\d{2}\.\d{2}\s+\d{2}:\d{2}\s*-\s*", "", faq)
         answer = re.sub(r"^\d{2}\.\d{2}\.\d{2}\s+\d{2}:\d{2}\s*-\s*", "", answer)
         verification = str(row.get("Verification", "")).strip().upper()
@@ -186,17 +185,23 @@ def chat():
         # Если клиент уже находится в режиме уточнения (pending guiding questions)
         if client_code in pending_guiding:
             pending = pending_guiding[client_code]
-            pending.setdefault("answers", []).append(user_message)
-            pending["current_index"] += 1
-            if pending["current_index"] < len(pending["conditions"]):
-                # Если есть еще guiding questions, задаем следующую
-                response_message = pending["conditions"][pending["current_index"]]
-            else:
-                # Все guiding вопросы отвечены; вычисляем итоговую цену
-                final_price = get_price_response(pending["vehicle_type"], direction="Ro_Ge")
+            # Если клиент присылает сообщение, содержащее ключевые слова, означающие завершение уточнения,
+            # например "какой стандартный тариф", то завершаем сбор ответов.
+            if is_price_query(user_message):
+                # Завершаем сбор, используем уже собранные ответы
+                final_price = get_price_response_wrapper(pending["vehicle_type"], direction="Ro_Ge", client_guiding_answers=pending["answers"])
                 response_message = f"Спасибо, ваши ответы приняты. {final_price}"
-                # Удаляем запись о guiding состоянии
                 del pending_guiding[client_code]
+            else:
+                # Иначе сохраняем очередной ответ и спрашиваем следующий guiding вопрос
+                pending.setdefault("answers", []).append(user_message)
+                pending["current_index"] += 1
+                if pending["current_index"] < len(pending["conditions"]):
+                    response_message = pending["conditions"][pending["current_index"]]
+                else:
+                    final_price = get_price_response_wrapper(pending["vehicle_type"], direction="Ro_Ge", client_guiding_answers=pending["answers"])
+                    response_message = f"Спасибо, ваши ответы приняты. {final_price}"
+                    del pending_guiding[client_code]
         # Если запрос содержит ключевые слова о цене и клиент не в guiding режиме
         elif is_price_query(user_message):
             vehicle_type = get_vehicle_type(user_message)
@@ -204,7 +209,7 @@ def chat():
                 response_message = ("Для определения цены, пожалуйста, уточните тип транспортного средства "
                                     "(например, грузовик или фура).")
             else:
-                # Загружаем данные из Price.xlsx через load_price_data() из price_handler
+                # Загружаем данные из Price.xlsx через load_price_data() из price_handler.py
                 price_data = load_price_data()
                 if vehicle_type not in price_data:
                     response_message = f"Извините, информация о тарифах для '{vehicle_type}' отсутствует в нашей базе."
@@ -220,7 +225,7 @@ def chat():
                         }
                         response_message = conditions[0]
                     else:
-                        response_message = get_price_response(vehicle_type, direction="Ro_Ge")
+                        response_message = get_price_response_wrapper(vehicle_type, direction="Ro_Ge")
         else:
             # Стандартная обработка: формируем контекст из Bible.xlsx и истории переписки, затем вызываем OpenAI
             messages = prepare_chat_context(client_code)
