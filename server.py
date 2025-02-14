@@ -83,7 +83,9 @@ def get_vehicle_type(text):
 
 def get_price_response_wrapper(vehicle_type, direction="Ro_Ge", client_guiding_answers=None):
     try:
+        logger.info(f"Запрос на цену для типа транспортного средства: {vehicle_type}")
         response = get_price_response(vehicle_type, direction, client_guiding_answers)
+        logger.info(f"Ответ от price_handler: {response}")
         return response
     except Exception as e:
         logger.error(f"Ошибка при получении цены для {vehicle_type}: {e}")
