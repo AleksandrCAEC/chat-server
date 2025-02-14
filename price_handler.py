@@ -129,8 +129,7 @@ def normalize_text(text):
 def select_vehicle_record(query, price_data):
     """
     Определяет, какой тариф из price_data подходит для запроса.
-    Использует синонимы для грузовика и анализирует размер транспортного средства.
-    Также, если в запросе упоминается "trailer", выбирает тариф, содержащий этот термин.
+    Использует синонимы для грузовика, анализирует размер и проверяет наличие ключевого слова "trailer".
     Работает с нормализованными строками.
     """
     synonyms = ['truck', 'грузовик', 'фура', 'еврофура', 'трайлер', 'трас']
@@ -143,7 +142,7 @@ def select_vehicle_record(query, price_data):
     for key in price_data.keys():
         key_norm = normalize_text(key)
         score = 0
-        # Учитываем синонимы: если хотя бы один найден и в запросе, и в тарифе
+        # Учитываем синонимы: если слово встречается и в запросе, и в тарифе
         for syn in synonyms:
             if syn in query_norm and syn in key_norm:
                 score += 1
@@ -152,15 +151,15 @@ def select_vehicle_record(query, price_data):
             if any(t in key_norm for t in trailer_keywords):
                 score += 1
             else:
-                continue  # тариф не подходит
-        # Учитываем размер
+                continue
+        # Учитываем размер: если в тарифе указан размер, сравниваем с запросом
         size_match = re.search(r'(\d+)\s*(m|м)', key_norm)
         if size_match:
             max_size = int(size_match.group(1))
             if size is not None and size <= max_size:
                 score += 1
             else:
-                continue  # тариф не подходит по размеру
+                continue
         if score > best_score:
             best_score = score
             candidate = key
@@ -204,12 +203,21 @@ def check_ferry_price(query, direction="Ro_Ge", client_guiding_answers=None):
             return f"Извините, информация о тарифах для данного запроса отсутствует в нашей базе."
         
         website_prices = get_ferry_prices()
-        if not website_prices:
-            logger.error("Данные с сайта не получены.")
+        # Логируем содержимое, если необходимо:
+        logger.info(f"Данные с сайта: {website_prices}")
         website_raw = website_prices.get(record_key, {}).get("price_Ro_Ge", "") if website_prices else ""
         sheet_raw = price_data.get(record_key, {}).get("price_Ro_Ge", "")
-        website_price_numeric = extract_numeric(website_raw)
-        sheet_price_numeric = extract_numeric(sheet_raw)
+        
+        # Если источник возвращает placeholder "PRICE_QUERY", игнорируем его
+        if website_raw.strip().upper() == "PRICE_QUERY":
+            website_price_numeric = None
+        else:
+            website_price_numeric = extract_numeric(website_raw)
+        
+        if sheet_raw.strip().upper() == "PRICE_QUERY":
+            sheet_price_numeric = None
+        else:
+            sheet_price_numeric = extract_numeric(sheet_raw)
         
         if website_price_numeric is not None:
             base_price = website_price_numeric
@@ -273,8 +281,8 @@ def get_price_response(vehicle_query, direction="Ro_Ge", client_guiding_answers=
         return "Произошла ошибка при получении актуальной цены. Пожалуйста, попробуйте позже."
 
 if __name__ == "__main__":
-    # Пример тестирования: точный запрос, как указано
+    # Пример тестирования: запрос клиента "Standard truck with trailer (up to 17M)"
     test_query = "Standard truck with trailer (up to 17M)"
-    guiding_answers = []  # если дополнительные условия не подтверждены
+    guiding_answers = []  # Если дополнительных условий нет
     message = check_ferry_price(test_query, direction="Ro_Ge", client_guiding_answers=guiding_answers)
     print(message)
