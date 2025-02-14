@@ -142,17 +142,14 @@ def select_vehicle_record(query, price_data):
     for key in price_data.keys():
         key_norm = normalize_text(key)
         score = 0
-        # Учитываем синонимы: если слово встречается и в запросе, и в тарифе
         for syn in synonyms:
             if syn in query_norm and syn in key_norm:
                 score += 1
-        # Если запрос содержит "trailer", тариф должен содержать это слово
         if any(t in query_norm for t in trailer_keywords):
             if any(t in key_norm for t in trailer_keywords):
                 score += 1
             else:
                 continue
-        # Учитываем размер: если в тарифе указан размер, сравниваем с запросом
         size_match = re.search(r'(\d+)\s*(m|м)', key_norm)
         if size_match:
             max_size = int(size_match.group(1))
@@ -203,12 +200,11 @@ def check_ferry_price(query, direction="Ro_Ge", client_guiding_answers=None):
             return f"Извините, информация о тарифах для данного запроса отсутствует в нашей базе."
         
         website_prices = get_ferry_prices()
-        # Логируем содержимое, если необходимо:
         logger.info(f"Данные с сайта: {website_prices}")
         website_raw = website_prices.get(record_key, {}).get("price_Ro_Ge", "") if website_prices else ""
         sheet_raw = price_data.get(record_key, {}).get("price_Ro_Ge", "")
         
-        # Если источник возвращает placeholder "PRICE_QUERY", игнорируем его
+        # Если один из источников возвращает "PRICE_QUERY", считаем его недействительным
         if website_raw.strip().upper() == "PRICE_QUERY":
             website_price_numeric = None
         else:
@@ -281,8 +277,8 @@ def get_price_response(vehicle_query, direction="Ro_Ge", client_guiding_answers=
         return "Произошла ошибка при получении актуальной цены. Пожалуйста, попробуйте позже."
 
 if __name__ == "__main__":
-    # Пример тестирования: запрос клиента "Standard truck with trailer (up to 17M)"
+    # Пример тестирования: запрос "Standard truck with trailer (up to 17M)"
     test_query = "Standard truck with trailer (up to 17M)"
-    guiding_answers = []  # Если дополнительных условий нет
+    guiding_answers = []  # Дополнительные условия отсутствуют
     message = check_ferry_price(test_query, direction="Ro_Ge", client_guiding_answers=guiding_answers)
     print(message)
