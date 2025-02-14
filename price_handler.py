@@ -74,7 +74,7 @@ def load_price_data():
                 "round_trip": round_trip,
                 "conditions": conditions
             }
-        logger.info(f"Данные из Price.xlsx: {price_data}")
+        logger.info(f"Данные из Price.xlsx: {price_data}")  # Логирование данных
         return price_data
     except Exception as e:
         logger.error(f"Ошибка загрузки данных из Price.xlsx: {e}")
