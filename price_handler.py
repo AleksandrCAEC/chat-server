@@ -1,6 +1,7 @@
 import os
 import logging
 import re
+import string
 from price import get_ferry_prices
 from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
@@ -35,7 +36,6 @@ def load_price_data():
              "price_Ro_Ge": "2200",
              "price_Ge_Ro": "1090",
              "round_trip": "3060",
-             "remark": "",       # Если требуется
              "conditions": [ "1", "0", ... ]
          },
          ...
@@ -74,6 +74,9 @@ def load_price_data():
         raise
 
 def send_telegram_notification(message):
+    """
+    Отправляет уведомление через Telegram, используя переменные окружения TELEGRAM_BOT_TOKEN и TELEGRAM_CHAT_ID.
+    """
     try:
         import requests
         telegram_bot_token = os.getenv("TELEGRAM_BOT_TOKEN")
@@ -86,6 +89,10 @@ def send_telegram_notification(message):
         logger.error(f"Ошибка при отправке уведомления: {ex}")
 
 def extract_numeric(price_str):
+    """
+    Извлекает числовое значение из строки с ценой, удаляя лишние символы (например, валюту).
+    Возвращает float или None, если извлечение не удалось.
+    """
     if not price_str:
         return None
     cleaned = re.sub(r'[^\d.,]', '', price_str)
@@ -99,30 +106,42 @@ def extract_numeric(price_str):
         return None
 
 def extract_vehicle_size(query):
-    """Извлекает размер (число метров) из запроса."""
+    """
+    Извлекает размер (число метров) из запроса.
+    Пример: "17 метров" вернёт число 17.
+    """
     match = re.search(r'(\d{1,2})\s*(м|метр)', query.lower())
     if match:
         return int(match.group(1))
     return None
 
+def normalize_text(text):
+    """
+    Приводит текст к нижнему регистру, удаляет пунктуацию и лишние пробелы.
+    """
+    text = text.lower()
+    text = re.sub(f'[{re.escape(string.punctuation)}]', '', text)
+    text = re.sub(r'\s+', ' ', text).strip()
+    return text
+
 def select_vehicle_record(query, price_data):
     """
     Определяет, какой тариф из price_data подходит для запроса.
     Использует синонимы для грузовика и анализирует размер транспортного средства.
+    Теперь происходит нормализация строк для сопоставления.
     """
-    # Определяем синонимы для грузовика (фура, еврофура, трайлер, трас, truck)
     synonyms = ['truck', 'грузовик', 'фура', 'еврофура', 'трайлер', 'трас']
-    query_lower = query.lower()
+    query_norm = normalize_text(query)
     size = extract_vehicle_size(query)
     
     candidate = None
-    # Перебираем все тарифы (ключи) из price_data
+    # Проходим по всем тарифам
     for key in price_data.keys():
-        key_lower = key.lower()
-        # Если в названии тарифа присутствует один из синонимов
-        if any(s in key_lower for s in synonyms):
-            # Если в названии есть размер, например "(up to 17m)" или "up to 17m" (регистронезависимо)
-            size_match = re.search(r'(\d+)\s*[mм]', key_lower)
+        key_norm = normalize_text(key)
+        # Если в нормализованном названии тарифа встречается один из синонимов
+        if any(s in key_norm for s in synonyms):
+            # Если найден размер в названии тарифа, например "up to 17m" или просто "17m"
+            size_match = re.search(r'(\d+)\s*(m|м)', key_norm)
             if size_match:
                 max_size = int(size_match.group(1))
                 # Если размер запроса определён и меньше или равен max_size, выбираем этот тариф
@@ -137,7 +156,7 @@ def select_vehicle_record(query, price_data):
 def get_condition_detail(condition_index):
     """
     Для заданного индекса условия (ConditionX) ищет в Bible.xlsx строку, где в столбце Verification
-    содержится точное значение "ConditionX" (например, "Condition3" для condition_index=2).
+    содержится точное значение "ConditionX" (например, для condition_index=2 ищется "Condition3").
     Возвращает кортеж (detail_text, extra_cost) из столбца Answers.
     """
     condition_key = f"Condition{condition_index + 1}"
@@ -153,18 +172,18 @@ def get_condition_detail(condition_index):
 def check_ferry_price(query, direction="Ro_Ge", client_guiding_answers=None):
     """
     Основная функция расчёта цены.
-    1. Сначала определяется нужный тариф на основе запроса (тип и размер) через select_vehicle_record().
-    2. Получается базовая цена (приоритет – данные с сайта, затем Price.xlsx).
-    3. Если есть активные условия (в столбцах Condition), и клиент подтвердил их (через guiding answers),
-       для каждого активного условия вызывается get_condition_detail() для получения пояснения и доплаты.
-    4. Формируется итоговый ответ:
-         - Базовая цена
-         - Дополнительные услуги с пояснениями и суммарная стоимость доплат
-         - Итоговая стоимость (базовая + доплаты)
+    1. На основе запроса выбирается тариф из Price.xlsx с учетом синонимов и размера (через select_vehicle_record()).
+    2. Получается базовая цена (приоритет – данные с сайта, затем из Price.xlsx).
+    3. Если в записи активны дополнительные условия (Condition), и клиент подтвердил их (через guiding answers),
+       для каждого активного условия вызывается get_condition_detail() для получения пояснения и возможной доплаты.
+    4. Итоговый ответ включает:
+         - Базовую цену перевозки (с указанием источника),
+         - Перечень дополнительных услуг с пояснениями и их суммарную стоимость,
+         - Итоговую стоимость (базовая цена + доплаты).
     """
     try:
         price_data = load_price_data()
-        # Определяем подходящий тариф на основе запроса (учитываем тип и размер)
+        # Выбор тарифа на основе запроса и нормализованных данных
         record_key = select_vehicle_record(query, price_data)
         if not record_key:
             return f"Извините, информация о тарифах для данного запроса отсутствует в нашей базе."
@@ -186,7 +205,6 @@ def check_ferry_price(query, direction="Ro_Ge", client_guiding_answers=None):
             send_telegram_notification(f"Ошибка: Нет данных о тарифе для '{record_key}'.")
             return f"Извините, тариф для '{record_key}' недоступен."
         
-        # Если оба источника доступны, проверяем их согласованность
         if website_price_numeric is not None and sheet_price_numeric is not None:
             if abs(website_price_numeric - sheet_price_numeric) > 0.001:
                 send_telegram_notification(f"ВНИМАНИЕ: Для тарифа '{record_key}' цены различаются: сайт {website_raw} и база {sheet_raw}.")
@@ -199,12 +217,11 @@ def check_ferry_price(query, direction="Ro_Ge", client_guiding_answers=None):
         
         additional_total = 0.0
         active_conditions_details = []
-        # Если guiding ответы присутствуют, обрабатываем активные условия
         if client_guiding_answers and conditions:
             for i, cond in enumerate(conditions):
                 if cond == "1" and i < len(client_guiding_answers):
                     answer = client_guiding_answers[i].strip().lower()
-                    if answer:  # Если клиент подтвердил условие
+                    if answer:
                         detail_text, extra_cost = get_condition_detail(i)
                         if detail_text:
                             active_conditions_details.append(detail_text)
@@ -242,7 +259,6 @@ def get_price_response(vehicle_query, direction="Ro_Ge", client_guiding_answers=
 if __name__ == "__main__":
     # Пример тестирования: запрос клиента "Констанца-Поти, без водителя, груз не ADR, фура 17 метров"
     test_query = "Констанца-Поти, без водителя, груз не ADR, фура 17 метров"
-    # Пример guiding ответов (например, по активным условиям, если они задаются по порядку)
-    guiding_answers = ["без водителя"]  # здесь можно расширить список, если в тарифе несколько условий
+    guiding_answers = ["без водителя"]  # Пример guiding ответов
     message = check_ferry_price(test_query, direction="Ro_Ge", client_guiding_answers=guiding_answers)
     print(message)
