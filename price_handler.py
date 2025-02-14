@@ -2,10 +2,10 @@ import os
 import logging
 import re
 import string
-from price import get_ferry_prices  # Убедитесь, что этот модуль возвращает данные с сайта
+from price import get_ferry_prices
 from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
-from bible import load_bible_data  # Для получения пояснений из Bible.xlsx
+from bible import load_bible_data
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -55,6 +55,7 @@ def load_price_data():
         price_data = {}
         for row in values:
             if len(row) < 4:
+                logger.warning(f"Пропущена строка с недостаточным количеством данных: {row}")
                 continue
             tariff_name = row[0].strip()
             price_Ro_Ge = row[1].strip() if len(row) > 1 else ""
@@ -63,6 +64,10 @@ def load_price_data():
             conditions = []
             for i in range(4, len(row)):
                 conditions.append(row[i].strip())
+            # Проверяем, что цена не равна "PRICE_QUERY"
+            if price_Ro_Ge.upper() == "PRICE_QUERY" or price_Ge_Ro.upper() == "PRICE_QUERY":
+                logger.warning(f"Найдена строка с PRICE_QUERY: {tariff_name}. Пропуск.")
+                continue
             price_data[tariff_name] = {
                 "price_Ro_Ge": price_Ro_Ge,
                 "price_Ge_Ro": price_Ge_Ro,
