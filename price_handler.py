@@ -4,6 +4,7 @@ import re
 from price import get_ferry_prices
 from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
+from bible import load_bible_data  # Для получения пояснений из Bible.xlsx
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -27,16 +28,15 @@ def load_price_data():
       B: Price_Ro_Ge (направление: Romania -> Georgia)
       C: Price_Ge_Ro (направление: Georgia -> Romania)
       D: Remark
-      E: Condition1
-      F: Condition2
-      G: Condition3
+      E, F, G, ...: Дополнительные условия (Condition1, Condition2, …),
+          где в каждой ячейке стоит "1" (условие активно) или "0" (не активно).
     Возвращает словарь вида:
       {
          "VehicleType1": {
              "price_Ro_Ge": "...",
              "price_Ge_Ro": "...",
              "remark": "...",
-             "conditions": [ "Condition1 текст", "Condition2 текст", "Condition3 текст" ]
+             "conditions": [ значение из ячеек, если есть ]
          },
          ...
       }
@@ -57,13 +57,10 @@ def load_price_data():
             price_Ro_Ge = row[1].strip() if len(row) > 1 else ""
             price_Ge_Ro = row[2].strip() if len(row) > 2 else ""
             remark = row[3].strip() if len(row) > 3 else ""
+            # Сохраняем оставшиеся столбцы как условия (например, Condition1, Condition2, ...)
             conditions = []
-            if len(row) > 4 and row[4].strip():
-                conditions.append(row[4].strip())
-            if len(row) > 5 and row[5].strip():
-                conditions.append(row[5].strip())
-            if len(row) > 6 and row[6].strip():
-                conditions.append(row[6].strip())
+            for i in range(4, len(row)):
+                conditions.append(row[i].strip())
             price_data[vehicle_type] = {
                 "price_Ro_Ge": price_Ro_Ge,
                 "price_Ge_Ro": price_Ge_Ro,
@@ -93,17 +90,14 @@ def send_telegram_notification(message):
 
 def extract_numeric(price_str):
     """
-    Извлекает числовое значение из строки с ценой, удаляя лишние символы.
+    Извлекает числовое значение из строки с ценой, удаляя лишние символы (например, валюту).
     Возвращает float или None, если извлечение не удалось.
     """
     if not price_str:
         return None
-    # Удаляем все символы, кроме цифр, точки и запятой
     cleaned = re.sub(r'[^\d.,]', '', price_str)
-    # Если есть запятая без точки, заменяем запятую на точку
     if cleaned.count(',') > 0 and cleaned.count('.') == 0:
         cleaned = cleaned.replace(',', '.')
-    # Если есть и запятая и точка, предполагаем, что точка – десятичный разделитель, а запятая – разделитель тысяч
     elif cleaned.count(',') > 0 and cleaned.count('.') > 0:
         cleaned = cleaned.replace(',', '')
     try:
@@ -111,28 +105,51 @@ def extract_numeric(price_str):
     except ValueError:
         return None
 
-def check_ferry_price(vehicle_type, direction="Ro_Ge"):
+def get_condition_detail(condition_index, guiding_answer):
+    """
+    Для заданного индекса условия (ConditionX) возвращает пояснение из Bible.xlsx.
+    Ищется строка, где в столбце Verification содержится точное значение "ConditionX"
+    (например, для condition_index=2 ищется "Condition3").
+    
+    Возвращает кортеж (detail_text, extra_cost), где:
+      - detail_text: текстовое описание условия из столбца Answers.
+      - extra_cost: числовое значение дополнительной платы, извлечённое из detail_text (если есть),
+                    иначе None.
+    """
+    # Формируем ключ условия, например: "Condition3" для condition_index=2
+    condition_key = f"Condition{condition_index + 1}"
+    bible_df = load_bible_data()
+    for index, row in bible_df.iterrows():
+        verification_val = str(row.get("Verification", "")).strip()
+        if verification_val.lower() == condition_key.lower():
+            detail_text = row.get("Answers", "").strip()
+            extra_cost = extract_numeric(detail_text)
+            return detail_text, extra_cost
+    return None, None
+
+def check_ferry_price(vehicle_type, direction="Ro_Ge", client_guiding_answers=None):
     """
     Сравнивает тарифы для указанного типа транспортного средства и направления.
     
-    direction: 
-      - "Ro_Ge" для направления Romania -> Georgia,
-      - "Ge_Ro" для направления Georgia -> Romania.
-    
     Логика:
-      1. Получаем актуальные тарифы с сайта через get_ferry_prices() из модуля price.
-      2. Загружаем данные из Price.xlsx с помощью load_price_data().
-      3. Если данные доступны из обоих источников, сравниваем их; данные с сайта имеют приоритет.
-         Если цены совпадают (с учетом небольших погрешностей), формируем ответ с подтверждённой ценой.
-         Если цены различаются, отправляем уведомление менеджеру и просим уточнить цену.
-      4. Если один из источников недоступен, возвращаем данные из доступного источника.
-      5. В случае сбоя в сверке или обработки данных, отправляем уведомление через Telegram для отладки.
+      1. Получает базовую цену из двух источников: сайта (приоритет) и Price.xlsx.
+      2. Если оба источника доступны, проверяет их согласованность.
+      3. Из Price.xlsx считываются все столбцы с условиями (Condition1, Condition2, ...).
+         Для каждого условия, где стоит метка "1" (активное), если клиент подтвердил его (ответ присутствует
+         в client_guiding_answers в соответствующем порядке), вызывается get_condition_detail(), которая ищет
+         в Bible.xlsx строку с Verification равным "ConditionX". Если найдена, из Answers извлекается подробное
+         описание и, возможно, дополнительная плата.
+      4. Итоговое сообщение включает:
+           - Базовую цену (с указанием источника).
+           - Перечень активных условий с пояснениями.
+           - Итоговую стоимость = базовая цена + суммарная доплата.
+      5. При ошибках или несоответствии источников отправляется уведомление менеджеру.
     """
     try:
         website_prices = get_ferry_prices()
         sheet_prices = load_price_data()
         
-        # Определяем сырые значения цены в зависимости от направления
+        # Получение "сырых" значений цены по направлению
         if direction == "Ro_Ge":
             website_raw = website_prices.get(vehicle_type, {}).get("price_Ro_Ge", "")
             sheet_raw = sheet_prices.get(vehicle_type, {}).get("price_Ro_Ge", "")
@@ -140,27 +157,25 @@ def check_ferry_price(vehicle_type, direction="Ro_Ge"):
             website_raw = website_prices.get(vehicle_type, {}).get("price_Ge_Ro", "")
             sheet_raw = sheet_prices.get(vehicle_type, {}).get("price_Ge_Ro", "")
         
-        # Извлекаем числовые значения из цен
         website_price_numeric = extract_numeric(website_raw)
         sheet_price_numeric = extract_numeric(sheet_raw)
         
-        # Получаем дополнительные данные из Price.xlsx для ответа
         remark = sheet_prices.get(vehicle_type, {}).get("remark", "")
         conditions = sheet_prices.get(vehicle_type, {}).get("conditions", [])
         
-        # Логика выбора: если данные с сайта доступны, используем их как приоритет
+        # Определяем базовую цену с приоритетом данных с сайта
         if website_price_numeric is not None:
-            final_price = website_price_numeric
+            base_price = website_price_numeric
             source_used = "сайта"
         elif sheet_price_numeric is not None:
-            final_price = sheet_price_numeric
+            base_price = sheet_price_numeric
             source_used = "базы"
         else:
             message = f"Извините, тариф для '{vehicle_type}' недоступен ни на сайте, ни в базе."
             send_telegram_notification(f"Ошибка: Нет данных о тарифе для '{vehicle_type}' в обоих источниках.")
             return message
         
-        # Если оба источника доступны, сравниваем их
+        # Если оба источника доступны, проверяем их согласованность
         if website_price_numeric is not None and sheet_price_numeric is not None:
             if abs(website_price_numeric - sheet_price_numeric) > 0.001:
                 message_to_manager = (f"ВНИМАНИЕ: Для транспортного средства '{vehicle_type}' цены различаются. "
@@ -169,18 +184,36 @@ def check_ferry_price(vehicle_type, direction="Ro_Ge"):
                 send_telegram_notification(message_to_manager)
                 return (f"Цена для '{vehicle_type}' требует уточнения. Пожалуйста, свяжитесь с менеджером по телефонам: "
                         "+995595198228 или +4367763198228.")
-            # Если цены совпадают (с учетом погрешности), используем данные с сайта
-            final_price = website_price_numeric
+            base_price = website_price_numeric
             source_used = "сайта"
         
-        # Формируем ответное сообщение
-        response_message = f"Цена перевозки для '{vehicle_type}' ({direction.replace('_', ' ')}) составляет {final_price} (данные из {source_used})."
+        # Обработка активных условий из Price.xlsx
+        additional_total = 0.0
+        active_conditions_details = []
+        if client_guiding_answers and conditions:
+            # Перебираем условия по порядку
+            for i, cond in enumerate(conditions):
+                if cond == "1" and i < len(client_guiding_answers):
+                    # Если клиент ответил (подтвердил) по данному условию, обрабатываем его
+                    client_answer = client_guiding_answers[i].strip().lower()
+                    if client_answer:
+                        detail_text, extra_cost = get_condition_detail(i, client_answer)
+                        if detail_text:
+                            active_conditions_details.append(detail_text)
+                        if extra_cost is not None:
+                            additional_total += extra_cost
+        total_price = base_price + additional_total
+        
+        response_message = f"Цена перевозки для '{vehicle_type}' ({direction.replace('_', ' ')}) составляет {base_price} евро (данные из {source_used})."
         if remark:
             response_message += f" Примечание: {remark}"
-        if conditions:
-            response_message += "\nДля более точного расчёта, пожалуйста, ответьте на следующие вопросы:"
-            for question in conditions:
-                response_message += f"\n{question}"
+        if active_conditions_details:
+            response_message += "\nДополнительно применяются следующие условия:"
+            for detail in active_conditions_details:
+                response_message += f"\n- {detail}"
+            response_message += f"\nИтоговая стоимость составляет {total_price} евро."
+        else:
+            response_message += f"\nИтоговая стоимость составляет {total_price} евро."
         return response_message
     except Exception as e:
         error_msg = f"Ошибка при сравнении цен для '{vehicle_type}': {e}"
@@ -188,9 +221,19 @@ def check_ferry_price(vehicle_type, direction="Ro_Ge"):
         send_telegram_notification(error_msg)
         return "Произошла ошибка при получении цены. Пожалуйста, попробуйте позже."
 
+def get_price_response(vehicle_type, direction="Ro_Ge", client_guiding_answers=None):
+    try:
+        response = check_ferry_price(vehicle_type, direction, client_guiding_answers)
+        return response
+    except Exception as e:
+        logger.error(f"Ошибка при получении цены для {vehicle_type}: {e}")
+        return "Произошла ошибка при получении актуальной цены. Пожалуйста, попробуйте позже."
+
 if __name__ == "__main__":
     # Пример вызова функции для тестирования
-    vehicle = "Truck"  # Пример: заменить на реальный тип транспортного средства, как в таблице Price.xlsx
+    vehicle = "Truck"  # Например, "Truck" или "Fura"
     direction = "Ro_Ge"  # или "Ge_Ro"
-    message = check_ferry_price(vehicle, direction)
+    # Пример guiding answers: список ответов клиента, порядок соответствует условиям из Price.xlsx
+    guiding_answers = ["без водителя", "нет ADR"]
+    message = check_ferry_price(vehicle, direction, client_guiding_answers=guiding_answers)
     print(message)
