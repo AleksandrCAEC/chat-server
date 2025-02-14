@@ -202,6 +202,7 @@ def check_ferry_price(query, direction="Ro_Ge", client_guiding_answers=None):
             return "Ошибка считывания данных из Price.xlsx."
         record_key = select_vehicle_record(query, price_data)
         if not record_key:
+            logger.error(f"Тариф для запроса '{query}' не найден в базе данных.")
             return f"Извините, информация о тарифах для данного запроса отсутствует в нашей базе."
         
         website_prices = get_ferry_prices()
