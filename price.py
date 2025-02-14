@@ -28,19 +28,19 @@ def get_ferry_prices():
         logger.info("Запрос к тарифной странице выполнен успешно.")
     except Exception as e:
         logger.error(f"Ошибка при запросе тарифов с сайта: {e}")
-        raise Exception(f"Ошибка при запросе тарифов с сайта: {e}")
+        return {}  # Возвращаем пустой словарь вместо исключения
 
     soup = BeautifulSoup(response.text, 'html.parser')
     table = soup.find('table')
     if not table:
         logger.error("Таблица тарифов не найдена на странице.")
-        raise Exception("Таблица тарифов не найдена на странице.")
+        return {}  # Возвращаем пустой словарь вместо исключения
 
     prices = {}
     rows = table.find_all('tr')
     if not rows or len(rows) < 2:
         logger.error("В таблице тарифов нет данных для обработки.")
-        raise Exception("В таблице тарифов нет данных для обработки.")
+        return {}  # Возвращаем пустой словарь вместо исключения
 
     # Предполагается, что первая строка таблицы – заголовок, а последующие строки – данные
     for row in rows[1:]:
@@ -52,6 +52,10 @@ def get_ferry_prices():
         price_Ge_Ro = cols[2].get_text(strip=True)
         remark = cols[3].get_text(strip=True)
         condition = cols[4].get_text(strip=True)
+        # Проверяем, что цена не равна "PRICE_QUERY"
+        if price_Ro_Ge.upper() == "PRICE_QUERY" or price_Ge_Ro.upper() == "PRICE_QUERY":
+            logger.warning(f"Найдена строка с PRICE_QUERY: {vehicle_type}. Пропуск.")
+            continue
         prices[vehicle_type] = {
             "price_Ro_Ge": price_Ro_Ge,
             "price_Ge_Ro": price_Ge_Ro,
