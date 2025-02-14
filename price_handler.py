@@ -116,7 +116,6 @@ def get_condition_detail(condition_index, guiding_answer):
       - extra_cost: числовое значение дополнительной платы, извлечённое из detail_text (если есть),
                     иначе None.
     """
-    # Формируем ключ условия, например: "Condition3" для condition_index=2
     condition_key = f"Condition{condition_index + 1}"
     bible_df = load_bible_data()
     for index, row in bible_df.iterrows():
@@ -139,10 +138,10 @@ def check_ferry_price(vehicle_type, direction="Ro_Ge", client_guiding_answers=No
          в client_guiding_answers в соответствующем порядке), вызывается get_condition_detail(), которая ищет
          в Bible.xlsx строку с Verification равным "ConditionX". Если найдена, из Answers извлекается подробное
          описание и, возможно, дополнительная плата.
-      4. Итоговое сообщение включает:
-           - Базовую цену (с указанием источника).
-           - Перечень активных условий с пояснениями.
-           - Итоговую стоимость = базовая цена + суммарная доплата.
+      4. Итоговое сообщение теперь формируется так:
+            - Сначала выводится **базовая цена** перевозки (с указанием источника).
+            - Затем, если есть активные условия, выводится перечень дополнительных услуг и их суммарная стоимость.
+            - После этого, если применимы дополнительные услуги, показывается **итоговая стоимость** (базовая + доплаты).
       5. При ошибках или несоответствии источников отправляется уведомление менеджеру.
     """
     try:
@@ -194,7 +193,6 @@ def check_ferry_price(vehicle_type, direction="Ro_Ge", client_guiding_answers=No
             # Перебираем условия по порядку
             for i, cond in enumerate(conditions):
                 if cond == "1" and i < len(client_guiding_answers):
-                    # Если клиент ответил (подтвердил) по данному условию, обрабатываем его
                     client_answer = client_guiding_answers[i].strip().lower()
                     if client_answer:
                         detail_text, extra_cost = get_condition_detail(i, client_answer)
@@ -202,18 +200,21 @@ def check_ferry_price(vehicle_type, direction="Ro_Ge", client_guiding_answers=No
                             active_conditions_details.append(detail_text)
                         if extra_cost is not None:
                             additional_total += extra_cost
+        
         total_price = base_price + additional_total
         
-        response_message = f"Цена перевозки для '{vehicle_type}' ({direction.replace('_', ' ')}) составляет {base_price} евро (данные из {source_used})."
+        # Формирование итогового ответа с разделением базовой цены и доплат
+        response_message = f"Базовая цена перевозки для '{vehicle_type}' ({direction.replace('_', ' ')}) составляет {base_price} евро (данные из {source_used})."
         if remark:
-            response_message += f" Примечание: {remark}"
+            response_message += f"\nПримечание: {remark}"
         if active_conditions_details:
-            response_message += "\nДополнительно применяются следующие условия:"
+            response_message += "\n\nДополнительные услуги:"
             for detail in active_conditions_details:
                 response_message += f"\n- {detail}"
-            response_message += f"\nИтоговая стоимость составляет {total_price} евро."
+            response_message += f"\nСуммарная стоимость дополнительных услуг: {additional_total} евро."
+            response_message += f"\n\nИтоговая стоимость перевозки: {total_price} евро."
         else:
-            response_message += f"\nИтоговая стоимость составляет {total_price} евро."
+            response_message += f"\n\nИтоговая стоимость перевозки: {base_price} евро."
         return response_message
     except Exception as e:
         error_msg = f"Ошибка при сравнении цен для '{vehicle_type}': {e}"
@@ -233,7 +234,6 @@ if __name__ == "__main__":
     # Пример вызова функции для тестирования
     vehicle = "Truck"  # Например, "Truck" или "Fura"
     direction = "Ro_Ge"  # или "Ge_Ro"
-    # Пример guiding answers: список ответов клиента, порядок соответствует условиям из Price.xlsx
     guiding_answers = ["без водителя", "нет ADR"]
     message = check_ferry_price(vehicle, direction, client_guiding_answers=guiding_answers)
     print(message)
