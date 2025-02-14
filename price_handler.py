@@ -43,7 +43,6 @@ def load_price_data():
     """
     try:
         service = get_sheets_service()
-        # Диапазон можно расширить, если есть больше столбцов
         range_name = "Sheet1!A2:G"
         result = service.spreadsheets().values().get(
             spreadsheetId=PRICE_SPREADSHEET_ID,
@@ -128,27 +127,41 @@ def select_vehicle_record(query, price_data):
     """
     Определяет, какой тариф из price_data подходит для запроса.
     Использует синонимы для грузовика и анализирует размер транспортного средства.
+    Также, если в запросе упоминается "trailer", выбирает тариф, содержащий этот термин.
     Работает с нормализованными строками.
     """
     synonyms = ['truck', 'грузовик', 'фура', 'еврофура', 'трайлер', 'трас']
+    trailer_keywords = ['trailer', 'трейлер']
     query_norm = normalize_text(query)
     size = extract_vehicle_size(query)
     
     candidate = None
+    best_score = 0
     for key in price_data.keys():
         key_norm = normalize_text(key)
-        # Проверяем наличие одного из синонимов
-        if any(s in key_norm for s in synonyms):
-            size_match = re.search(r'(\d+)\s*(m|м)', key_norm)
-            if size_match:
-                max_size = int(size_match.group(1))
-                if size is None or size <= max_size:
-                    candidate = key
-                    break
+        score = 0
+        # Учитываем синонимы: если хотя бы один найден в и запросе, и в тарифе
+        for syn in synonyms:
+            if syn in query_norm and syn in key_norm:
+                score += 1
+        # Если запрос содержит "trailer", требуем наличие этого слова в тарифе
+        if any(t in query_norm for t in trailer_keywords):
+            if any(t in key_norm for t in trailer_keywords):
+                score += 1
             else:
-                candidate = key
-                break
-    logger.info(f"Выбран тариф: {candidate} для запроса: '{query_norm}', размер: {size}")
+                continue
+        # Учитываем размер: если в тарифе указан размер, сравниваем с размером из запроса
+        size_match = re.search(r'(\d+)\s*(m|м)', key_norm)
+        if size_match:
+            max_size = int(size_match.group(1))
+            if size is not None and size <= max_size:
+                score += 1
+            else:
+                continue
+        if score > best_score:
+            best_score = score
+            candidate = key
+    logger.info(f"Выбран тариф: {candidate} для запроса: '{query_norm}', размер: {size}, score: {best_score}")
     return candidate
 
 def get_condition_detail(condition_index):
