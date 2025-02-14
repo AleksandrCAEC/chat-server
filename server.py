@@ -184,55 +184,17 @@ def chat():
         update_last_visit(client_code)
         update_activity_status()
         
-        # Если клиент уже находится в режиме уточнения (pending guiding questions)
-        if client_code in pending_guiding:
-            pending = pending_guiding[client_code]
-            # Если клиент явно пишет "базовая цена" (или содержит слово "базовая"), то возвращаем только базовую цену
-            if "базовая" in user_message.lower():
-                final_price = get_price_response_wrapper(pending["vehicle_type"], direction="Ro_Ge", client_guiding_answers=[])
-                response_message = f"Базовая цена составляет: {final_price}"
-                del pending_guiding[client_code]
-            # Если клиент присылает сообщение с ключевыми словами, означающими завершение уточнения
-            elif is_price_query(user_message):
-                final_price = get_price_response_wrapper(pending["vehicle_type"], direction="Ro_Ge", client_guiding_answers=pending["answers"])
-                response_message = f"Спасибо, ваши ответы приняты. {final_price}"
-                del pending_guiding[client_code]
-            else:
-                # Иначе сохраняем очередной ответ и спрашиваем следующий guiding вопрос
-                pending.setdefault("answers", []).append(user_message)
-                pending["current_index"] += 1
-                if pending["current_index"] < len(pending["conditions"]):
-                    response_message = pending["conditions"][pending["current_index"]]
-                else:
-                    final_price = get_price_response_wrapper(pending["vehicle_type"], direction="Ro_Ge", client_guiding_answers=pending["answers"])
-                    response_message = f"Спасибо, ваши ответы приняты. {final_price}"
-                    del pending_guiding[client_code]
-        # Если запрос содержит ключевые слова о цене и клиент не в guiding режиме
-        elif is_price_query(user_message):
+        if is_price_query(user_message):
             vehicle_type = get_vehicle_type(user_message)
             if not vehicle_type:
                 response_message = ("Для определения цены, пожалуйста, уточните тип транспортного средства "
                                     "(например, грузовик или фура).")
             else:
-                # Загружаем данные из Price.xlsx через load_price_data() из price_handler.py
-                price_data = load_price_data()
-                if vehicle_type not in price_data:
-                    response_message = f"Извините, информация о тарифах для '{vehicle_type}' отсутствует в нашей базе."
-                else:
-                    conditions = price_data[vehicle_type].get("conditions", [])
-                    if conditions:
-                        # Если guiding questions имеются, сохраняем состояние и задаем первый вопрос
-                        pending_guiding[client_code] = {
-                            "vehicle_type": vehicle_type,
-                            "conditions": conditions,
-                            "current_index": 0,
-                            "answers": []
-                        }
-                        response_message = conditions[0]
-                    else:
-                        response_message = get_price_response_wrapper(vehicle_type, direction="Ro_Ge")
+                logger.info(f"Запрос на цену для типа транспортного средства: {vehicle_type}")
+                response_message = get_price_response_wrapper(vehicle_type, direction="Ro_Ge")
+                logger.info(f"Ответ от price_handler: {response_message}")
         else:
-            # Стандартная обработка: формируем контекст из Bible.xlsx и истории переписки, затем вызываем OpenAI
+            # Стандартная обработка
             messages = prepare_chat_context(client_code)
             messages.append({"role": "user", "content": user_message})
             openai_response = openai.ChatCompletion.create(
