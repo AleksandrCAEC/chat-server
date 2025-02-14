@@ -23,41 +23,35 @@ def get_ferry_prices():
     }
     """
     try:
-        logger.info(f"Запрос к странице тарифов: {TARIFF_URL}")
         response = requests.get(TARIFF_URL)
         response.raise_for_status()
         logger.info("Запрос к тарифной странице выполнен успешно.")
     except Exception as e:
         logger.error(f"Ошибка при запросе тарифов с сайта: {e}")
-        return {}  # Возвращаем пустой словарь вместо исключения
+        raise Exception(f"Ошибка при запросе тарифов с сайта: {e}")
 
     soup = BeautifulSoup(response.text, 'html.parser')
     table = soup.find('table')
     if not table:
         logger.error("Таблица тарифов не найдена на странице.")
-        return {}  # Возвращаем пустой словарь вместо исключения
+        raise Exception("Таблица тарифов не найдена на странице.")
 
     prices = {}
     rows = table.find_all('tr')
     if not rows or len(rows) < 2:
         logger.error("В таблице тарифов нет данных для обработки.")
-        return {}  # Возвращаем пустой словарь вместо исключения
+        raise Exception("В таблице тарифов нет данных для обработки.")
 
     # Предполагается, что первая строка таблицы – заголовок, а последующие строки – данные
     for row in rows[1:]:
         cols = row.find_all('td')
         if len(cols) < 5:
-            logger.warning(f"Пропущена строка с недостаточным количеством данных: {row}")
             continue  # если строка не содержит достаточное число ячеек, пропускаем её
         vehicle_type = cols[0].get_text(strip=True)
         price_Ro_Ge = cols[1].get_text(strip=True)
         price_Ge_Ro = cols[2].get_text(strip=True)
         remark = cols[3].get_text(strip=True)
         condition = cols[4].get_text(strip=True)
-        # Проверяем, что цена не равна "PRICE_QUERY"
-        if price_Ro_Ge.upper() == "PRICE_QUERY" or price_Ge_Ro.upper() == "PRICE_QUERY":
-            logger.warning(f"Найдена строка с PRICE_QUERY: {vehicle_type}. Пропуск.")
-            continue
         prices[vehicle_type] = {
             "price_Ro_Ge": price_Ro_Ge,
             "price_Ge_Ro": price_Ge_Ro,
@@ -66,7 +60,6 @@ def get_ferry_prices():
         }
         logger.info(f"Найден тариф для '{vehicle_type}': {prices[vehicle_type]}")
 
-    logger.info(f"Все тарифы с сайта: {prices}")
     return prices
 
 if __name__ == "__main__":
