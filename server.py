@@ -185,10 +185,13 @@ def chat():
         # Если клиент уже находится в режиме уточнения (pending guiding questions)
         if client_code in pending_guiding:
             pending = pending_guiding[client_code]
-            # Если клиент присылает сообщение, содержащее ключевые слова, означающие завершение уточнения,
-            # например "какой стандартный тариф", то завершаем сбор ответов.
-            if is_price_query(user_message):
-                # Завершаем сбор, используем уже собранные ответы
+            # Если клиент явно пишет "базовая цена" (или содержит слово "базовая"), то возвращаем только базовую цену
+            if "базовая" in user_message.lower():
+                final_price = get_price_response_wrapper(pending["vehicle_type"], direction="Ro_Ge", client_guiding_answers=[])
+                response_message = f"Базовая цена составляет: {final_price}"
+                del pending_guiding[client_code]
+            # Если клиент присылает сообщение с ключевыми словами, означающими завершение уточнения
+            elif is_price_query(user_message):
                 final_price = get_price_response_wrapper(pending["vehicle_type"], direction="Ro_Ge", client_guiding_answers=pending["answers"])
                 response_message = f"Спасибо, ваши ответы приняты. {final_price}"
                 del pending_guiding[client_code]
