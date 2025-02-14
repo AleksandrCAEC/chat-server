@@ -83,12 +83,7 @@ def get_vehicle_type(text):
 
 def get_price_response(vehicle_type, direction="Ro_Ge"):
     try:
-        # Получаем окончательный ответ через check_ferry_price.
-        # Если guiding questions имеются, check_ferry_price должна вернуть только первый вопрос.
         response = check_ferry_price(vehicle_type, direction)
-        # Если ответ равен "PRICE_QUERY" (или содержит его как маркер), то это означает, что цена не окончательная.
-        if response.strip().upper() == "PRICE_QUERY":
-            return "Информация о цене не доступна. Пожалуйста, свяжитесь с менеджером."
         return response
     except Exception as e:
         logger.error(f"Ошибка при получении цены для {vehicle_type}: {e}")
@@ -104,9 +99,13 @@ def prepare_chat_context(client_code):
         raise Exception("Bible.xlsx не найден или недоступен.")
     logger.info(f"Bible.xlsx содержит {len(bible_df)} записей.")
     bible_context = "Информация о компании (FAQ):\n"
+    # Удаляем префиксы-временные метки из FAQ и Answers (например, "14.02.25 14:11 -")
     for index, row in bible_df.iterrows():
         faq = row.get("FAQ", "")
         answer = row.get("Answers", "")
+        # Очистка от временной метки
+        faq = re.sub(r"^\d{2}\.\d{2}\.\d{2}\s+\d{2}:\d{2}\s*-\s*", "", faq)
+        answer = re.sub(r"^\d{2}\.\d{2}\.\d{2}\s+\d{2}:\d{2}\s*-\s*", "", answer)
         verification = str(row.get("Verification", "")).strip().upper()
         if faq and answer and verification != "CHECK":
             bible_context += f"Вопрос: {faq}\nОтвет: {answer}\n\n"
@@ -187,14 +186,13 @@ def chat():
         # Если клиент уже находится в режиме уточнения (pending guiding questions)
         if client_code in pending_guiding:
             pending = pending_guiding[client_code]
-            # Сохраняем ответ клиента на текущий guiding question
             pending.setdefault("answers", []).append(user_message)
             pending["current_index"] += 1
             if pending["current_index"] < len(pending["conditions"]):
                 # Если есть еще guiding questions, задаем следующую
                 response_message = pending["conditions"][pending["current_index"]]
             else:
-                # Все guiding вопросы отвечены; можно вычислить итоговую цену
+                # Все guiding вопросы отвечены; вычисляем итоговую цену
                 final_price = get_price_response(pending["vehicle_type"], direction="Ro_Ge")
                 response_message = f"Спасибо, ваши ответы приняты. {final_price}"
                 # Удаляем запись о guiding состоянии
