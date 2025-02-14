@@ -1,6 +1,7 @@
 # price_handler.py
 import os
 import logging
+import re
 from price import get_ferry_prices
 from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
@@ -92,6 +93,26 @@ def send_telegram_notification(message):
     except Exception as ex:
         logger.error(f"Ошибка при отправке уведомления: {ex}")
 
+def extract_numeric(price_str):
+    """
+    Извлекает числовое значение из строки с ценой, удаляя лишние символы.
+    Возвращает float или None, если извлечение не удалось.
+    """
+    if not price_str:
+        return None
+    # Удаляем все символы, кроме цифр, точки и запятой
+    cleaned = re.sub(r'[^\d.,]', '', price_str)
+    # Если есть запятая без точки, заменяем запятую на точку
+    if cleaned.count(',') > 0 and cleaned.count('.') == 0:
+        cleaned = cleaned.replace(',', '.')
+    # Если есть и запятая и точка, предполагаем, что точка - десятичный разделитель, а запятая - разделитель тысяч
+    elif cleaned.count(',') > 0 and cleaned.count('.') > 0:
+        cleaned = cleaned.replace(',', '')
+    try:
+        return float(cleaned)
+    except ValueError:
+        return None
+
 def check_ferry_price(vehicle_type, direction="Ro_Ge"):
     """
     Сравнивает тарифы для указанного типа транспортного средства и направления.
@@ -103,51 +124,70 @@ def check_ferry_price(vehicle_type, direction="Ro_Ge"):
     Логика:
       1. Получаем актуальные тарифы с сайта через get_ferry_prices() из модуля price.
       2. Загружаем данные из Price.xlsx с помощью load_price_data().
-      3. Если для заданного типа транспортного средства данные отсутствуют в одном из источников, возвращаем соответствующее сообщение.
-      4. Сравниваем цены из сайта и из Price.xlsx:
-         - Если цены совпадают, формируем ответ с подтверждённой ценой и добавляем Remark.
-           Если для данного типа транспортного средства в столбцах Condition* (conditions) указаны наводящие вопросы, 
-           к ответу добавляется приглашение для уточнения, например:
-           «Для более точного расчёта, пожалуйста, ответьте на следующие вопросы:
-            {Condition1}
-            {Condition2}
-            ...»
-         - Если цены различаются, возвращаем сообщение, что цена требует уточнения, и отправляем уведомление менеджеру.
+      3. Если данные доступны из обоих источников, сравниваем их; данные с сайта имеют приоритет.
+         Если цены совпадают (с учетом небольших погрешностей), формируем ответ с подтверждённой ценой.
+         Если цены различаются, отправляем уведомление менеджеру и просим уточнить цену.
+      4. Если один из источников недоступен, возвращаем данные из доступного источника.
+      5. В случае сбоя в сверке или обработки данных, отправляем уведомление через Telegram для отладки.
     """
     try:
         website_prices = get_ferry_prices()
         sheet_prices = load_price_data()
         
-        if vehicle_type not in website_prices:
-            return f"Извините, актуальная цена для транспортного средства '{vehicle_type}' не найдена на сайте."
-        if vehicle_type not in sheet_prices:
-            return f"Извините, информация о тарифах для '{vehicle_type}' отсутствует в нашей базе."
-        
+        # Определяем сырые значения цены в зависимости от направления
         if direction == "Ro_Ge":
-            website_price = website_prices[vehicle_type].get("price_Ro_Ge", "")
-            sheet_price = sheet_prices[vehicle_type].get("price_Ro_Ge", "")
+            website_raw = website_prices.get(vehicle_type, {}).get("price_Ro_Ge", "")
+            sheet_raw = sheet_prices.get(vehicle_type, {}).get("price_Ro_Ge", "")
         else:
-            website_price = website_prices[vehicle_type].get("price_Ge_Ro", "")
-            sheet_price = sheet_prices[vehicle_type].get("price_Ge_Ro", "")
+            website_raw = website_prices.get(vehicle_type, {}).get("price_Ge_Ro", "")
+            sheet_raw = sheet_prices.get(vehicle_type, {}).get("price_Ge_Ro", "")
         
-        if website_price == sheet_price:
-            response_message = f"Цена перевозки для '{vehicle_type}' ({direction.replace('_', ' ')}) составляет {website_price}."
-            if sheet_prices[vehicle_type].get("remark"):
-                response_message += f" Примечание: {sheet_prices[vehicle_type]['remark']}"
-            conditions = sheet_prices[vehicle_type].get("conditions", [])
-            if conditions:
-                response_message += "\nДля более точного расчёта, пожалуйста, ответьте на следующие вопросы:"
-                for question in conditions:
-                    response_message += f"\n{question}"
-            return response_message
+        # Извлекаем числовые значения из цен
+        website_price_numeric = extract_numeric(website_raw)
+        sheet_price_numeric = extract_numeric(sheet_raw)
+        
+        # Получаем дополнительные данные из Price.xlsx для ответа
+        remark = sheet_prices.get(vehicle_type, {}).get("remark", "")
+        conditions = sheet_prices.get(vehicle_type, {}).get("conditions", [])
+        
+        # Логика выбора: если данные с сайта доступны, используем их как приоритет
+        if website_price_numeric is not None:
+            final_price = website_price_numeric
+            source_used = "сайта"
+        elif sheet_price_numeric is not None:
+            final_price = sheet_price_numeric
+            source_used = "базы"
         else:
-            message_to_manager = (f"ВНИМАНИЕ: Для транспортного средства '{vehicle_type}' цены различаются. "
-                                  f"Сайт: {website_price}, База: {sheet_price}. Требуется уточнение!")
-            send_telegram_notification(message_to_manager)
-            return (f"Цена для '{vehicle_type}' требует уточнения. Пожалуйста, свяжитесь с менеджером по телефонам: "
-                    "+995595198228 или +4367763198228.")
+            message = f"Извините, тариф для '{vehicle_type}' недоступен ни на сайте, ни в базе."
+            send_telegram_notification(f"Ошибка: Нет данных о тарифе для '{vehicle_type}' в обоих источниках.")
+            return message
+        
+        # Если оба источника доступны, сравниваем их
+        if website_price_numeric is not None and sheet_price_numeric is not None:
+            if abs(website_price_numeric - sheet_price_numeric) > 0.001:
+                message_to_manager = (f"ВНИМАНИЕ: Для транспортного средства '{vehicle_type}' цены различаются. "
+                                      f"Сайт: {website_raw} (обработано как {website_price_numeric}), "
+                                      f"База: {sheet_raw} (обработано как {sheet_price_numeric}). Требуется уточнение!")
+                send_telegram_notification(message_to_manager)
+                return (f"Цена для '{vehicle_type}' требует уточнения. Пожалуйста, свяжитесь с менеджером по телефонам: "
+                        "+995595198228 или +4367763198228.")
+            # Если цены совпадают (с учетом погрешности), используем данные с сайта
+            final_price = website_price_numeric
+            source_used = "сайта"
+        
+        # Формируем ответное сообщение
+        response_message = f"Цена перевозки для '{vehicle_type}' ({direction.replace('_', ' ')}) составляет {final_price} (данные из {source_used})."
+        if remark:
+            response_message += f" Примечание: {remark}"
+        if conditions:
+            response_message += "\nДля более точного расчёта, пожалуйста, ответьте на следующие вопросы:"
+            for question in conditions:
+                response_message += f"\n{question}"
+        return response_message
     except Exception as e:
-        logger.error(f"Ошибка при сравнении цен: {e}")
+        error_msg = f"Ошибка при сравнении цен для '{vehicle_type}': {e}"
+        logger.error(error_msg)
+        send_telegram_notification(error_msg)
         return "Произошла ошибка при получении цены. Пожалуйста, попробуйте позже."
 
 if __name__ == "__main__":
