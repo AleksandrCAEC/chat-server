@@ -152,4 +152,109 @@ def select_vehicle_record(query, price_data):
     return candidate
 
 def get_condition_detail(condition_index):
-  
+    """
+    Для заданного индекса условия (ConditionX) ищет в Bible.xlsx строку, где в столбце Verification
+    содержится точное значение "ConditionX" (например, для condition_index=2 ищется "Condition3").
+    Возвращает кортеж (detail_text, extra_cost) из столбца Answers.
+    """
+    condition_key = f"Condition{condition_index + 1}"
+    bible_df = load_bible_data()
+    for index, row in bible_df.iterrows():
+        verification_val = str(row.get("Verification", "")).strip()
+        if verification_val.lower() == condition_key.lower():
+            detail_text = row.get("Answers", "").strip()
+            extra_cost = extract_numeric(detail_text)
+            return detail_text, extra_cost
+    return None, None
+
+def check_ferry_price(query, direction="Ro_Ge", client_guiding_answers=None):
+    """
+    Основная функция расчёта цены.
+    1. На основе запроса выбирается тариф из Price.xlsx с учетом синонимов и размера (через select_vehicle_record()).
+    2. Получается базовая цена (приоритет – данные с сайта, затем из Price.xlsx).
+    3. Если в записи активны дополнительные условия (Condition) и клиент подтвердил их (через guiding answers),
+       для каждого активного условия вызывается get_condition_detail() для получения пояснения и возможной доплаты.
+    4. Итоговый ответ включает:
+         - Базовую цену перевозки (с указанием источника),
+         - Перечень дополнительных услуг с пояснениями и их суммарную стоимость,
+         - Итоговую стоимость (базовая цена + доплаты).
+    """
+    try:
+        price_data = load_price_data()
+        record_key = select_vehicle_record(query, price_data)
+        if not record_key:
+            return f"Извините, информация о тарифах для данного запроса отсутствует в нашей базе."
+        
+        website_prices = get_ferry_prices()
+        website_raw = website_prices.get(record_key, {}).get("price_Ro_Ge", "")
+        sheet_raw = price_data.get(record_key, {}).get("price_Ro_Ge", "")
+        website_price_numeric = extract_numeric(website_raw)
+        sheet_price_numeric = extract_numeric(sheet_raw)
+        
+        if website_price_numeric is not None:
+            base_price = website_price_numeric
+            source_used = "сайта"
+        elif sheet_price_numeric is not None:
+            base_price = sheet_price_numeric
+            source_used = "базы"
+        else:
+            send_telegram_notification(f"Ошибка: Нет данных о тарифе для '{record_key}'.")
+            return f"Извините, тариф для '{record_key}' недоступен."
+        
+        if website_price_numeric is not None and sheet_price_numeric is not None:
+            if abs(website_price_numeric - sheet_price_numeric) > 0.001:
+                send_telegram_notification(f"ВНИМАНИЕ: Для тарифа '{record_key}' цены различаются: сайт {website_raw} и база {sheet_raw}.")
+                return f"Тариф для '{record_key}' требует уточнения. Пожалуйста, свяжитесь с менеджером."
+            base_price = website_price_numeric
+            source_used = "сайта"
+        
+        remark = price_data.get(record_key, {}).get("remark", "")
+        conditions = price_data.get(record_key, {}).get("conditions", [])
+        
+        additional_total = 0.0
+        active_conditions_details = []
+        if client_guiding_answers and conditions:
+            for i, cond in enumerate(conditions):
+                if cond == "1" and i < len(client_guiding_answers):
+                    answer = client_guiding_answers[i].strip().lower()
+                    if answer:
+                        detail_text, extra_cost = get_condition_detail(i)
+                        if detail_text:
+                            active_conditions_details.append(detail_text)
+                        if extra_cost is not None:
+                            additional_total += extra_cost
+        
+        total_price = base_price + additional_total
+        
+        response_message = f"Базовая цена для '{record_key}' ({direction.replace('_', ' ')}) составляет {base_price} евро (данные из {source_used})."
+        if remark:
+            response_message += f"\nПримечание: {remark}"
+        if active_conditions_details:
+            response_message += "\n\nДополнительные услуги:"
+            for detail in active_conditions_details:
+                response_message += f"\n- {detail}"
+            response_message += f"\nСуммарная стоимость дополнительных услуг: {additional_total} евро."
+            response_message += f"\n\nИтоговая стоимость перевозки: {total_price} евро."
+        else:
+            response_message += f"\n\nИтоговая стоимость перевозки: {base_price} евро."
+        return response_message
+    except Exception as e:
+        error_msg = f"Ошибка при расчёте тарифа для запроса '{query}': {e}"
+        logger.error(error_msg)
+        send_telegram_notification(error_msg)
+        return "Произошла ошибка при получении цены. Пожалуйста, попробуйте позже."
+
+def get_price_response(vehicle_query, direction="Ro_Ge", client_guiding_answers=None):
+    try:
+        response = check_ferry_price(vehicle_query, direction, client_guiding_answers)
+        return response
+    except Exception as e:
+        logger.error(f"Ошибка при получении цены для запроса '{vehicle_query}': {e}")
+        return "Произошла ошибка при получении актуальной цены. Пожалуйста, попробуйте позже."
+
+if __name__ == "__main__":
+    # Пример тестирования: запрос клиента "Констанца-Поти, без водителя, груз не ADR, фура 17 метров"
+    test_query = "Констанца-Поти, без водителя, груз не ADR, фура 17 метров"
+    guiding_answers = ["без водителя"]
+    message = check_ferry_price(test_query, direction="Ro_Ge", client_guiding_answers=guiding_answers)
+    print(message)
