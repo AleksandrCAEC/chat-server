@@ -1,4 +1,3 @@
-# price_handler.py
 import os
 import logging
 import re
@@ -44,7 +43,6 @@ def load_price_data():
     """
     try:
         service = get_sheets_service()
-        # Измените диапазон, если количество столбцов больше
         range_name = "Sheet1!A2:G"
         result = service.spreadsheets().values().get(
             spreadsheetId=PRICE_SPREADSHEET_ID,
@@ -105,7 +103,7 @@ def extract_numeric(price_str):
     # Если есть запятая без точки, заменяем запятую на точку
     if cleaned.count(',') > 0 and cleaned.count('.') == 0:
         cleaned = cleaned.replace(',', '.')
-    # Если есть и запятая и точка, предполагаем, что точка - десятичный разделитель, а запятая - разделитель тысяч
+    # Если есть и запятая и точка, предполагаем, что точка – десятичный разделитель, а запятая – разделитель тысяч
     elif cleaned.count(',') > 0 and cleaned.count('.') > 0:
         cleaned = cleaned.replace(',', '')
     try:
