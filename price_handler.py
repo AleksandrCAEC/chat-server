@@ -2,7 +2,7 @@ import os
 import logging
 import re
 import string
-from price import get_ferry_prices
+from price import get_ferry_prices  # Убедитесь, что этот модуль возвращает данные с сайта
 from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
 from bible import load_bible_data  # Для получения пояснений из Bible.xlsx
@@ -49,6 +49,9 @@ def load_price_data():
             range=range_name
         ).execute()
         values = result.get("values", [])
+        if not values:
+            logger.error("Пустые данные, полученные из Price.xlsx.")
+            return {}
         price_data = {}
         for row in values:
             if len(row) < 4:
@@ -66,11 +69,11 @@ def load_price_data():
                 "round_trip": round_trip,
                 "conditions": conditions
             }
-        logger.info(f"Данные из Price.xlsx загружены: {price_data}")
+        logger.info(f"Данные из Price.xlsx: {price_data}")
         return price_data
     except Exception as e:
         logger.error(f"Ошибка загрузки данных из Price.xlsx: {e}")
-        raise
+        return {}
 
 def send_telegram_notification(message):
     """
@@ -140,24 +143,24 @@ def select_vehicle_record(query, price_data):
     for key in price_data.keys():
         key_norm = normalize_text(key)
         score = 0
-        # Учитываем синонимы: если хотя бы один найден в и запросе, и в тарифе
+        # Учитываем синонимы: если хотя бы один найден и в запросе, и в тарифе
         for syn in synonyms:
             if syn in query_norm and syn in key_norm:
                 score += 1
-        # Если запрос содержит "trailer", требуем наличие этого слова в тарифе
+        # Если запрос содержит "trailer", тариф должен содержать это слово
         if any(t in query_norm for t in trailer_keywords):
             if any(t in key_norm for t in trailer_keywords):
                 score += 1
             else:
-                continue
-        # Учитываем размер: если в тарифе указан размер, сравниваем с размером из запроса
+                continue  # тариф не подходит
+        # Учитываем размер
         size_match = re.search(r'(\d+)\s*(m|м)', key_norm)
         if size_match:
             max_size = int(size_match.group(1))
             if size is not None and size <= max_size:
                 score += 1
             else:
-                continue
+                continue  # тариф не подходит по размеру
         if score > best_score:
             best_score = score
             candidate = key
@@ -194,12 +197,16 @@ def check_ferry_price(query, direction="Ro_Ge", client_guiding_answers=None):
     """
     try:
         price_data = load_price_data()
+        if not price_data:
+            return "Ошибка считывания данных из Price.xlsx."
         record_key = select_vehicle_record(query, price_data)
         if not record_key:
             return f"Извините, информация о тарифах для данного запроса отсутствует в нашей базе."
         
         website_prices = get_ferry_prices()
-        website_raw = website_prices.get(record_key, {}).get("price_Ro_Ge", "")
+        if not website_prices:
+            logger.error("Данные с сайта не получены.")
+        website_raw = website_prices.get(record_key, {}).get("price_Ro_Ge", "") if website_prices else ""
         sheet_raw = price_data.get(record_key, {}).get("price_Ro_Ge", "")
         website_price_numeric = extract_numeric(website_raw)
         sheet_price_numeric = extract_numeric(sheet_raw)
@@ -266,8 +273,8 @@ def get_price_response(vehicle_query, direction="Ro_Ge", client_guiding_answers=
         return "Произошла ошибка при получении актуальной цены. Пожалуйста, попробуйте позже."
 
 if __name__ == "__main__":
-    # Пример тестирования: запрос клиента "Констанца-Поти, без водителя, груз не ADR, фура 17 метров"
-    test_query = "Констанца-Поти, без водителя, груз не ADR, фура 17 метров"
-    guiding_answers = ["без водителя"]
+    # Пример тестирования: точный запрос, как указано
+    test_query = "Standard truck with trailer (up to 17M)"
+    guiding_answers = []  # если дополнительные условия не подтверждены
     message = check_ferry_price(test_query, direction="Ro_Ge", client_guiding_answers=guiding_answers)
     print(message)
