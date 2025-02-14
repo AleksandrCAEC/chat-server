@@ -23,6 +23,7 @@ def get_ferry_prices():
     }
     """
     try:
+        logger.info(f"Запрос к странице тарифов: {TARIFF_URL}")
         response = requests.get(TARIFF_URL)
         response.raise_for_status()
         logger.info("Запрос к тарифной странице выполнен успешно.")
@@ -46,6 +47,7 @@ def get_ferry_prices():
     for row in rows[1:]:
         cols = row.find_all('td')
         if len(cols) < 5:
+            logger.warning(f"Пропущена строка с недостаточным количеством данных: {row}")
             continue  # если строка не содержит достаточное число ячеек, пропускаем её
         vehicle_type = cols[0].get_text(strip=True)
         price_Ro_Ge = cols[1].get_text(strip=True)
@@ -64,6 +66,7 @@ def get_ferry_prices():
         }
         logger.info(f"Найден тариф для '{vehicle_type}': {prices[vehicle_type]}")
 
+    logger.info(f"Все тарифы с сайта: {prices}")
     return prices
 
 if __name__ == "__main__":
