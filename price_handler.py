@@ -4,8 +4,8 @@ import re
 from price import get_ferry_prices  # Функция для получения тарифов с сайта
 
 # Настройка логирования
-logging.basicConfig(level=logging.DEBUG, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
+logger.setLevel(logging.DEBUG)
 
 def extract_length(text):
     """
@@ -23,18 +23,16 @@ def extract_length(text):
 def find_category_by_length(extracted_length, website_prices):
     """
     Находит категорию транспортного средства в данных website_prices,
-    сопоставляя извлечённую длину с пороговыми значениями в имени категории.
-    Ожидается, что имена категорий содержат подстроку вида "up to <число>".
+    сопоставляя извлечённую длину с пороговыми значениями, извлечёнными из названий категорий.
+    Для каждой категории извлекается первое найденное число.
     Возвращает найденную категорию или None.
     """
-    logger.debug(f"Попытка сопоставления длины {extracted_length} с тарифными категориями:")
-    logger.debug(f"Доступные категории: {list(website_prices.keys())}")
     best_category = None
     best_threshold = None
     for category in website_prices:
-        m = re.search(r'up to\s*(\d+)', category, re.IGNORECASE)
-        if m:
-            threshold = int(m.group(1))
+        numbers = re.findall(r'\d+', category)
+        if numbers:
+            threshold = int(numbers[0])
             logger.debug(f"Категория '{category}' имеет порог {threshold}")
             if extracted_length <= threshold:
                 if best_threshold is None or threshold < best_threshold:
@@ -48,16 +46,23 @@ def check_ferry_price_from_site(vehicle_description, direction="Ro_Ge"):
     Получает тариф исключительно с сайта, используя get_ferry_prices() из файла price.py.
     
     Шаги:
-      1. Извлекаем длину из vehicle_description.
-      2. Загружаем тарифы с сайта.
-      3. Находим категорию, соответствующую извлечённой длине.
-      4. Если категория найдена, возвращаем цену из данных сайта.
-      5. Если не найдена, возвращаем сообщение об отсутствии данных.
+      1. Извлекает длину из vehicle_description.
+      2. Загружает тарифы с сайта.
+      3. Находит категорию, соответствующую извлечённой длине.
+      4. Если категория найдена, возвращает цену из данных сайта.
+      5. Если длина не указана, возвращает наводящий вопрос (если ТС не относится к исключениям).
     """
     extracted_length = extract_length(vehicle_description)
     logger.debug(f"Из описания '{vehicle_description}' извлечена длина: {extracted_length}")
+    
+    # Ключевые слова для ТС, для которых длина не требуется
+    exceptions = ["контейнер", "мини", "легков", "мото"]
     if extracted_length is None:
-        return "Пожалуйста, уточните длину вашего транспортного средства (например, 17 метров)."
+        if not any(keyword in vehicle_description.lower() for keyword in exceptions):
+            return ("Пожалуйста, уточните длину вашего транспортного средства "
+                    "(например, до 20, до 17, до 14, до 10 или до 8 метров).")
+        else:
+            return "Для данного типа транспортного средства длина не требуется для расчета цены."
     
     try:
         website_prices = get_ferry_prices()
@@ -85,7 +90,7 @@ def check_ferry_price_from_site(vehicle_description, direction="Ro_Ge"):
 check_ferry_price = check_ferry_price_from_site
 
 def load_price_data():
-    # Заглушка, так как на данный момент мы не используем этот метод.
+    # Заглушка, так как на данный момент этот метод не используется.
     return {}
 
 if __name__ == "__main__":
