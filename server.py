@@ -10,7 +10,7 @@ from datetime import datetime
 from clientdata import register_or_update_client, verify_client_code, update_last_visit
 from client_caec import add_message_to_client_file, find_client_file_id, get_sheets_service, CLIENT_FILES_DIR
 from bible import load_bible_data, save_bible_pair
-from price_handler import check_ferry_price, load_price_data  # Функция check_ferry_price отвечает за сбор данных с сайта
+from price_handler import check_ferry_price, load_price_data  # Функция check_ferry_price теперь отвечает за сбор данных с сайта
 from flask_cors import CORS
 import openpyxl
 
@@ -67,6 +67,48 @@ def send_telegram_notification(message):
         logger.error(f"❌ Ошибка при отправке Telegram уведомления: {e}")
 
 ###############################################
+# ФУНКЦИЯ ПОДГОТОВКИ КОНТЕКСТА (ПАМЯТЬ АССИСТЕНТА)
+###############################################
+def prepare_chat_context(client_code):
+    messages = []
+    bible_df = load_bible_data()
+    if bible_df is None:
+        raise Exception("Bible.xlsx не найден или недоступен.")
+    logger.info(f"Bible.xlsx содержит {len(bible_df)} записей.")
+    bible_context = "Информация о компании (FAQ):\n"
+    for index, row in bible_df.iterrows():
+        faq = row.get("FAQ", "")
+        answer = row.get("Answers", "")
+        verification = str(row.get("Verification", "")).strip().upper()
+        if faq and answer and verification != "CHECK":
+            bible_context += f"Вопрос: {faq}\nОтвет: {answer}\n\n"
+    system_message = {
+        "role": "system",
+        "content": f"Вы – умный ассистент компании CAEC. Используйте следующую информацию для ответов:\n{bible_context}"
+    }
+    messages.append(system_message)
+    
+    spreadsheet_id = find_client_file_id(client_code)
+    if spreadsheet_id:
+        sheets_service = get_sheets_service()
+        result = sheets_service.spreadsheets().values().get(
+            spreadsheetId=spreadsheet_id,
+            range="Sheet1!A:B"
+        ).execute()
+        values = result.get("values", [])
+        if len(values) >= 2:
+            conversation_rows = values[2:]
+            logger.info(f"Найдено {len(conversation_rows)} строк переписки для клиента {client_code}.")
+            for row in conversation_rows:
+                if len(row) >= 1 and row[0].strip():
+                    messages.append({"role": "user", "content": row[0].strip()})
+                if len(row) >= 2 and row[1].strip():
+                    messages.append({"role": "assistant", "content": row[1].strip()})
+    else:
+        logger.info(f"Файл клиента с кодом {client_code} не найден.")
+    return messages
+
+###############################################
 # ЭНДПОИНТ /register-client
 ###############################################
 @app.route('/register-client', methods=['POST'])
@@ -121,7 +163,6 @@ def get_price_endpoint():
     vehicle_description = data["vehicle_description"]
     direction = data.get("direction", "Ro_Ge")
     
-    # Вызов функции для получения тарифа (логика из price_handler.py)
     result = check_ferry_price(vehicle_description, direction=direction)
     return jsonify({"price": result}), 200
 
@@ -141,7 +182,6 @@ def chat():
 
         update_last_visit(client_code)
         
-        # Если клиент уже находится в режиме уточнения (pending guiding questions)
         if client_code in pending_guiding:
             pending = pending_guiding[client_code]
             pending.setdefault("answers", []).append(user_message)
