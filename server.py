@@ -10,7 +10,7 @@ from datetime import datetime
 from clientdata import register_or_update_client, verify_client_code, update_last_visit
 from client_caec import add_message_to_client_file, find_client_file_id, get_sheets_service, CLIENT_FILES_DIR
 from bible import load_bible_data, save_bible_pair
-from price_handler import check_ferry_price, load_price_data  # Функция check_ferry_price теперь отвечает за сбор данных с сайта
+from price_handler import check_ferry_price, load_price_data  # Функция check_ferry_price отвечает за сбор данных с сайта
 from flask_cors import CORS
 import openpyxl
 
@@ -152,7 +152,7 @@ def get_price_endpoint():
     """
     Эндпоинт ожидает POST-запрос с JSON-телом:
     {
-       "vehicle_description": "Фура 17 метров, Констанца-Поти, без ADR, без водителя",
+       "vehicle_description": "Фура 17 метров, Констанца-Поти, без ADR, без груза",
        "direction": "Ro_Ge"  // этот параметр не обязателен, по умолчанию используется "Ro_Ge"
     }
     """
@@ -193,7 +193,15 @@ def chat():
                 response_message = f"Спасибо, ваши ответы приняты. {final_price}"
                 del pending_guiding[client_code]
         elif "цена" in user_message.lower() or "прайс" in user_message.lower():
-            response_message = check_ferry_price(vehicle_description=user_message, direction="Ro_Ge")
+            # Определяем направление на основе содержимого запроса
+            lower_msg = user_message.lower()
+            if "из поти" in lower_msg:
+                direction = "Ge_Ro"
+            elif "из констанца" in lower_msg or "из констанцы" in lower_msg:
+                direction = "Ro_Ge"
+            else:
+                direction = "Ro_Ge"  # значение по умолчанию
+            response_message = check_ferry_price(vehicle_description=user_message, direction=direction)
         else:
             messages = prepare_chat_context(client_code)
             messages.append({"role": "user", "content": user_message})
