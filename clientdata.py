@@ -1,4 +1,3 @@
-#clientdata.py
 import os
 from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
@@ -150,18 +149,10 @@ def save_client_data(client_code, name, phone, email, created_date, last_visit, 
     except Exception as e:
         logger.error(f"Ошибка сохранения в локальный файл: {e}")
 
+# Функция update_activity_status теперь отключена для избежания перебора всех клиентов.
 def update_activity_status():
-    try:
-        df = load_client_data()
-        current_date = datetime.now()
-        one_year_ago = current_date - timedelta(days=365)
-        df["Client Code"] = df["Client Code"].astype(str)
-        df.loc[pd.to_datetime(df["Last Visit"]) < one_year_ago, "Activity Status"] = "Not Active"
-        df = df.sort_values(by=["Activity Status"], ascending=False)
-        df.astype(str).to_excel(CLIENT_DATA_PATH, index=False)
-        logger.info("Статус активности клиентов обновлен.")
-    except Exception as e:
-        logger.error(f"Ошибка при обновлении статуса активности: {e}")
+    logger.info("Обновление статуса активности клиентов отключено.")
+    return
 
 def register_or_update_client(data):
     try:
@@ -220,7 +211,8 @@ def register_or_update_client(data):
             handle_client(client_code)
         except Exception as e_import:
             logger.error(f"Ошибка импорта handle_client при регистрации нового клиента: {e_import}")
-        update_activity_status()
+        # Вызов обновления активности всех клиентов удалён, чтобы обрабатывать только текущего клиента.
+        # update_activity_status()
         return {
             "uniqueCode": client_code,
             "message": f"Добро пожаловать, {name}! Ваш код: {client_code}.",
