@@ -79,6 +79,80 @@ def check_ferry_price_from_site(vehicle_category, direction="Ro_Ge"):
         logger.error(f"Ошибка при получении цены с сайта: {e}")
         return "Произошла ошибка при получении цены с сайта. Пожалуйста, попробуйте позже."
 
+# Для обеспечения обратной совместимости с сервером,
+# назначаем функцию check_ferry_price как временную обёртку для check_ferry_price_from_site.
+check_ferry_price = check_ferry_price_from_site
+
+# --- Функция загрузки данных из файла price.xlsx (пока не используется при отладке) ---
+def load_price_data():
+    """
+    Загружает данные из Google Sheets (Price.xlsx) для тарифов.
+    Ожидается, что таблица имеет следующие столбцы:
+      A: Type of the vehicle
+      B: Price_Ro_Ge (направление: Romania -> Georgia)
+      C: Price_Ge_Ro (направление: Georgia -> Romania)
+      D: Remark
+      E: Condition1
+      F: Condition2
+      G: Condition3
+    Возвращает словарь вида:
+      {
+         "VehicleType1": {
+             "price_Ro_Ge": "...",
+             "price_Ge_Ro": "...",
+             "remark": "...",
+             "conditions": [ "Condition1 текст", "Condition2 текст", "Condition3 текст" ]
+         },
+         ...
+      }
+    """
+    try:
+        service = get_sheets_service()
+        range_name = "Sheet1!A2:G"
+        result = service.spreadsheets().values().get(
+            spreadsheetId=os.getenv("PRICE_SPREADSHEET_ID", "1N4VpU1rBw3_MPx6GJRDiSQ03iHhS24noTq5-i6V01z8"),
+            range=range_name
+        ).execute()
+        values = result.get("values", [])
+        price_data = {}
+        for row in values:
+            if len(row) < 4:
+                continue
+            vehicle_type = row[0].strip()
+            price_Ro_Ge = row[1].strip() if len(row) > 1 else ""
+            price_Ge_Ro = row[2].strip() if len(row) > 2 else ""
+            remark = row[3].strip() if len(row) > 3 else ""
+            conditions = []
+            if len(row) > 4 and row[4].strip():
+                conditions.append(row[4].strip())
+            if len(row) > 5 and row[5].strip():
+                conditions.append(row[5].strip())
+            if len(row) > 6 and row[6].strip():
+                conditions.append(row[6].strip())
+            price_data[vehicle_type] = {
+                "price_Ro_Ge": price_Ro_Ge,
+                "price_Ge_Ro": price_Ge_Ro,
+                "remark": remark,
+                "conditions": conditions
+            }
+        logger.info(f"Данные из Price.xlsx загружены: {price_data}")
+        return price_data
+    except Exception as e:
+        logger.error(f"Ошибка загрузки данных из Price.xlsx: {e}")
+        raise
+
+def get_sheets_service():
+    try:
+        from google.oauth2.service_account import Credentials
+        from googleapiclient.discovery import build
+        credentials = Credentials.from_service_account_file(
+            os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
+        )
+        return build('sheets', 'v4', credentials=credentials)
+    except Exception as e:
+        logger.error(f"Ошибка инициализации Google Sheets API: {e}")
+        raise
+
 # --- Пример тестирования логики в режиме отладки ---
 if __name__ == "__main__":
     sample_text = "Фура 17 метров, Констанца-Поти, без ADR, без водителя"
@@ -89,7 +163,7 @@ if __name__ == "__main__":
         vehicle_category = determine_vehicle_category(length)
         if vehicle_category:
             print(f"Определена категория: {vehicle_category}")
-            price_info = check_ferry_price_from_site(vehicle_category, direction="Ro_Ge")
+            price_info = check_ferry_price(vehicle_category, direction="Ro_Ge")
             print(price_info)
         else:
             print("Не удалось определить категорию по длине. Пожалуйста, уточните параметры транспортного средства.")
