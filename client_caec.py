@@ -1,4 +1,3 @@
-#client_caec.py
 import os
 import pandas as pd
 from datetime import datetime
@@ -155,10 +154,10 @@ def create_client_file(client_code, client_data):
             addParents=GOOGLE_DRIVE_FOLDER_ID,
             fields="id, parents"
         ).execute()
-        # Устанавливаем ширину столбцов A и B равной 650 пикселей и включаем перенос текста
-        set_column_width(spreadsheet_id, 0, 650)
-        set_column_width(spreadsheet_id, 1, 650)
-        set_text_wrap(spreadsheet_id, 0, 2)
+        # Убираем установку ширины столбцов и настройки переноса текста
+        # set_column_width(spreadsheet_id, 0, 650)
+        # set_column_width(spreadsheet_id, 1, 650)
+        # set_text_wrap(spreadsheet_id, 0, 2)
         return spreadsheet_id
     except Exception as e:
         logger.error(f"Ошибка при создании файла клиента {file_title}: {e}")
@@ -250,10 +249,10 @@ def add_message_to_client_file(client_code, message, is_assistant=False):
                 raise Exception(f"Данные клиента {client_code} не найдены.")
             spreadsheet_id = create_client_file(client_code, client_data)
         
-        # Устанавливаем ширину столбцов A и B равной 650 пикселей и включаем перенос текста
-        set_column_width(spreadsheet_id, 0, 650)
-        set_column_width(spreadsheet_id, 1, 650)
-        set_text_wrap(spreadsheet_id, 0, 2)
+        # Убираем установку ширины столбцов и настройки переноса текста
+        # set_column_width(spreadsheet_id, 0, 650)
+        # set_column_width(spreadsheet_id, 1, 650)
+        # set_text_wrap(spreadsheet_id, 0, 2)
         
         current_time = datetime.now().strftime("%d.%m.%y %H:%M")
         
@@ -337,5 +336,7 @@ def handle_all_clients():
         logger.error(f"Ошибка при обработке всех клиентов: {e}")
         send_notification(f"Ошибка при обработке всех клиентов: {e}")
 
+# Запуск обработки всех клиентов отключён, чтобы обрабатывать только файлы, связанные с текущим посещением чата.
 if __name__ == "__main__":
-    handle_all_clients()
+    # handle_all_clients()  # Отключено для повышения производительности при большом количестве клиентов.
+    pass
