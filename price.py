@@ -1,4 +1,3 @@
-#price.py
 import requests
 from bs4 import BeautifulSoup
 import logging
@@ -24,9 +23,13 @@ def get_ferry_prices():
     }
     """
     try:
-        response = requests.get(TARIFF_URL)
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0 Safari/537.36'
+        }
+        response = requests.get(TARIFF_URL, headers=headers)
         response.raise_for_status()
-        logger.info("Запрос к тарифной странице выполнен успешно.")
+        logger.info("Запрос к тарифной странице выполнен успешно. Код ответа: %s", response.status_code)
+        logger.info("Длина полученного HTML: %d символов", len(response.text))
     except Exception as e:
         logger.error(f"Ошибка при запросе тарифов с сайта: {e}")
         raise Exception(f"Ошибка при запросе тарифов с сайта: {e}")
@@ -34,7 +37,14 @@ def get_ferry_prices():
     soup = BeautifulSoup(response.text, 'html.parser')
     table = soup.find('table')
     if not table:
-        logger.error("Таблица тарифов не найдена на странице.")
+        logger.error("Таблица тарифов не найдена на странице. Попытка поиска альтернативных селекторов.")
+        # Альтернативная попытка: если таблица обёрнута в div с классом 'table-responsive'
+        table_container = soup.find('div', class_='table-responsive')
+        if table_container:
+            table = table_container.find('table')
+    
+    if not table:
+        logger.error("Таблица тарифов так и не найдена на странице.")
         raise Exception("Таблица тарифов не найдена на странице.")
 
     prices = {}
