@@ -49,20 +49,21 @@ def check_ferry_price_from_site(vehicle_description, direction="Ro_Ge"):
       1. Извлекает длину из vehicle_description.
       2. Загружает тарифы с сайта.
       3. Находит категорию, соответствующую извлечённой длине.
-      4. Если категория найдена, возвращает цену из данных сайта.
-      5. Если длина не указана, возвращает наводящий вопрос (если ТС не относится к исключениям).
+      4. Если категория найдена, возвращает тариф, используя данные из website_prices.
+         (Значения цены и remark полностью берутся из данных, полученных с сайта.)
+      5. Если длина не указана, возвращает наводящий вопрос (если транспортное средство не относится к исключениям).
     """
     extracted_length = extract_length(vehicle_description)
     logger.debug(f"Из описания '{vehicle_description}' извлечена длина: {extracted_length}")
     
-    # Ключевые слова для ТС, для которых длина не требуется
+    # Список ключевых слов для транспортных средств, для которых длина не требуется
     exceptions = ["контейнер", "мини", "легков", "мото"]
     if extracted_length is None:
         if not any(keyword in vehicle_description.lower() for keyword in exceptions):
             return ("Пожалуйста, уточните длину вашего транспортного средства "
                     "(например, до 20, до 17, до 14, до 10 или до 8 метров).")
         else:
-            return "Для данного типа транспортного средства длина не требуется для расчета цены."
+            return "Для данного типа транспортного средства длина не требуется для расчета тарифа."
     
     try:
         website_prices = get_ferry_prices()
@@ -80,9 +81,11 @@ def check_ferry_price_from_site(vehicle_description, direction="Ro_Ge"):
     else:
         website_price = website_prices[category].get("price_Ge_Ro", "")
     
+    remark = website_prices[category].get("remark", "")
+    
     response_message = f"Цена перевозки для категории '{category}' ({direction.replace('_', ' ')}) составляет {website_price}."
-    if website_prices[category].get("remark"):
-        response_message += f" Примечание: {website_prices[category]['remark']}"
+    if remark:
+        response_message += f" Примечание: {remark}"
     logger.debug(f"Итоговый ответ: {response_message}")
     return response_message
 
@@ -94,6 +97,9 @@ def load_price_data():
     return {}
 
 if __name__ == "__main__":
-    sample_text = "Фура 17 метров, Констанца-Поти, без ADR, без водителя"
-    result = check_ferry_price(sample_text, direction="Ro_Ge")
-    logger.info(f"Результат теста: {result}")
+    sample_text = "Фура 17 метров, Констанца-Поти, без ADR, без груза"
+    result_ro_ge = check_ferry_price(sample_text, direction="Ro_Ge")
+    logger.info(f"Результат теста (Ro_Ge): {result_ro_ge}")
+    
+    result_ge_ro = check_ferry_price(sample_text, direction="Ge_Ro")
+    logger.info(f"Результат теста (Ge_Ro): {result_ge_ro}")
