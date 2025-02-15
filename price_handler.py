@@ -1,6 +1,6 @@
-# price_handler.py
 import os
 import logging
+import re
 from price import get_ferry_prices
 from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
@@ -43,7 +43,6 @@ def load_price_data():
     """
     try:
         service = get_sheets_service()
-        # Измените диапазон, если количество столбцов больше
         range_name = "Sheet1!A2:G"
         result = service.spreadsheets().values().get(
             spreadsheetId=PRICE_SPREADSHEET_ID,
@@ -107,11 +106,7 @@ def check_ferry_price(vehicle_type, direction="Ro_Ge"):
       4. Сравниваем цены из сайта и из Price.xlsx:
          - Если цены совпадают, формируем ответ с подтверждённой ценой и добавляем Remark.
            Если для данного типа транспортного средства в столбцах Condition* (conditions) указаны наводящие вопросы, 
-           к ответу добавляется приглашение для уточнения, например:
-           «Для более точного расчёта, пожалуйста, ответьте на следующие вопросы:
-            {Condition1}
-            {Condition2}
-            ...»
+           к ответу добавляется приглашение для уточнения.
          - Если цены различаются, возвращаем сообщение, что цена требует уточнения, и отправляем уведомление менеджеру.
     """
     try:
@@ -150,9 +145,57 @@ def check_ferry_price(vehicle_type, direction="Ro_Ge"):
         logger.error(f"Ошибка при сравнении цен: {e}")
         return "Произошла ошибка при получении цены. Пожалуйста, попробуйте позже."
 
+# --- Новая логика для определения категории транспортного средства по длине ---
+
+def extract_length(text):
+    """
+    Извлекает числовое значение длины (в метрах) из текста.
+    Возвращает число или None, если длина не найдена.
+    """
+    match = re.search(r'(\d+)\s*(м|метров)', text.lower())
+    if match:
+        return int(match.group(1))
+    return None
+
+def determine_vehicle_category(length):
+    """
+    Определяет категорию транспортного средства на основе длины.
+    Допустимые диапазоны:
+      - Если длина >17 и <=20, возвращается "Road Train (up to 20 M)"
+      - Если длина <=17 и >14, возвращается "Standard truck with trailer (up to 17M)"
+      - Если длина <=14 и >10, возвращается "Trailer (up to 14 m)"
+      - Если длина <=10 и >8, возвращается "Truck (up to 10M)"
+      - Если длина <=8, возвращается "Mini truck (up to 8M)"
+    Если длина не попадает ни в один диапазон, возвращается None.
+    """
+    if length is None:
+        return None
+    if length > 17 and length <= 20:
+        return "Road Train (up to 20 M)"
+    elif length <= 17 and length > 14:
+        return "Standard truck with trailer (up to 17M)"
+    elif length <= 14 and length > 10:
+        return "Trailer (up to 14 m)"
+    elif length <= 10 and length > 8:
+        return "Truck (up to 10M)"
+    elif length <= 8:
+        return "Mini truck (up to 8M)"
+    return None
+
+# --- Конец новой логики ---
+    
 if __name__ == "__main__":
-    # Пример вызова функции для тестирования
-    vehicle = "Truck"  # Пример: заменить на реальный тип транспортного средства, как в таблице Price.xlsx
-    direction = "Ro_Ge"  # или "Ge_Ro"
-    message = check_ferry_price(vehicle, direction)
-    print(message)
+    # Пример вызова функций для тестирования логики определения тарифа
+    sample_text = "Фура 17 метров, Констанца-Поти, без ADR, без водителя"
+    length = extract_length(sample_text)
+    if length is None:
+        print("Пожалуйста, уточните длину вашего транспортного средства (например, до 20, до 17, до 14, до 10 или до 8 метров).")
+    else:
+        vehicle_category = determine_vehicle_category(length)
+        if vehicle_category:
+            print(f"Определена категория: {vehicle_category}")
+            # Здесь можно вызвать check_ferry_price с определенной категорией:
+            price_info = check_ferry_price(vehicle_category, direction="Ro_Ge")
+            print(price_info)
+        else:
+            print("Не удалось определить категорию по длине. Пожалуйста, уточните параметры транспортного средства.")
