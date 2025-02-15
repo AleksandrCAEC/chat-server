@@ -67,78 +67,7 @@ def send_telegram_notification(message):
         logger.error(f"❌ Ошибка при отправке Telegram уведомления: {e}")
 
 ###############################################
-# ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ДЛЯ ОБРАБОТКИ ЗАПРОСОВ О ЦЕНЕ
-###############################################
-PRICE_KEYWORDS = ["цена", "прайс", "сколько стоит", "во сколько обойдется"]
-
-def is_price_query(text):
-    return any(keyword in text.lower() for keyword in PRICE_KEYWORDS)
-
-def get_vehicle_type(text):
-    known_types = {"truck": "Truck", "грузовик": "Truck", "fura": "Fura", "фура": "Fura"}
-    for key, standard in known_types.items():
-        if key in text.lower():
-            return standard
-    return None
-
-def get_price_response(vehicle_type, direction="Ro_Ge"):
-    try:
-        # Получаем окончательный ответ через check_ferry_price.
-        # Если guiding questions имеются, check_ferry_price должна вернуть только первый вопрос.
-        response = check_ferry_price(vehicle_type, direction)
-        # Если ответ равен "PRICE_QUERY" (или содержит его как маркер), то это означает, что цена не окончательная.
-        if response.strip().upper() == "PRICE_QUERY":
-            return "Информация о цене не доступна. Пожалуйста, свяжитесь с менеджером."
-        return response
-    except Exception as e:
-        logger.error(f"Ошибка при получении цены для {vehicle_type}: {e}")
-        return "Произошла ошибка при получении актуальной цены. Пожалуйста, попробуйте позже."
-
-###############################################
-# ФУНКЦИЯ ПОДГОТОВКИ КОНТЕКСТА (ПАМЯТЬ АССИСТЕНТА)
-###############################################
-def prepare_chat_context(client_code):
-    messages = []
-    bible_df = load_bible_data()
-    if bible_df is None:
-        raise Exception("Bible.xlsx не найден или недоступен.")
-    logger.info(f"Bible.xlsx содержит {len(bible_df)} записей.")
-    bible_context = "Информация о компании (FAQ):\n"
-    for index, row in bible_df.iterrows():
-        faq = row.get("FAQ", "")
-        answer = row.get("Answers", "")
-        verification = str(row.get("Verification", "")).strip().upper()
-        if faq and answer and verification != "CHECK":
-            bible_context += f"Вопрос: {faq}\nОтвет: {answer}\n\n"
-    system_message = {
-        "role": "system",
-        "content": f"Вы – умный ассистент компании CAEC. Используйте следующую информацию для ответов:\n{bible_context}"
-    }
-    messages.append(system_message)
-    
-    # Чтение истории переписки из уникального файла клиента (начиная со 3-й строки)
-    spreadsheet_id = find_client_file_id(client_code)
-    if spreadsheet_id:
-        sheets_service = get_sheets_service()
-        result = sheets_service.spreadsheets().values().get(
-            spreadsheetId=spreadsheet_id,
-            range="Sheet1!A:B"
-        ).execute()
-        values = result.get("values", [])
-        if len(values) >= 2:
-            conversation_rows = values[2:]
-            logger.info(f"Найдено {len(conversation_rows)} строк переписки для клиента {client_code}.")
-            for row in conversation_rows:
-                if len(row) >= 1 and row[0].strip():
-                    messages.append({"role": "user", "content": row[0].strip()})
-                if len(row) >= 2 and row[1].strip():
-                    messages.append({"role": "assistant", "content": row[1].strip()})
-    else:
-        logger.info(f"Файл клиента с кодом {client_code} не найден.")
-    return messages
-
-###############################################
-# ЭНДПОИНТЫ РЕГИСТРАЦИИ, ВЕРИФИКАЦИИ И ЧАТА
+# ЭНДПОИНТ /register-client
 ###############################################
 @app.route('/register-client', methods=['POST'])
 def register_client():
@@ -155,6 +84,9 @@ def register_client():
         logger.error(f"❌ Ошибка в /register-client: {e}")
         return jsonify({'error': str(e)}), 400
 
+###############################################
+# ЭНДПОИНТ /verify-code
+###############################################
 @app.route('/verify-code', methods=['POST'])
 def verify_code():
     try:
@@ -170,6 +102,32 @@ def verify_code():
         logger.error(f"❌ Ошибка в /verify-code: {e}")
         return jsonify({'error': str(e)}), 400
 
+###############################################
+# ЭНДПОИНТ /get-price - для тестирования тарифа через Postman
+###############################################
+@app.route('/get-price', methods=['POST'])
+def get_price():
+    """
+    Эндпоинт ожидает POST-запрос с JSON-телом:
+    {
+       "vehicle_description": "Фура 17 метров, Констанца-Поти, без ADR, без водителя",
+       "direction": "Ro_Ge" // этот параметр не обязателен, по умолчанию используется "Ro_Ge"
+    }
+    """
+    data = request.get_json()
+    if not data or "vehicle_description" not in data:
+        return jsonify({"error": "Не передано описание транспортного средства"}), 400
+
+    vehicle_description = data["vehicle_description"]
+    direction = data.get("direction", "Ro_Ge")
+    
+    # Вызов функции для получения тарифа (логика из price_handler.py)
+    result = check_ferry_price(vehicle_description, direction=direction)
+    return jsonify({"price": result}), 200
+
+###############################################
+# ЭНДПОИНТ /chat
+###############################################
 @app.route('/chat', methods=['POST'])
 def chat():
     try:
@@ -182,47 +140,22 @@ def chat():
             return jsonify({'error': 'Сообщение и код клиента не могут быть пустыми'}), 400
 
         update_last_visit(client_code)
-        # Обработка файлов ограничена только текущим клиентом – вызов update_activity_status() удалён
         
         # Если клиент уже находится в режиме уточнения (pending guiding questions)
         if client_code in pending_guiding:
             pending = pending_guiding[client_code]
-            # Сохраняем ответ клиента на текущий guiding question
             pending.setdefault("answers", []).append(user_message)
             pending["current_index"] += 1
             if pending["current_index"] < len(pending["conditions"]):
-                # Если есть еще guiding questions, задаем следующую
                 response_message = pending["conditions"][pending["current_index"]]
             else:
-                # Все guiding вопросы отвечены; можно вычислить итоговую цену
-                final_price = get_price_response(pending["vehicle_type"], direction="Ro_Ge")
+                final_price = check_ferry_price(pending["vehicle_type"], direction="Ro_Ge")
                 response_message = f"Спасибо, ваши ответы приняты. {final_price}"
-                # Удаляем запись о guiding состоянии
                 del pending_guiding[client_code]
-        # Если запрос содержит ключевые слова о цене и клиент не в guiding режиме
-        elif is_price_query(user_message):
-            vehicle_type = get_vehicle_type(user_message)
-            if not vehicle_type:
-                response_message = ("Для определения цены, пожалуйста, уточните тип транспортного средства "
-                                    "(например, грузовик или фура).")
-            else:
-                # Загружаем данные из Price.xlsx через load_price_data() из price_handler
-                price_data = load_price_data()
-                if vehicle_type not in price_data:
-                    response_message = f"Извините, информация о тарифах для '{vehicle_type}' отсутствует в нашей базе."
-                else:
-                    conditions = price_data[vehicle_type].get("conditions", [])
-                    if conditions:
-                        # Если guiding questions имеются, сохраняем состояние и задаем первый вопрос
-                        pending_guiding[client_code] = {
-                            "vehicle_type": vehicle_type,
-                            "conditions": conditions,
-                            "current_index": 0,
-                            "answers": []
-                        }
-                        response_message = conditions[0]
-                    else:
-                        response_message = get_price_response(vehicle_type, direction="Ro_Ge")
+        elif "цена" in user_message.lower() or "прайс" in user_message.lower():
+            # Здесь используется вызов, если клиент спрашивает о цене
+            # Обратите внимание, что эта ветка может требовать доработки в будущем
+            response_message = check_ferry_price(vehicle_description=user_message, direction="Ro_Ge")
         else:
             # Стандартная обработка: формируем контекст из Bible.xlsx и истории переписки, затем вызываем OpenAI
             messages = prepare_chat_context(client_code)
@@ -243,13 +176,16 @@ def chat():
         logger.error(f"❌ Ошибка в /chat: {e}")
         return jsonify({'error': str(e)}), 500
 
+###############################################
+# ЭНДПОИНТ домашней страницы (/)
+###############################################
 @app.route('/', methods=['GET'])
 def home():
     return jsonify({"status": "Server is running!"}), 200
 
-##############################################
+###############################################
 # Интеграция Telegram Bot для команды /bible
-##############################################
+###############################################
 from telegram.ext import ConversationHandler
 
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
@@ -321,9 +257,9 @@ def telegram_webhook():
         logger.error(f"Ошибка обработки Telegram update: {e}")
         return jsonify({'error': str(e)}), 500
 
-##############################################
+###############################################
 # Основной блок запуска
-##############################################
+###############################################
 global_loop = asyncio.new_event_loop()
 asyncio.set_event_loop(global_loop)
 if __name__ == '__main__':
