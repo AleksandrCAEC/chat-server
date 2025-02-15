@@ -10,7 +10,7 @@ from datetime import datetime
 from clientdata import register_or_update_client, verify_client_code, update_last_visit
 from client_caec import add_message_to_client_file, find_client_file_id, get_sheets_service, CLIENT_FILES_DIR
 from bible import load_bible_data, save_bible_pair
-from price_handler import check_ferry_price, load_price_data  # Функция check_ferry_price теперь отвечает за сбор данных с сайта
+from price_handler import check_ferry_price, load_price_data  # Функция check_ferry_price отвечает за сбор данных с сайта
 from flask_cors import CORS
 import openpyxl
 
@@ -31,7 +31,7 @@ os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = "/etc/secrets/service_account_jso
 # Инициализация OpenAI
 openai.api_key = os.getenv("OPENAI_API_KEY")
 
-# Инициализация Flask‑приложения и CORS
+# Инициализация Flask-приложения и CORS
 app = Flask(__name__)
 CORS(app)
 
@@ -103,15 +103,15 @@ def verify_code():
         return jsonify({'error': str(e)}), 400
 
 ###############################################
-# ЭНДПОИНТ /get-price - для тестирования тарифа через Postman
+# ЭНДПОИНТ /get-price - для проверки тарифа через Postman
 ###############################################
 @app.route('/get-price', methods=['POST'])
 def get_price_endpoint():
     """
-    Эндпоинт ожидает POST‑запрос с JSON‑телом:
+    Эндпоинт ожидает POST-запрос с JSON-телом:
     {
        "vehicle_description": "Фура 17 метров, Констанца-Поти, без ADR, без водителя",
-       "direction": "Ro_Ge"  // не обязательный параметр; по умолчанию используется "Ro_Ge"
+       "direction": "Ro_Ge"  // этот параметр не обязателен, по умолчанию используется "Ro_Ge"
     }
     """
     data = request.get_json()
