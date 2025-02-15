@@ -1,4 +1,3 @@
-#server.py
 import os
 import re
 import logging
@@ -8,7 +7,7 @@ from flask import Flask, request, jsonify
 import openai
 import requests
 from datetime import datetime
-from clientdata import register_or_update_client, verify_client_code, update_last_visit, update_activity_status
+from clientdata import register_or_update_client, verify_client_code, update_last_visit
 from client_caec import add_message_to_client_file, find_client_file_id, get_sheets_service, CLIENT_FILES_DIR
 from bible import load_bible_data, save_bible_pair
 from price_handler import check_ferry_price, load_price_data  # load_price_data для получения данных из Price.xlsx
@@ -183,7 +182,7 @@ def chat():
             return jsonify({'error': 'Сообщение и код клиента не могут быть пустыми'}), 400
 
         update_last_visit(client_code)
-        update_activity_status()
+        # Обработка файлов ограничена только текущим клиентом – вызов update_activity_status() удалён
         
         # Если клиент уже находится в режиме уточнения (pending guiding questions)
         if client_code in pending_guiding:
