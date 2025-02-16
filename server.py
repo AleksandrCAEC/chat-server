@@ -90,7 +90,7 @@ def prepare_chat_context(client_code):
         system_instructions = "Инструкция для ассистента (не показывать клиенту): " + " ".join(internal_rules)
         messages.append({"role": "system", "content": system_instructions})
     
-    # Общая информация из Bible.xlsx (только FAQ и Answers, где FAQ != "-" и Verification != "RULE")
+    # Общая информация из Bible.xlsx (только строки, где FAQ != "-" и Verification != "RULE")
     for index, row in bible_df.iterrows():
         faq = row.get("FAQ", "").strip()
         answer = row.get("Answers", "").strip()
@@ -245,8 +245,11 @@ def chat():
                 add_message_to_client_file(client_code, response_message, is_assistant=True)
                 return jsonify({'reply': response_message}), 200
             
-            # Если сообщение содержит только направление (короткое сообщение), используем последнее полное описание ТС.
-            if len(user_message) < 20:
+            # Если сообщение кажется уточняющим (содержит только направление), используем последнее полное описание из истории.
+            direction_keywords = {"поти", "констанца", "констанцы", "грузия", "груз"}
+            words = set(re.findall(r'\w+', lower_msg))
+            # Если все слова принадлежат к группе направлений или служебным словам, считаем это уточнением.
+            if words.issubset(direction_keywords.union({"из", "а", "в", "для", "мой", "своего", "с"})):
                 last_description = get_last_vehicle_description(client_code)
                 if last_description:
                     logger.debug(f"Используем последнее полное описание: '{last_description}'")
