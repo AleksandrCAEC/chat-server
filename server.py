@@ -47,7 +47,6 @@ logger.info("Текущие переменные окружения:")
 pprint.pprint(dict(os.environ))
 
 # Глобальный словарь для хранения состояния уточняющих вопросов (guiding questions)
-# Дополнительные уточняющие вопросы отключены – единственное возможное уточнение касается направления.
 pending_guiding = {}
 
 ###############################################
@@ -78,7 +77,7 @@ def prepare_chat_context(client_code):
         raise Exception("Bible.xlsx не найден или недоступен.")
     logger.info(f"Bible.xlsx содержит {len(bible_df)} записей.")
     
-    # Внутренние правила (FAQ = "-" и Verification = "RULE") используются только для внутренней логики.
+    # Загружаем внутренние правила (FAQ = "-" и Verification = "RULE") для внутренней логики.
     internal_rules = []
     for index, row in bible_df.iterrows():
         faq = row.get("FAQ", "").strip()
@@ -98,7 +97,7 @@ def prepare_chat_context(client_code):
         if faq and faq != "-" and answer and verification != "RULE":
             messages.append({"role": "system", "content": f"Вопрос: {faq}\nОтвет: {answer}"})
     
-    # История переписки из уникального файла клиента.
+    # Добавляем историю переписки из уникального файла клиента.
     spreadsheet_id = find_client_file_id(client_code)
     if spreadsheet_id:
         sheets_service = get_sheets_service()
@@ -245,14 +244,12 @@ def chat():
                 add_message_to_client_file(client_code, response_message, is_assistant=True)
                 return jsonify({'reply': response_message}), 200
             
-            # Если сообщение выглядит как уточнение (короткое сообщение), используем последнее полное описание.
+            # Если сообщение выглядит как уточнение (короткое сообщение) – используем последнее полное описание.
             if len(user_message) < 20:
                 last_description = get_last_vehicle_description(client_code)
                 if last_description:
-                    # Очищаем последнее описание от любых упоминаний направлений.
-                    cleaned_description = re.sub(r'\b(?:из|в)\s+(?:поти|констанца|констанцы|грузия)\b', '', last_description, flags=re.IGNORECASE).strip()
-                    logger.debug(f"Используем последнее полное описание (очищенное): '{cleaned_description}'")
-                    response_message = check_ferry_price(vehicle_description=cleaned_description, direction=direction)
+                    logger.debug(f"Используем последнее полное описание: '{last_description}'")
+                    response_message = check_ferry_price(vehicle_description=last_description, direction=direction)
                 else:
                     response_message = check_ferry_price(vehicle_description=user_message, direction=direction)
             else:
