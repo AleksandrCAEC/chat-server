@@ -3,15 +3,15 @@ import re
 import logging
 import asyncio
 import pprint
+import threading
 from flask import Flask, request, jsonify
 import openai
 import requests
 from datetime import datetime
-# Импорт необходимых модулей для работы с базами данных
 from clientdata import register_or_update_client, verify_client_code, update_last_visit
 from client_caec import add_message_to_client_file, find_client_file_id, get_sheets_service, CLIENT_FILES_DIR
 from bible import load_bible_data, save_bible_pair
-from price_handler import check_ferry_price, load_price_data  # Функция check_ferry_price для получения тарифов с сайта
+from price_handler import check_ferry_price, load_price_data  # Функция check_ferry_price отвечает за сбор данных с сайта
 from flask_cors import CORS
 import openpyxl
 
@@ -32,7 +32,7 @@ os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = "/etc/secrets/service_account_jso
 # Инициализация OpenAI
 openai.api_key = os.getenv("OPENAI_API_KEY")
 
-# Инициализация Flask-приложения и CORS
+# Инициализация Flask‑приложения и CORS
 app = Flask(__name__)
 CORS(app)
 
@@ -182,13 +182,11 @@ def chat():
             logger.error("Ошибка: Сообщение и код клиента не могут быть пустыми")
             return jsonify({'error': 'Сообщение и код клиента не могут быть пустыми'}), 400
 
-        # Перед обработкой чата проверяем наличие файла Bible.xlsx и файла клиента.
-        bible_data = None
+        # Проверка наличия ключевых файлов: Bible.xlsx и файла клиента
         try:
             bible_data = load_bible_data()
         except Exception as e:
             logger.error(f"Ошибка загрузки Bible.xlsx: {e}")
-        if bible_data is None:
             send_telegram_notification("Ошибка базы данных: файл Bible.xlsx не найден. Пожалуйста, подключите менеджера.")
             return jsonify({'error': 'Ошибка базы данных: Bible.xlsx не найден.'}), 500
 
@@ -210,7 +208,6 @@ def chat():
                 response_message = f"Спасибо, ваши ответы приняты. {final_price}"
                 del pending_guiding[client_code]
         elif "цена" in user_message.lower() or "прайс" in user_message.lower():
-            # Определение направления на основании текста, если указано.
             lower_msg = user_message.lower()
             if "из поти" in lower_msg:
                 direction = "Ge_Ro"
@@ -322,16 +319,25 @@ def telegram_webhook():
 ###############################################
 # Основной блок запуска
 ###############################################
-global_loop = asyncio.new_event_loop()
-asyncio.set_event_loop(global_loop)
-if __name__ == '__main__':
-    port = int(os.environ.get('PORT', 8080))
+def setup_webhook():
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
     WEBHOOK_URL = os.getenv("WEBHOOK_URL")
     if not WEBHOOK_URL:
         logger.error("Переменная окружения WEBHOOK_URL не задана!")
         exit(1)
-    global_loop.run_until_complete(application.initialize())
-    global_loop.run_until_complete(bot.set_webhook(WEBHOOK_URL))
-    logger.info(f"Webhook установлен на {WEBHOOK_URL}")
+    try:
+        loop.run_until_complete(application.initialize())
+        loop.run_until_complete(bot.set_webhook(WEBHOOK_URL))
+        logger.info(f"Webhook установлен на {WEBHOOK_URL}")
+    except Exception as e:
+        logger.error(f"Ошибка установки webhook: {e}")
+    finally:
+        loop.close()
+
+if __name__ == '__main__':
+    port = int(os.environ.get('PORT', 8080))
+    # Запускаем настройку webhook в отдельном потоке, чтобы не блокировать запуск Flask-сервера
+    threading.Thread(target=setup_webhook).start()
     logger.info(f"✅ Сервер запущен на порту {port}")
     app.run(host='0.0.0.0', port=port, debug=False, threaded=True)
