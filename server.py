@@ -47,7 +47,7 @@ logger.info("Текущие переменные окружения:")
 pprint.pprint(dict(os.environ))
 
 # Глобальный словарь для хранения состояния уточняющих вопросов (guiding questions)
-# Дополнительные уточняющие вопросы отключены – единственный возможный уточняющий вопрос касается направления.
+# Дополнительные уточняющие вопросы отключены – единственное возможное уточнение касается направления.
 pending_guiding = {}
 
 ###############################################
@@ -245,12 +245,12 @@ def chat():
                 add_message_to_client_file(client_code, response_message, is_assistant=True)
                 return jsonify({'reply': response_message}), 200
             
-            # Если сообщение выглядит как уточнение (короткое сообщение), используем последнее полное описание
+            # Если сообщение выглядит как уточнение (короткое сообщение), используем последнее полное описание.
             if len(user_message) < 20:
                 last_description = get_last_vehicle_description(client_code)
                 if last_description:
-                    # Удаляем из полного описания любые упоминания направлений, используя улучшенное регулярное выражение.
-                    cleaned_description = re.sub(r'\bиз\s+(?:поти|констанца|констанцы|грузия)\b(?:\s+в\s+(?:поти|констанца|констанцы|грузия))?', '', last_description, flags=re.IGNORECASE).strip()
+                    # Очищаем последнее описание от любых упоминаний направлений.
+                    cleaned_description = re.sub(r'\b(?:из|в)\s+(?:поти|констанца|констанцы|грузия)\b', '', last_description, flags=re.IGNORECASE).strip()
                     logger.debug(f"Используем последнее полное описание (очищенное): '{cleaned_description}'")
                     response_message = check_ferry_price(vehicle_description=cleaned_description, direction=direction)
                 else:
