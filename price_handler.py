@@ -8,8 +8,8 @@ logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
 
 # Словарь синонимов для типов транспортных средств.
-# Ключи — варианты, которые может ввести клиент (в нижнем регистре),
-# значения — официальный термин, используемый в тарифных данных.
+# Ключи – варианты, которые может ввести клиент (в нижнем регистре),
+# значения – официальный термин, используемый в тарифных данных.
 TYPE_SYNONYMS = {
     "минивэн": "Minivan",
     "minivan": "Minivan",
@@ -60,14 +60,14 @@ def check_ferry_price_from_site(vehicle_description, direction="Ro_Ge"):
     Алгоритм:
       1. Загружает тарифы с сайта.
       2. Сначала пытается определить тарифную категорию по названию транспортного средства:
-         если в описании встречается синоним из TYPE_SYNONYMS, преобразует его в официальный термин и,
-         если этот термин присутствует в тарифных данных, используется для определения тарифа.
-      3. Если по названию тариф не определён, пытается извлечь длину из vehicle_description
-         и определить категорию через find_category_by_length.
+         если в описании встречается синоним из TYPE_SYNONYMS, он преобразуется в официальный термин,
+         который затем ищется в тарифных данных.
+      3. Если по названию тариф не найден, пытается извлечь длину из vehicle_description и определяет категорию
+         через find_category_by_length.
       4. Если ни название, ни длина не позволяют однозначно определить категорию, возвращается запрос на уточнение.
       5. Если тарифная категория определена, извлекаются активное значение цены (и, если есть, зачёркнутая цена)
-         и примечание для указанного направления – данные поднимаются динамически.
-      6. Формируется итоговый ответ.
+         и примечание для указанного направления – данные полностью поднимаются из внешнего источника.
+      6. Формируется и возвращается итоговый ответ.
     """
     try:
         website_prices = get_ferry_prices()
@@ -79,7 +79,7 @@ def check_ferry_price_from_site(vehicle_description, direction="Ro_Ge"):
     vehicle_lower = vehicle_description.lower()
     category = None
 
-    # 1. Попытка определить тариф по синониму (названию ТС)
+    # 1. Определение тарифной категории по синониму.
     for synonym, official in TYPE_SYNONYMS.items():
         if synonym in vehicle_lower:
             if official in website_prices:
@@ -87,7 +87,7 @@ def check_ferry_price_from_site(vehicle_description, direction="Ro_Ge"):
                 logger.debug(f"Синоним '{synonym}' определил тарифную категорию: {category}")
                 break
 
-    # 2. Если по синониму не удалось определить, пробуем найти совпадение по ключам тарифных данных
+    # 2. Если по синониму не удалось определить, пробуем найти совпадение по ключам тарифных данных.
     if category is None:
         for key in website_prices:
             if key.lower() in vehicle_lower:
@@ -95,7 +95,7 @@ def check_ferry_price_from_site(vehicle_description, direction="Ro_Ge"):
                 logger.debug(f"Найденная категория по совпадению названия: {category}")
                 break
 
-    # 3. Если и по названию не удалось определить, пробуем извлечь длину
+    # 3. Если и по названию не удалось определить, пробуем извлечь длину.
     if category is None:
         extracted_length = extract_length(vehicle_description)
         logger.debug(f"Из описания '{vehicle_description}' извлечена длина: {extracted_length}")
@@ -108,7 +108,7 @@ def check_ferry_price_from_site(vehicle_description, direction="Ro_Ge"):
     if category is None:
         return "Не удалось определить тарифную категорию по вашему запросу. Пожалуйста, уточните информацию о транспортном средстве."
 
-    # 4. Извлекаем цены для выбранной категории в зависимости от направления
+    # 4. Извлекаем цены для выбранной категории в зависимости от направления.
     if direction == "Ro_Ge":
         active_price = website_prices[category].get("price_Ro_Ge", "")
         old_price = website_prices[category].get("old_price_Ro_Ge", "")
@@ -121,7 +121,7 @@ def check_ferry_price_from_site(vehicle_description, direction="Ro_Ge"):
     
     remark = website_prices[category].get("remark", "")
     
-    # 5. Формирование итогового ответа (без лишних обтекаемых фраз)
+    # 5. Формируем итоговый ответ.
     if old_price:
         response_message = (f"Цена перевозки для категории '{category}' ({direction.replace('_', ' ')}) составляет "
                             f"{active_price} (предложение), предыдущая цена: {old_price} (зачёрнуто).")
