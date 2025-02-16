@@ -46,8 +46,8 @@ logger = logging.getLogger(__name__)
 logger.info("Текущие переменные окружения:")
 pprint.pprint(dict(os.environ))
 
-# Глобальный словарь для хранения состояния последовательного уточнения (guiding questions)
-# Guiding questions отключены – никаких дополнительных уточняющих вопросов не задаётся, кроме уточнения направления.
+# Глобальный словарь для хранения состояния уточняющих вопросов (guiding questions)
+# Сейчас уточняющие вопросы отключены – единственный вопрос, который может быть задан, касается направления.
 pending_guiding = {}
 
 ###############################################
@@ -91,7 +91,7 @@ def prepare_chat_context(client_code):
         system_instructions = "Инструкция для ассистента (не показывать клиенту): " + " ".join(internal_rules)
         messages.append({"role": "system", "content": system_instructions})
     
-    # Добавляем общую информацию из Bible.xlsx (только FAQ и Answers, где FAQ != "-" и Verification != "RULE")
+    # Добавляем общую информацию из Bible.xlsx (FAQ и Answers, где FAQ != "-" и Verification != "RULE")
     for index, row in bible_df.iterrows():
         faq = row.get("FAQ", "").strip()
         answer = row.get("Answers", "").strip()
@@ -240,14 +240,23 @@ def chat():
             elif "грузия" in lower_msg or "из груз" in lower_msg:
                 direction = "Ge_Ro"
             else:
-                # Если направление не указано, задаем уточняющий вопрос – это единственный доп. вопрос.
+                # Если направление не указано, задаем единственный уточняющий вопрос.
                 response_message = "Пожалуйста, уточните направление отправки (например, Поти-Констанца или Констанца-Поти)."
                 add_message_to_client_file(client_code, user_message, is_assistant=False)
                 add_message_to_client_file(client_code, response_message, is_assistant=True)
                 return jsonify({'reply': response_message}), 200
             
-            # Рассчитываем цену по переданным данным.
-            response_message = check_ferry_price(vehicle_description=user_message, direction=direction)
+            # Если входящее сообщение слишком короткое, объединяем его с предыдущим описанием ТС.
+            if len(user_message) < 20:
+                last_description = get_last_vehicle_description(client_code)
+                if last_description:
+                    combined_description = last_description + " " + user_message
+                    logger.debug(f"Используем комбинированное описание: '{combined_description}'")
+                    response_message = check_ferry_price(vehicle_description=combined_description, direction=direction)
+                else:
+                    response_message = check_ferry_price(vehicle_description=user_message, direction=direction)
+            else:
+                response_message = check_ferry_price(vehicle_description=user_message, direction=direction)
         else:
             messages = prepare_chat_context(client_code)
             messages.append({"role": "user", "content": user_message})
