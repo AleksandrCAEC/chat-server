@@ -77,7 +77,7 @@ def prepare_chat_context(client_code):
         raise Exception("Bible.xlsx не найден или недоступен.")
     logger.info(f"Bible.xlsx содержит {len(bible_df)} записей.")
     
-    # Загрузка внутренних правил (не показываются клиенту)
+    # Загрузка внутренних правил (FAQ = "-" и Verification = "RULE") – для внутренней логики.
     internal_rules = []
     for index, row in bible_df.iterrows():
         faq = row.get("FAQ", "").strip()
@@ -89,7 +89,7 @@ def prepare_chat_context(client_code):
         system_instructions = "Инструкция для ассистента (не показывать клиенту): " + " ".join(internal_rules)
         messages.append({"role": "system", "content": system_instructions})
     
-    # Добавление общей информации из Bible.xlsx
+    # Добавление общей информации из Bible.xlsx (без внутренних инструкций)
     for index, row in bible_df.iterrows():
         faq = row.get("FAQ", "").strip()
         answer = row.get("Answers", "").strip()
@@ -97,7 +97,7 @@ def prepare_chat_context(client_code):
         if faq and faq != "-" and answer and verification != "RULE":
             messages.append({"role": "system", "content": f"Вопрос: {faq}\nОтвет: {answer}"})
     
-    # Добавление истории переписки
+    # Добавление истории переписки из файла клиента
     spreadsheet_id = find_client_file_id(client_code)
     if spreadsheet_id:
         sheets_service = get_sheets_service()
@@ -135,17 +135,7 @@ def get_last_vehicle_description(client_code):
     return None
 
 ###############################################
-# Вспомогательная функция для извлечения портов
-###############################################
-def extract_ports(text):
-    # Ищем порт отправления после "из" и порт назначения после "в"
-    sending = re.search(r'\bиз\s+(\w+)', text, flags=re.IGNORECASE)
-    destination = re.search(r'\bв\s+(\w+)', text, flags=re.IGNORECASE)
-    return (sending.group(1).lower() if sending else None,
-            destination.group(1).lower() if destination else None)
-
-###############################################
-# ЭНДПОИНТ /register-client
+# Эндпоинт /register-client
 ###############################################
 @app.route('/register-client', methods=['POST'])
 def register_client():
@@ -163,7 +153,7 @@ def register_client():
         return jsonify({'error': str(e)}), 400
 
 ###############################################
-# ЭНДПОИНТ /verify-code
+# Эндпоинт /verify-code
 ###############################################
 @app.route('/verify-code', methods=['POST'])
 def verify_code():
@@ -181,7 +171,7 @@ def verify_code():
         return jsonify({'error': str(e)}), 400
 
 ###############################################
-# ЭНДПОИНТ /get-price - для проверки тарифа через Postman
+# Эндпоинт /get-price - для проверки тарифа через Postman
 ###############################################
 @app.route('/get-price', methods=['POST'])
 def get_price_endpoint():
@@ -196,7 +186,7 @@ def get_price_endpoint():
     return jsonify({"price": result}), 200
 
 ###############################################
-# ЭНДПОИНТ /chat
+# Эндпоинт /chat
 ###############################################
 @app.route('/chat', methods=['POST'])
 def chat():
@@ -209,7 +199,6 @@ def chat():
             logger.error("Ошибка: Сообщение и код клиента не могут быть пустыми")
             return jsonify({'error': 'Сообщение и код клиента не могут быть пустыми'}), 400
 
-        # Проверяем наличие ключевых файлов: Bible.xlsx и файла клиента.
         try:
             bible_data = load_bible_data()
         except Exception as e:
@@ -227,55 +216,39 @@ def chat():
         # Обработка запроса о тарифе.
         if any(kw in user_message.lower() for kw in ["цена", "прайс", "минивэн", "minivan", "truck", "траk"]):
             lower_msg = user_message.lower()
-            # Попытка извлечения портов из сообщения
-            sending_port, destination_port = extract_ports(user_message)
-            # Если оба порта не указаны, задаем уточняющий вопрос.
-            if not sending_port or not destination_port:
-                # Если сообщение слишком короткое (например, только "А из Констанца?"), используем последнее полное описание
-                if len(user_message) < 20:
-                    last_description = get_last_vehicle_description(client_code)
-                    if last_description:
-                        # Очищаем описание от упоминаний портов
-                        cleaned_description = re.sub(
-                            r'\b(?:из|в)\s+\w+\b', '', last_description, flags=re.IGNORECASE
-                        ).strip()
-                        logger.debug(f"Используем последнее описание (очищенное): '{cleaned_description}'")
-                        response_message = check_ferry_price(vehicle_description=cleaned_description, direction=None)
-                    else:
-                        response_message = "Пожалуйста, укажите порты отправления и назначения."
-                else:
-                    response_message = "Пожалуйста, укажите порты отправления и назначения (например, 'Из Констанцы в Поти')."
+            if "из поти" in lower_msg:
+                direction = "Ge_Ro"
+            elif "из констанца" in lower_msg or "из констанцы" in lower_msg:
+                direction = "Ro_Ge"
+            elif "грузия" in lower_msg or "из груз" in lower_msg:
+                direction = "Ge_Ro"
+            else:
+                response_message = "Пожалуйста, уточните направление отправки (например, Поти-Констанца или Констанца-Поти)."
                 add_message_to_client_file(client_code, user_message, is_assistant=False)
                 add_message_to_client_file(client_code, response_message, is_assistant=True)
                 return jsonify({'reply': response_message}), 200
-            else:
-                # Если оба порта указаны, определяем направление по предлогам:
-                # Если сообщение содержит "из поти", считаем отправлением Потии, а если "из констанца" – Констанца.
-                # При этом, если оба порта указаны, направление определяем на основе сочетания.
-                if sending_port in ["поти"] and destination_port in ["констанца", "констанцы"]:
-                    direction = "Ge_Ro"
-                elif sending_port in ["констанца", "констанцы"] and destination_port in ["поти"]:
-                    direction = "Ro_Ge"
-                else:
-                    # Если комбинация не стандартная, уточняем у клиента
-                    response_message = "Пожалуйста, уточните направление отправки (например, 'Из Констанцы в Поти')."
-                    add_message_to_client_file(client_code, user_message, is_assistant=False)
-                    add_message_to_client_file(client_code, response_message, is_assistant=True)
-                    return jsonify({'reply': response_message}), 200
-
-                # Если сообщение выглядит как короткое уточнение, используем последнее полное описание
-                if len(user_message) < 20:
-                    last_description = get_last_vehicle_description(client_code)
-                    if last_description:
-                        cleaned_description = re.sub(
-                            r'\b(?:из|в)\s+\w+\b', '', last_description, flags=re.IGNORECASE
-                        ).strip()
-                        logger.debug(f"Используем последнее описание (очищенное): '{cleaned_description}'")
-                        response_message = check_ferry_price(vehicle_description=cleaned_description, direction=direction)
+            
+            # Если сообщение выглядит как уточнение (короткое сообщение), то:
+            if len(user_message) < 20:
+                last_description = get_last_vehicle_description(client_code)
+                if last_description:
+                    # Вместо полного удаления, заменим старое направление на новое.
+                    cleaned_description = re.sub(
+                        r'\b(?:из|в)\s+\w+(?:\s+в\s+\w+)?\b', '', last_description, flags=re.IGNORECASE
+                    ).strip()
+                    # Добавляем явное указание нового направления:
+                    if direction == "Ro_Ge":
+                        new_direction_clause = ", направление: Констанца-Поти"
                     else:
-                        response_message = check_ferry_price(vehicle_description=user_message, direction=direction)
+                        new_direction_clause = ", направление: Поти-Констанца"
+                    updated_description = cleaned_description + new_direction_clause
+                    logger.debug(f"Используем обновлённое описание: '{updated_description}'")
+                    response_message = check_ferry_price(vehicle_description=updated_description, direction=direction)
+                    response_message = re.sub(r"^Извините[^.]*\.\s*", "", response_message)
                 else:
                     response_message = check_ferry_price(vehicle_description=user_message, direction=direction)
+            else:
+                response_message = check_ferry_price(vehicle_description=user_message, direction=direction)
         else:
             messages = prepare_chat_context(client_code)
             messages.append({"role": "user", "content": user_message})
@@ -296,7 +269,7 @@ def chat():
         return jsonify({'error': str(e)}), 500
 
 ###############################################
-# ЭНДПОИНТ домашней страницы (/)
+# Эндпоинт домашней страницы (/)
 ###############################################
 @app.route('/', methods=['GET'])
 def home():
