@@ -50,7 +50,7 @@ pprint.pprint(dict(os.environ))
 pending_guiding = {}
 
 ###############################################
-# ФУНКЦИЯ ОТПРАВКИ УВЕДОМЛЕНИЙ ЧЕРЕЗ TELEGRAM
+# Функция отправки уведомлений через Telegram
 ###############################################
 def send_telegram_notification(message):
     telegram_bot_token = os.getenv("TELEGRAM_BOT_TOKEN")
@@ -68,7 +68,7 @@ def send_telegram_notification(message):
         logger.error(f"❌ Ошибка при отправке Telegram уведомления: {e}")
 
 ###############################################
-# ФУНКЦИЯ ПОДГОТОВКИ КОНТЕКСТА (ПАМЯТЬ АССИСТЕНТА)
+# Функция подготовки контекста (память ассистента)
 ###############################################
 def prepare_chat_context(client_code):
     messages = []
@@ -77,7 +77,7 @@ def prepare_chat_context(client_code):
         raise Exception("Bible.xlsx не найден или недоступен.")
     logger.info(f"Bible.xlsx содержит {len(bible_df)} записей.")
     
-    # Загрузка внутренних правил (FAQ = "-" и Verification = "RULE") – для внутренней логики.
+    # Загрузка внутренних правил (не показываются клиенту)
     internal_rules = []
     for index, row in bible_df.iterrows():
         faq = row.get("FAQ", "").strip()
@@ -89,7 +89,7 @@ def prepare_chat_context(client_code):
         system_instructions = "Инструкция для ассистента (не показывать клиенту): " + " ".join(internal_rules)
         messages.append({"role": "system", "content": system_instructions})
     
-    # Общая информация из Bible.xlsx (только строки, где FAQ != "-" и Verification != "RULE")
+    # Добавление общей информации из Bible.xlsx
     for index, row in bible_df.iterrows():
         faq = row.get("FAQ", "").strip()
         answer = row.get("Answers", "").strip()
@@ -97,7 +97,7 @@ def prepare_chat_context(client_code):
         if faq and faq != "-" and answer and verification != "RULE":
             messages.append({"role": "system", "content": f"Вопрос: {faq}\nОтвет: {answer}"})
     
-    # История переписки из уникального файла клиента.
+    # Добавление истории переписки
     spreadsheet_id = find_client_file_id(client_code)
     if spreadsheet_id:
         sheets_service = get_sheets_service()
@@ -119,14 +119,9 @@ def prepare_chat_context(client_code):
     return messages
 
 ###############################################
-# ФУНКЦИЯ ДЛЯ ИЗВЛЕЧЕНИЯ ПОЛНОГО ОПИСАНИЯ ТС
+# Функция для извлечения полного описания ТС
 ###############################################
 def get_last_vehicle_description(client_code):
-    """
-    Извлекает последнее полное сообщение от клиента, содержащее информацию о транспортном средстве,
-    из истории переписки (использует prepare_chat_context).
-    Возвращает текст или None, если подходящее сообщение не найдено.
-    """
     try:
         messages = prepare_chat_context(client_code)
     except Exception as e:
@@ -138,6 +133,16 @@ def get_last_vehicle_description(client_code):
             if text and (re.search(r'\d+', text) or any(kw in text.lower() for kw in ["фура", "грузовик", "минивэн", "minivan", "тягач", "еврофура"])):
                 return text
     return None
+
+###############################################
+# Вспомогательная функция для извлечения портов
+###############################################
+def extract_ports(text):
+    # Ищем порт отправления после "из" и порт назначения после "в"
+    sending = re.search(r'\bиз\s+(\w+)', text, flags=re.IGNORECASE)
+    destination = re.search(r'\bв\s+(\w+)', text, flags=re.IGNORECASE)
+    return (sending.group(1).lower() if sending else None,
+            destination.group(1).lower() if destination else None)
 
 ###############################################
 # ЭНДПОИНТ /register-client
@@ -180,13 +185,6 @@ def verify_code():
 ###############################################
 @app.route('/get-price', methods=['POST'])
 def get_price_endpoint():
-    """
-    Эндпоинт ожидает POST-запрос с JSON-телом:
-    {
-       "vehicle_description": "Минивэн, Из Констанцы в Поти",
-       "direction": "Ge_Ro"  // или "Ro_Ge"
-    }
-    """
     data = request.get_json()
     if not data or "vehicle_description" not in data:
         return jsonify({"error": "Не передано описание транспортного средства"}), 400
@@ -211,6 +209,7 @@ def chat():
             logger.error("Ошибка: Сообщение и код клиента не могут быть пустыми")
             return jsonify({'error': 'Сообщение и код клиента не могут быть пустыми'}), 400
 
+        # Проверяем наличие ключевых файлов: Bible.xlsx и файла клиента.
         try:
             bible_data = load_bible_data()
         except Exception as e:
@@ -226,39 +225,57 @@ def chat():
         update_last_visit(client_code)
         
         # Обработка запроса о тарифе.
-        if ("цена" in user_message.lower() or "прайс" in user_message.lower() or 
-            "минивэн" in user_message.lower() or "minivan" in user_message.lower() or
-            "truck" in user_message.lower() or "траk" in user_message.lower()):
+        if any(kw in user_message.lower() for kw in ["цена", "прайс", "минивэн", "minivan", "truck", "траk"]):
             lower_msg = user_message.lower()
-            if "из поти" in lower_msg:
-                direction = "Ge_Ro"
-            elif "из констанца" in lower_msg or "из констанцы" in lower_msg:
-                direction = "Ro_Ge"
-            elif "грузия" in lower_msg or "из груз" in lower_msg:
-                direction = "Ge_Ro"
-            else:
-                response_message = "Пожалуйста, уточните направление отправки (например, Поти-Констанца или Констанца-Поти)."
+            # Попытка извлечения портов из сообщения
+            sending_port, destination_port = extract_ports(user_message)
+            # Если оба порта не указаны, задаем уточняющий вопрос.
+            if not sending_port or not destination_port:
+                # Если сообщение слишком короткое (например, только "А из Констанца?"), используем последнее полное описание
+                if len(user_message) < 20:
+                    last_description = get_last_vehicle_description(client_code)
+                    if last_description:
+                        # Очищаем описание от упоминаний портов
+                        cleaned_description = re.sub(
+                            r'\b(?:из|в)\s+\w+\b', '', last_description, flags=re.IGNORECASE
+                        ).strip()
+                        logger.debug(f"Используем последнее описание (очищенное): '{cleaned_description}'")
+                        response_message = check_ferry_price(vehicle_description=cleaned_description, direction=None)
+                    else:
+                        response_message = "Пожалуйста, укажите порты отправления и назначения."
+                else:
+                    response_message = "Пожалуйста, укажите порты отправления и назначения (например, 'Из Констанцы в Поти')."
                 add_message_to_client_file(client_code, user_message, is_assistant=False)
                 add_message_to_client_file(client_code, response_message, is_assistant=True)
                 return jsonify({'reply': response_message}), 200
-            
-            # Если сообщение выглядит как уточнение (короткое сообщение), используем последнее полное описание
-            if len(user_message) < 20:
-                last_description = get_last_vehicle_description(client_code)
-                if last_description:
-                    # Очищаем описание от упоминаний направлений (расширенный паттерн).
-                    cleaned_description = re.sub(
-                        r'\b(?:из|в)\s+(?:поти|констанца|констанцы|грузия)\b', 
-                        '', last_description, flags=re.IGNORECASE
-                    ).strip()
-                    logger.debug(f"Используем последнее полное описание (очищенное): '{cleaned_description}'")
-                    response_message = check_ferry_price(vehicle_description=cleaned_description, direction=direction)
-                    # Если полученный ответ начинается с "Извините", удаляем его.
-                    response_message = re.sub(r"^Извините[^.]*\.\s*", "", response_message)
+            else:
+                # Если оба порта указаны, определяем направление по предлогам:
+                # Если сообщение содержит "из поти", считаем отправлением Потии, а если "из констанца" – Констанца.
+                # При этом, если оба порта указаны, направление определяем на основе сочетания.
+                if sending_port in ["поти"] and destination_port in ["констанца", "констанцы"]:
+                    direction = "Ge_Ro"
+                elif sending_port in ["констанца", "констанцы"] and destination_port in ["поти"]:
+                    direction = "Ro_Ge"
+                else:
+                    # Если комбинация не стандартная, уточняем у клиента
+                    response_message = "Пожалуйста, уточните направление отправки (например, 'Из Констанцы в Поти')."
+                    add_message_to_client_file(client_code, user_message, is_assistant=False)
+                    add_message_to_client_file(client_code, response_message, is_assistant=True)
+                    return jsonify({'reply': response_message}), 200
+
+                # Если сообщение выглядит как короткое уточнение, используем последнее полное описание
+                if len(user_message) < 20:
+                    last_description = get_last_vehicle_description(client_code)
+                    if last_description:
+                        cleaned_description = re.sub(
+                            r'\b(?:из|в)\s+\w+\b', '', last_description, flags=re.IGNORECASE
+                        ).strip()
+                        logger.debug(f"Используем последнее описание (очищенное): '{cleaned_description}'")
+                        response_message = check_ferry_price(vehicle_description=cleaned_description, direction=direction)
+                    else:
+                        response_message = check_ferry_price(vehicle_description=user_message, direction=direction)
                 else:
                     response_message = check_ferry_price(vehicle_description=user_message, direction=direction)
-            else:
-                response_message = check_ferry_price(vehicle_description=user_message, direction=direction)
         else:
             messages = prepare_chat_context(client_code)
             messages.append({"role": "user", "content": user_message})
