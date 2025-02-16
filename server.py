@@ -47,6 +47,7 @@ logger.info("Текущие переменные окружения:")
 pprint.pprint(dict(os.environ))
 
 # Глобальный словарь для хранения состояния последовательного уточнения (guiding questions)
+# Сейчас guiding questions отключены – никаких уточняющих вопросов не задаём.
 pending_guiding = {}
 
 ###############################################
@@ -77,7 +78,8 @@ def prepare_chat_context(client_code):
         raise Exception("Bible.xlsx не найден или недоступен.")
     logger.info(f"Bible.xlsx содержит {len(bible_df)} записей.")
     
-    # Загружаем внутренние правила (инструкции) из Bible.xlsx: строки с FAQ равным "-" и Verification равным "RULE"
+    # Загружаем внутренние правила (инструкции) из Bible.xlsx:
+    # Строки, где FAQ равен "-" и Verification равен "RULE" – эти инструкции используются только для внутренней логики.
     internal_rules = []
     for index, row in bible_df.iterrows():
         faq = row.get("FAQ", "").strip()
@@ -135,6 +137,7 @@ def get_last_vehicle_description(client_code):
     for msg in reversed(messages):
         if msg.get("role") == "user":
             text = msg.get("content", "").strip()
+            # Если сообщение содержит хотя бы одно ключевое слово, характерное для описания ТС
             if text and (re.search(r'\d+', text) or any(kw in text.lower() for kw in ["фура", "грузовик", "минивэн", "minivan", "тягач", "еврофура"])):
                 return text
     return None
@@ -228,7 +231,6 @@ def chat():
         
         # Обработка запроса о тарифе.
         if "цена" in user_message.lower() or "прайс" in user_message.lower():
-            # Определяем направление на основании ключевых слов в сообщении.
             lower_msg = user_message.lower()
             if "из поти" in lower_msg:
                 direction = "Ge_Ro"
@@ -238,6 +240,7 @@ def chat():
                 direction = "Ge_Ro"
             else:
                 direction = "Ro_Ge"
+            # Используем только данные из запроса – никаких объединений с историей, никаких уточняющих вопросов.
             response_message = check_ferry_price(vehicle_description=user_message, direction=direction)
         else:
             messages = prepare_chat_context(client_code)
