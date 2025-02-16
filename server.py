@@ -76,24 +76,15 @@ def prepare_chat_context(client_code):
     if bible_df is None:
         raise Exception("Bible.xlsx не найден или недоступен.")
     logger.info(f"Bible.xlsx содержит {len(bible_df)} записей.")
-    # Загружаем внутренние правила (не для показа клиенту)
-    internal_rules = []
-    for index, row in bible_df.iterrows():
-        faq = row.get("FAQ", "").strip()
-        answer = row.get("Answers", "").strip()
-        verification = str(row.get("Verification", "")).strip().upper()
-        if faq == "-" and verification == "RULE" and answer:
-            internal_rules.append(answer)
-    if internal_rules:
-        system_instructions = "Инструкция для ассистента (не показывать клиенту): " + " ".join(internal_rules)
-        messages.append({"role": "system", "content": system_instructions})
-    # Добавляем обычную информацию из Bible.xlsx (FAQ и Answers, где Verification != "RULE")
+    
+    # Добавляем информацию из Bible.xlsx, исключая внутренние инструкции (где FAQ равен "-" и Verification == "RULE")
     for index, row in bible_df.iterrows():
         faq = row.get("FAQ", "").strip()
         answer = row.get("Answers", "").strip()
         verification = str(row.get("Verification", "")).strip().upper()
         if faq and faq != "-" and answer and verification != "RULE":
             messages.append({"role": "system", "content": f"Вопрос: {faq}\nОтвет: {answer}"})
+    
     # Добавляем историю переписки из уникального файла клиента
     spreadsheet_id = find_client_file_id(client_code)
     if spreadsheet_id:
@@ -133,7 +124,6 @@ def get_last_vehicle_description(client_code):
     for msg in reversed(messages):
         if msg.get("role") == "user":
             text = msg.get("content", "").strip()
-            # Если сообщение содержит хотя бы одно ключевое слово или число, считаем, что это описание ТС.
             if text and (re.search(r'\d+', text) or any(kw in text.lower() for kw in ["фура", "грузовик", "минивэн", "minivan", "тягач", "еврофура"])):
                 return text
     return None
@@ -225,18 +215,19 @@ def chat():
 
         update_last_visit(client_code)
         
-        # Обработка follow-up запросов, если сообщение связано с тарифами.
+        # Если запрос связан с тарифами (содержит "цена" или "прайс")
         if "цена" in user_message.lower() or "прайс" in user_message.lower():
-            # Если сообщение недостаточно информативно (например, короткое или не содержит цифр)
+            # Если сообщение недостаточно информативно, пробуем дополнить его историей.
             if len(user_message) < 20 or not re.search(r'\d+', user_message):
                 last_description = get_last_vehicle_description(client_code)
                 if last_description:
                     combined_description = last_description + " " + user_message
                     logger.debug(f"Используем комбинированное описание: '{combined_description}'")
-                    # Определяем направление на основании текущего сообщения
                     if "из поти" in user_message.lower():
                         direction = "Ge_Ro"
                     elif "из констанца" in user_message.lower() or "из констанцы" in user_message.lower():
+                        direction = "Ro_Ge"
+                    else:
                         direction = "Ro_Ge"
                     response_message = check_ferry_price(vehicle_description=combined_description, direction=direction)
                 else:
