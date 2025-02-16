@@ -89,7 +89,7 @@ def prepare_chat_context(client_code):
         system_instructions = "Инструкция для ассистента (не показывать клиенту): " + " ".join(internal_rules)
         messages.append({"role": "system", "content": system_instructions})
     
-    # Добавление общей информации из Bible.xlsx (без внутренних инструкций)
+    # Добавление общей информации из Bible.xlsx (без внутренних правил)
     for index, row in bible_df.iterrows():
         faq = row.get("FAQ", "").strip()
         answer = row.get("Answers", "").strip()
@@ -97,7 +97,7 @@ def prepare_chat_context(client_code):
         if faq and faq != "-" and answer and verification != "RULE":
             messages.append({"role": "system", "content": f"Вопрос: {faq}\nОтвет: {answer}"})
     
-    # Добавление истории переписки из файла клиента
+    # Добавление истории переписки из файла клиента.
     spreadsheet_id = find_client_file_id(client_code)
     if spreadsheet_id:
         sheets_service = get_sheets_service()
@@ -228,15 +228,15 @@ def chat():
                 add_message_to_client_file(client_code, response_message, is_assistant=True)
                 return jsonify({'reply': response_message}), 200
             
-            # Если сообщение выглядит как уточнение (короткое сообщение), то:
+            # Если сообщение выглядит как короткое уточнение (менее 20 символов)
             if len(user_message) < 20:
                 last_description = get_last_vehicle_description(client_code)
                 if last_description:
-                    # Вместо полного удаления, заменим старое направление на новое.
+                    # Удаляем из полного описания все упоминания портов
                     cleaned_description = re.sub(
                         r'\b(?:из|в)\s+\w+(?:\s+в\s+\w+)?\b', '', last_description, flags=re.IGNORECASE
                     ).strip()
-                    # Добавляем явное указание нового направления:
+                    # Добавляем явное указание нового направления
                     if direction == "Ro_Ge":
                         new_direction_clause = ", направление: Констанца-Поти"
                     else:
@@ -244,7 +244,8 @@ def chat():
                     updated_description = cleaned_description + new_direction_clause
                     logger.debug(f"Используем обновлённое описание: '{updated_description}'")
                     response_message = check_ferry_price(vehicle_description=updated_description, direction=direction)
-                    response_message = re.sub(r"^Извините[^.]*\.\s*", "", response_message)
+                    # Удаляем любые извинительные или уточняющие фразы из ответа
+                    response_message = re.sub(r"Пожалуйста, уточните[^.]*\.", "", response_message, flags=re.IGNORECASE).strip()
                 else:
                     response_message = check_ferry_price(vehicle_description=user_message, direction=direction)
             else:
