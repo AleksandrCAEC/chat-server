@@ -66,8 +66,11 @@ def check_ferry_price_from_site(vehicle_description, direction="Ro_Ge"):
          и определить категорию через find_category_by_length.
       4. Если ни название, ни длина не позволяют однозначно определить категорию, возвращается запрос на уточнение длины.
       5. Если тарифная категория определена, извлекается активное значение цены для указанного направления и примечание.
-         Если активная цена содержит маркер "PRICE_QUERY", возвращается сообщение об отсутствии актуальной цены.
-      6. Формируется итоговый ответ, который включает только активное (актуальное) значение цены и примечание.
+         Если активная цена содержит маркер "PRICE_QUERY", возвращается сообщение о том, что актуальная цена не получена.
+      6. Формируется итоговый ответ, который включает только активное значение цены и примечание.
+    Дополнительное правило для грузовиков:
+      Если в запросе присутствует слово "грузовик" или "truck" и явно указана длина "10" метров,
+      и если в тарифных данных присутствует ключ "Truck (up to 10M)", то используется именно этот тариф.
     """
     try:
         website_prices = get_ferry_prices()
@@ -79,15 +82,22 @@ def check_ferry_price_from_site(vehicle_description, direction="Ro_Ge"):
     vehicle_lower = vehicle_description.lower()
     category = None
 
-    # 1. Определение по синониму (названию ТС)
-    for synonym, official in TYPE_SYNONYMS.items():
-        if synonym in vehicle_lower:
-            if official in website_prices:
-                category = official
-                logger.debug(f"Синоним '{synonym}' определил тарифную категорию: {category}")
-                break
+    # Дополнительное правило для грузовиков: если в запросе указана длина 10 метров и слово "грузовик"/"truck"
+    if ("грузовик" in vehicle_lower or "truck" in vehicle_lower) and re.search(r'\b10\b', vehicle_lower):
+        if "Truck (up to 10M)" in website_prices:
+            category = "Truck (up to 10M)"
+            logger.debug("Используем дополнительное правило: выбрана категория 'Truck (up to 10M)' для запроса с длиной 10 метров.")
+    
+    # Если дополнительное правило не сработало, определяем категорию по синониму.
+    if category is None:
+        for synonym, official in TYPE_SYNONYMS.items():
+            if synonym in vehicle_lower:
+                if official in website_prices:
+                    category = official
+                    logger.debug(f"Синоним '{synonym}' определил тарифную категорию: {category}")
+                    break
 
-    # 2. Если по синониму не удалось, ищем совпадение по ключам тарифных данных.
+    # Если по синониму не удалось, ищем совпадение по ключам тарифных данных.
     if category is None:
         for key in website_prices:
             if key.lower() in vehicle_lower:
@@ -95,7 +105,7 @@ def check_ferry_price_from_site(vehicle_description, direction="Ro_Ge"):
                 logger.debug(f"Найденная категория по совпадению названия: {category}")
                 break
 
-    # 3. Если по названию не удалось, пробуем извлечь длину.
+    # Если по названию не удалось, пробуем извлечь длину.
     if category is None:
         extracted_length = extract_length(vehicle_description)
         logger.debug(f"Из описания '{vehicle_description}' извлечена длина: {extracted_length}")
@@ -108,20 +118,19 @@ def check_ferry_price_from_site(vehicle_description, direction="Ro_Ge"):
     if category is None:
         return "Не удалось определить тарифную категорию по вашему запросу. Пожалуйста, уточните информацию о транспортном средстве."
 
-    # 4. Извлекаем активное значение цены для выбранной категории в зависимости от направления.
+    # Извлекаем активное значение цены для выбранной категории в зависимости от направления.
     if direction == "Ro_Ge":
         active_price = website_prices[category].get("price_Ro_Ge", "")
     else:
         active_price = website_prices[category].get("price_Ge_Ro", "")
     
-    # Приводим цену к верхнему регистру и убираем лишние пробелы для проверки маркера.
     active_price_clean = active_price.strip().upper()
     if not active_price or "PRICE_QUERY" in active_price_clean:
         return "Актуальная цена для выбранной категории не получена. Пожалуйста, обратитесь к менеджеру."
     
     remark = website_prices[category].get("remark", "")
     
-    # 5. Формируем итоговый ответ (без отображения зачёркнутой цены).
+    # Формируем итоговый ответ (только активная цена и примечание).
     response_message = f"Цена перевозки для категории '{category}' ({direction.replace('_', ' ')}) составляет {active_price}."
     if remark:
         response_message += f" Примечание: {remark}"
@@ -150,7 +159,12 @@ if __name__ == "__main__":
     result_minivan = check_ferry_price(sample_text2, direction="Ge_Ro")
     logger.info(f"Результат теста для минивэна: {result_minivan}")
     
-    # Тестовый пример 3: Грузовик с указанием длины
+    # Тестовый пример 3: Грузовик 15 метров, из Поти в Констанца
     sample_text3 = "Грузовик 15 метров, из Поти в Констанца"
     result_truck = check_ferry_price(sample_text3, direction="Ge_Ro")
     logger.info(f"Результат теста для грузовика 15 метров (Ge_Ro): {result_truck}")
+    
+    # Тестовый пример 4: Грузовик 10 метров, из Поти в Констанца - должно использовать дополнительное правило
+    sample_text4 = "Грузовик 10 метров, из Поти в Констанца"
+    result_truck10 = check_ferry_price(sample_text4, direction="Ge_Ro")
+    logger.info(f"Результат теста для грузовика 10 метров (Ge_Ro): {result_truck10}")
