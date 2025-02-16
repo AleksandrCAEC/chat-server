@@ -7,10 +7,11 @@ from flask import Flask, request, jsonify
 import openai
 import requests
 from datetime import datetime
+# Импорт необходимых модулей для работы с базами данных
 from clientdata import register_or_update_client, verify_client_code, update_last_visit
 from client_caec import add_message_to_client_file, find_client_file_id, get_sheets_service, CLIENT_FILES_DIR
 from bible import load_bible_data, save_bible_pair
-from price_handler import check_ferry_price, load_price_data  # Функция check_ferry_price отвечает за сбор данных с сайта
+from price_handler import check_ferry_price, load_price_data  # Функция check_ferry_price для получения тарифов с сайта
 from flask_cors import CORS
 import openpyxl
 
@@ -88,6 +89,7 @@ def prepare_chat_context(client_code):
     }
     messages.append(system_message)
     
+    # Чтение истории переписки из уникального файла клиента
     spreadsheet_id = find_client_file_id(client_code)
     if spreadsheet_id:
         sheets_service = get_sheets_service()
@@ -152,8 +154,8 @@ def get_price_endpoint():
     """
     Эндпоинт ожидает POST-запрос с JSON-телом:
     {
-       "vehicle_description": "Фура 17 метров, Констанца-Поти, без ADR, без груза",
-       "direction": "Ro_Ge"  // этот параметр не обязателен, по умолчанию используется "Ro_Ge"
+       "vehicle_description": "Минивэн, Из Констанцы в Поти",
+       "direction": "Ge_Ro"  // или "Ro_Ge"
     }
     """
     data = request.get_json()
@@ -180,6 +182,21 @@ def chat():
             logger.error("Ошибка: Сообщение и код клиента не могут быть пустыми")
             return jsonify({'error': 'Сообщение и код клиента не могут быть пустыми'}), 400
 
+        # Перед обработкой чата проверяем наличие файла Bible.xlsx и файла клиента.
+        bible_data = None
+        try:
+            bible_data = load_bible_data()
+        except Exception as e:
+            logger.error(f"Ошибка загрузки Bible.xlsx: {e}")
+        if bible_data is None:
+            send_telegram_notification("Ошибка базы данных: файл Bible.xlsx не найден. Пожалуйста, подключите менеджера.")
+            return jsonify({'error': 'Ошибка базы данных: Bible.xlsx не найден.'}), 500
+
+        client_file_id = find_client_file_id(client_code)
+        if client_file_id is None:
+            send_telegram_notification(f"Ошибка базы данных: для клиента {client_code} не найден файл переписки. Пожалуйста, подключите менеджера.")
+            return jsonify({'error': 'Ошибка базы данных: файл клиента не найден.'}), 500
+
         update_last_visit(client_code)
         
         if client_code in pending_guiding:
@@ -193,14 +210,14 @@ def chat():
                 response_message = f"Спасибо, ваши ответы приняты. {final_price}"
                 del pending_guiding[client_code]
         elif "цена" in user_message.lower() or "прайс" in user_message.lower():
-            # Определяем направление на основе содержимого запроса
+            # Определение направления на основании текста, если указано.
             lower_msg = user_message.lower()
             if "из поти" in lower_msg:
                 direction = "Ge_Ro"
             elif "из констанца" in lower_msg or "из констанцы" in lower_msg:
                 direction = "Ro_Ge"
             else:
-                direction = "Ro_Ge"  # значение по умолчанию
+                direction = "Ro_Ge"
             response_message = check_ferry_price(vehicle_description=user_message, direction=direction)
         else:
             messages = prepare_chat_context(client_code)
