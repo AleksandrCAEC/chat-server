@@ -78,8 +78,7 @@ def prepare_chat_context(client_code):
         raise Exception("Bible.xlsx не найден или недоступен.")
     logger.info(f"Bible.xlsx содержит {len(bible_df)} записей.")
     
-    # Загружаем внутренние правила (инструкции) из Bible.xlsx:
-    # Строки с FAQ равным "-" и Verification равным "RULE" используются только для внутренней логики и не передаются клиенту.
+    # Внутренние правила (FAQ = "-" и Verification = "RULE") используются только для внутренней логики.
     internal_rules = []
     for index, row in bible_df.iterrows():
         faq = row.get("FAQ", "").strip()
@@ -91,7 +90,7 @@ def prepare_chat_context(client_code):
         system_instructions = "Инструкция для ассистента (не показывать клиенту): " + " ".join(internal_rules)
         messages.append({"role": "system", "content": system_instructions})
     
-    # Добавляем общую информацию из Bible.xlsx (только FAQ и Answers, где FAQ != "-" и Verification != "RULE")
+    # Общая информация из Bible.xlsx (только FAQ и Answers, где FAQ != "-" и Verification != "RULE")
     for index, row in bible_df.iterrows():
         faq = row.get("FAQ", "").strip()
         answer = row.get("Answers", "").strip()
@@ -99,7 +98,7 @@ def prepare_chat_context(client_code):
         if faq and faq != "-" and answer and verification != "RULE":
             messages.append({"role": "system", "content": f"Вопрос: {faq}\nОтвет: {answer}"})
     
-    # Добавляем историю переписки из уникального файла клиента.
+    # История переписки из уникального файла клиента
     spreadsheet_id = find_client_file_id(client_code)
     if spreadsheet_id:
         sheets_service = get_sheets_service()
@@ -229,7 +228,6 @@ def chat():
         update_last_visit(client_code)
         
         # Обработка запроса о тарифе.
-        # Если сообщение содержит слова "цена", "прайс", "минивэн"/"minivan", "truck" и т.п.
         if ("цена" in user_message.lower() or "прайс" in user_message.lower() or 
             "минивэн" in user_message.lower() or "minivan" in user_message.lower() or
             "truck" in user_message.lower() or "траk" in user_message.lower()):
@@ -242,17 +240,16 @@ def chat():
             elif "грузия" in lower_msg or "из груз" in lower_msg:
                 direction = "Ge_Ro"
             else:
-                # Если направление не указано, задаем единственный уточняющий вопрос.
                 response_message = "Пожалуйста, уточните направление отправки (например, Поти-Констанца или Констанца-Поти)."
                 add_message_to_client_file(client_code, user_message, is_assistant=False)
                 add_message_to_client_file(client_code, response_message, is_assistant=True)
                 return jsonify({'reply': response_message}), 200
             
-            # Если сообщение содержит только направление (менее 20 символов), используем последнее полное описание из истории.
+            # Если сообщение содержит только направление (короткое сообщение), используем последнее полное описание ТС.
             if len(user_message) < 20:
                 last_description = get_last_vehicle_description(client_code)
                 if last_description:
-                    logger.debug(f"Используем последнее полное описание транспортного средства: '{last_description}'")
+                    logger.debug(f"Используем последнее полное описание: '{last_description}'")
                     response_message = check_ferry_price(vehicle_description=last_description, direction=direction)
                 else:
                     response_message = check_ferry_price(vehicle_description=user_message, direction=direction)
