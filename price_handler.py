@@ -8,13 +8,11 @@ logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
 
 # Словарь синонимов для типов транспортных средств.
-# Здесь указываются варианты, которые может ввести клиент (в нижнем регистре),
-# а значения – официальный термин, который используется в тарифных данных.
-# Обратите внимание: если в запросе присутствует явная информация о длине, то выбор тарифа будет переопределён.
+# Ключи – варианты, которые может ввести клиент (в нижнем регистре),
+# значения – официальный термин, используемый в тарифных данных.
 TYPE_SYNONYMS = {
     "минивэн": "Minivan",
     "minivan": "Minivan",
-    # Для грузовика оставляем общий синоним, но если длина указана, то логика подберёт более узкую категорию
     "фура": "Standard truck with trailer (up to 17M)",
     "грузовик": "Standard truck with trailer (up to 17M)",
     "еврофура": "Standard truck with trailer (up to 17M)",
@@ -38,22 +36,26 @@ def find_category_by_length(extracted_length, website_prices):
     """
     Находит тарифную категорию, сопоставляя извлечённую длину с пороговыми значениями,
     извлечёнными из названий тарифных категорий.
-    Для каждой категории извлекается первое найденное число, которое считается порогом.
+    Функция сортирует все категории по числовому порогу в порядке возрастания
+    и выбирает первую категорию, где extracted_length <= порог.
     Возвращает найденную категорию или None.
     """
-    best_category = None
-    best_threshold = None
+    # Составляем список (категория, порог) для всех категорий, где можно извлечь число
+    categories_with_threshold = []
     for category in website_prices:
-        numbers = re.findall(r'\d+', category)
-        if numbers:
-            threshold = int(numbers[0])
-            logger.debug(f"Категория '{category}' имеет порог {threshold}")
-            if extracted_length <= threshold:
-                if best_threshold is None or threshold < best_threshold:
-                    best_threshold = threshold
-                    best_category = category
-    logger.debug(f"Найденная категория по длине: {best_category} для длины {extracted_length}")
-    return best_category
+        match = re.search(r'(\d+)', category)
+        if match:
+            threshold = int(match.group(1))
+            categories_with_threshold.append((category, threshold))
+    # Сортируем по порогу по возрастанию
+    sorted_categories = sorted(categories_with_threshold, key=lambda x: x[1])
+    logger.debug(f"Отсортированные категории по порогу: {sorted_categories}")
+    for category, threshold in sorted_categories:
+        if extracted_length <= threshold:
+            logger.debug(f"Выбрана категория '{category}' для длины {extracted_length} (порог {threshold})")
+            return category
+    logger.debug(f"Ни одна категория не удовлетворяет условию для длины {extracted_length}")
+    return None
 
 def check_ferry_price_from_site(vehicle_description, direction="Ro_Ge"):
     """
@@ -62,7 +64,7 @@ def check_ferry_price_from_site(vehicle_description, direction="Ro_Ge"):
     Алгоритм:
       1. Загружает тарифы с сайта.
       2. Сначала пытается определить тарифную категорию по названию транспортного средства:
-         если в описании встречается синоним из TYPE_SYNONYMS, преобразует его в официальный термин и,
+         если в описании встречается синоним из TYPE_SYNONYMS, он преобразуется в официальный термин и,
          если этот термин присутствует в тарифных данных, используется для определения тарифа.
       3. Если по названию тариф не найден, пытается извлечь длину из vehicle_description
          и определить категорию через find_category_by_length.
@@ -70,11 +72,6 @@ def check_ferry_price_from_site(vehicle_description, direction="Ro_Ge"):
       5. Если тарифная категория определена, извлекается активное значение цены для указанного направления и примечание.
          Если активная цена содержит маркер "PRICE_QUERY", возвращается сообщение об отсутствии актуальной цены.
       6. Формируется итоговый ответ, который включает только активное значение цены и примечание.
-      
-      **Доработка по грузовику:**  
-      Если в запросе присутствует слово "грузовик" или "truck" и извлеченная длина меньше или равна 8, то даже если синоним
-      вернул "Standard truck with trailer (up to 17M)", функция попытается найти категорию по длине, которая, как правило,
-      будет "Mini truck (up to 8M)".
     """
     try:
         website_prices = get_ferry_prices()
@@ -86,7 +83,7 @@ def check_ferry_price_from_site(vehicle_description, direction="Ro_Ge"):
     vehicle_lower = vehicle_description.lower()
     category = None
 
-    # 1. Попытка определить тарифную категорию по синониму.
+    # 1. Определение по синониму (названию ТС)
     for synonym, official in TYPE_SYNONYMS.items():
         if synonym in vehicle_lower:
             if official in website_prices:
@@ -102,23 +99,20 @@ def check_ferry_price_from_site(vehicle_description, direction="Ro_Ge"):
                 logger.debug(f"Найденная категория по совпадению названия: {category}")
                 break
 
-    # 3. Если информация о длине присутствует, используем её для уточнения тарифной категории.
-    extracted_length = extract_length(vehicle_description)
-    if extracted_length is not None:
-        category_by_length = find_category_by_length(extracted_length, website_prices)
-        if category_by_length is not None:
-            # Если категория, определённая по длине, отличается от найденной по синониму,
-            # используем категорию по длине, так как она более специфична.
-            if category is None or (category_by_length != category):
-                logger.debug(f"Переопределяем тарифную категорию с '{category}' на '{category_by_length}' на основе длины {extracted_length} метров")
-                category = category_by_length
-
-    # 4. Если ни по названию, ни по длине не удалось определить категорию, просим уточнить длину.
+    # 3. Если по названию не удалось, пробуем извлечь длину.
     if category is None:
-        return ("Пожалуйста, уточните длину вашего транспортного средства "
-                "(например, до 20, до 17, до 14, до 10 или до 8 метров).")
+        extracted_length = extract_length(vehicle_description)
+        logger.debug(f"Из описания '{vehicle_description}' извлечена длина: {extracted_length}")
+        if extracted_length is not None:
+            category = find_category_by_length(extracted_length, website_prices)
+        else:
+            return ("Пожалуйста, уточните длину вашего транспортного средства "
+                    "(например, до 20, до 17, до 14, до 10 или до 8 метров).")
     
-    # 5. Извлекаем активное значение цены для выбранной категории в зависимости от направления.
+    if category is None:
+        return "Не удалось определить тарифную категорию по вашему запросу. Пожалуйста, уточните информацию о транспортном средстве."
+
+    # 4. Извлекаем активное значение цены для выбранной категории в зависимости от направления.
     if direction == "Ro_Ge":
         active_price = website_prices[category].get("price_Ro_Ge", "")
     else:
@@ -130,7 +124,7 @@ def check_ferry_price_from_site(vehicle_description, direction="Ro_Ge"):
     
     remark = website_prices[category].get("remark", "")
     
-    # 6. Формируем итоговый ответ (выводим только активную цену и примечание).
+    # 5. Формирование итогового ответа (только активная цена и примечание).
     response_message = f"Цена перевозки для категории '{category}' ({direction.replace('_', ' ')}) составляет {active_price}."
     if remark:
         response_message += f" Примечание: {remark}"
