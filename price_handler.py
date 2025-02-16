@@ -22,9 +22,8 @@ def extract_length(text):
 
 def find_category_by_length(extracted_length, website_prices):
     """
-    Находит категорию транспортного средства в данных website_prices,
-    сопоставляя извлечённую длину с пороговыми значениями, извлечёнными из названий категорий.
-    Для каждой категории извлекается первое найденное число.
+    Находит тарифную категорию в данных website_prices, сопоставляя извлечённую длину с пороговыми значениями,
+    извлечёнными из названий категорий. Из каждого названия извлекается первое найденное число (порог).
     Возвращает найденную категорию или None.
     """
     best_category = None
@@ -50,13 +49,14 @@ def check_ferry_price_from_site(vehicle_description, direction="Ro_Ge"):
       2. Загружает тарифы с сайта.
       3. Находит категорию, соответствующую извлечённой длине.
       4. Если категория найдена, возвращает тариф, используя данные из website_prices.
-         (Значения цены и remark полностью берутся из данных, полученных с сайта.)
-      5. Если длина не указана, возвращает наводящий вопрос (если транспортное средство не относится к исключениям).
+         Если в ячейке с ценой обнаружены два значения (например, зачёркнутое и актуальное),
+         то в итоговом ответе выводится информация об обоих (например, "актуальное значение (предложение), старое значение: ... (зачёркнуто)").
+      5. Если длина не указана, возвращает наводящий вопрос, если транспортное средство не относится к исключениям.
     """
     extracted_length = extract_length(vehicle_description)
     logger.debug(f"Из описания '{vehicle_description}' извлечена длина: {extracted_length}")
     
-    # Список ключевых слов для транспортных средств, для которых длина не требуется
+    # Список ключевых слов для ТС, для которых длина не требуется
     exceptions = ["контейнер", "мини", "легков", "мото"]
     if extracted_length is None:
         if not any(keyword in vehicle_description.lower() for keyword in exceptions):
@@ -76,14 +76,23 @@ def check_ferry_price_from_site(vehicle_description, direction="Ro_Ge"):
     if category is None:
         return f"Не найдена тарифная категория для транспортного средства длиной {extracted_length} метров."
     
+    # Получаем цены для выбранной категории и направления
     if direction == "Ro_Ge":
-        website_price = website_prices[category].get("price_Ro_Ge", "")
+        active_price = website_prices[category].get("price_Ro_Ge", "")
+        old_price = website_prices[category].get("old_price_Ro_Ge", "")
     else:
-        website_price = website_prices[category].get("price_Ge_Ro", "")
+        active_price = website_prices[category].get("price_Ge_Ro", "")
+        old_price = website_prices[category].get("old_price_Ge_Ro", "")
     
     remark = website_prices[category].get("remark", "")
     
-    response_message = f"Цена перевозки для категории '{category}' ({direction.replace('_', ' ')}) составляет {website_price}."
+    # Формируем итоговый ответ
+    if old_price:
+        response_message = (f"Цена перевозки для категории '{category}' ({direction.replace('_', ' ')}) составляет "
+                            f"{active_price} (предложение), старое значение: {old_price} (зачёркнуто).")
+    else:
+        response_message = f"Цена перевозки для категории '{category}' ({direction.replace('_', ' ')}) составляет {active_price}."
+    
     if remark:
         response_message += f" Примечание: {remark}"
     logger.debug(f"Итоговый ответ: {response_message}")
