@@ -66,8 +66,8 @@ def check_ferry_price_from_site(vehicle_description, direction="Ro_Ge"):
          и определить категорию через find_category_by_length.
       4. Если ни название, ни длина не позволяют однозначно определить категорию, возвращается запрос на уточнение длины.
       5. Если тарифная категория определена, извлекается активное значение цены для указанного направления и примечание.
-         Если активная цена равна или содержит "PRICE_QUERY", возвращается сообщение о том, что актуальная цена не получена.
-      6. Формируется итоговый ответ, который включает только активную (актуальную) цену и примечание.
+         Если активная цена содержит маркер "PRICE_QUERY", возвращается сообщение об отсутствии актуальной цены.
+      6. Формируется итоговый ответ, который включает только активное (актуальное) значение цены и примечание.
     """
     try:
         website_prices = get_ferry_prices()
@@ -114,12 +114,14 @@ def check_ferry_price_from_site(vehicle_description, direction="Ro_Ge"):
     else:
         active_price = website_prices[category].get("price_Ge_Ro", "")
     
-    if not active_price or "PRICE_QUERY" in active_price.upper():
+    # Приводим цену к верхнему регистру и убираем лишние пробелы для проверки маркера.
+    active_price_clean = active_price.strip().upper()
+    if not active_price or "PRICE_QUERY" in active_price_clean:
         return "Актуальная цена для выбранной категории не получена. Пожалуйста, обратитесь к менеджеру."
     
     remark = website_prices[category].get("remark", "")
     
-    # 5. Формируем итоговый ответ (только активная цена и примечание).
+    # 5. Формируем итоговый ответ (без отображения зачёркнутой цены).
     response_message = f"Цена перевозки для категории '{category}' ({direction.replace('_', ' ')}) составляет {active_price}."
     if remark:
         response_message += f" Примечание: {remark}"
