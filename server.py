@@ -47,7 +47,7 @@ logger.info("Текущие переменные окружения:")
 pprint.pprint(dict(os.environ))
 
 # Глобальный словарь для хранения состояния последовательного уточнения (guiding questions)
-# Guiding questions отключены – никаких дополнительных уточняющих вопросов не задаётся.
+# Guiding questions отключены – никаких дополнительных уточняющих вопросов не задаётся, кроме уточнения направления.
 pending_guiding = {}
 
 ###############################################
@@ -228,10 +228,11 @@ def chat():
 
         update_last_visit(client_code)
         
-        # Если запрос о тарифе (содержащий "цена", "прайс" или упоминание "минивэн" или "minivan"), сразу рассчитываем цену без уточнений.
+        # Обработка запроса о тарифе: если сообщение содержит "цена", "прайс", "минивэн" или "minivan"
         if ("цена" in user_message.lower() or "прайс" in user_message.lower() or 
             "минивэн" in user_message.lower() or "minivan" in user_message.lower()):
             lower_msg = user_message.lower()
+            # Определяем направление, если оно явно указано.
             if "из поти" in lower_msg:
                 direction = "Ge_Ro"
             elif "из констанца" in lower_msg or "из констанцы" in lower_msg:
@@ -239,8 +240,13 @@ def chat():
             elif "грузия" in lower_msg or "из груз" in lower_msg:
                 direction = "Ge_Ro"
             else:
-                direction = "Ro_Ge"
-            # Используем только данные из запроса – никаких дополнительных уточнений.
+                # Если направление не указано, задаем уточняющий вопрос – это единственный доп. вопрос.
+                response_message = "Пожалуйста, уточните направление отправки (например, Поти-Констанца или Констанца-Поти)."
+                add_message_to_client_file(client_code, user_message, is_assistant=False)
+                add_message_to_client_file(client_code, response_message, is_assistant=True)
+                return jsonify({'reply': response_message}), 200
+            
+            # Рассчитываем цену по переданным данным.
             response_message = check_ferry_price(vehicle_description=user_message, direction=direction)
         else:
             messages = prepare_chat_context(client_code)
