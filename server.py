@@ -79,7 +79,7 @@ def prepare_chat_context(client_code):
     logger.info(f"Bible.xlsx содержит {len(bible_df)} записей.")
     
     # Загружаем внутренние правила (инструкции) из Bible.xlsx:
-    # Строки, где FAQ равен "-" и Verification равен "RULE", используются для внутренней логики, но не передаются клиенту.
+    # Строки с FAQ равным "-" и Verification равным "RULE" используются только для внутренней логики и не передаются клиенту.
     internal_rules = []
     for index, row in bible_df.iterrows():
         faq = row.get("FAQ", "").strip()
@@ -228,8 +228,9 @@ def chat():
 
         update_last_visit(client_code)
         
-        # Обработка запроса о тарифе: теперь используются только данные из запроса.
-        if "цена" in user_message.lower() or "прайс" in user_message.lower():
+        # Если запрос о тарифе (содержащий "цена", "прайс" или упоминание "минивэн" или "minivan"), сразу рассчитываем цену без уточнений.
+        if ("цена" in user_message.lower() or "прайс" in user_message.lower() or 
+            "минивэн" in user_message.lower() or "minivan" in user_message.lower()):
             lower_msg = user_message.lower()
             if "из поти" in lower_msg:
                 direction = "Ge_Ro"
@@ -239,7 +240,7 @@ def chat():
                 direction = "Ge_Ro"
             else:
                 direction = "Ro_Ge"
-            # Используем только данные, переданные в сообщении; никаких уточняющих вопросов не задаём.
+            # Используем только данные из запроса – никаких дополнительных уточнений.
             response_message = check_ferry_price(vehicle_description=user_message, direction=direction)
         else:
             messages = prepare_chat_context(client_code)
