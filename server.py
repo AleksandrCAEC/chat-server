@@ -97,7 +97,7 @@ def prepare_chat_context(client_code):
         if faq and faq != "-" and answer and verification != "RULE":
             messages.append({"role": "system", "content": f"Вопрос: {faq}\nОтвет: {answer}"})
     
-    # Добавление истории переписки из файла клиента.
+    # История переписки из файла клиента.
     spreadsheet_id = find_client_file_id(client_code)
     if spreadsheet_id:
         sheets_service = get_sheets_service()
@@ -232,9 +232,9 @@ def chat():
             if len(user_message) < 20:
                 last_description = get_last_vehicle_description(client_code)
                 if last_description:
-                    # Удаляем из полного описания все упоминания портов
+                    # Очищаем описание от старых упоминаний портов, оставляя числовую информацию (например, "17 метров")
                     cleaned_description = re.sub(
-                        r'\b(?:из|в)\s+\w+(?:\s+в\s+\w+)?\b', '', last_description, flags=re.IGNORECASE
+                        r'\b(?:из|в)\s+(?:поти(?:й)?|констанца(?:ты)?|грузия)\b', '', last_description, flags=re.IGNORECASE
                     ).strip()
                     # Добавляем явное указание нового направления
                     if direction == "Ro_Ge":
@@ -244,8 +244,8 @@ def chat():
                     updated_description = cleaned_description + new_direction_clause
                     logger.debug(f"Используем обновлённое описание: '{updated_description}'")
                     response_message = check_ferry_price(vehicle_description=updated_description, direction=direction)
-                    # Удаляем любые извинительные или уточняющие фразы из ответа
-                    response_message = re.sub(r"Пожалуйста, уточните[^.]*\.", "", response_message, flags=re.IGNORECASE).strip()
+                    # Удаляем извинения из ответа, если они есть.
+                    response_message = re.sub(r"^Извините[^.]*\.\s*", "", response_message, flags=re.IGNORECASE)
                 else:
                     response_message = check_ferry_price(vehicle_description=user_message, direction=direction)
             else:
