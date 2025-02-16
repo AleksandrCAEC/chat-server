@@ -23,7 +23,8 @@ def extract_length(text):
 def find_category_by_length(extracted_length, website_prices):
     """
     Находит тарифную категорию в данных website_prices, сопоставляя извлечённую длину с пороговыми значениями,
-    извлечёнными из названий категорий. Из каждого названия извлекается первое найденное число (порог).
+    извлечёнными из названий категорий.
+    Из каждого названия извлекается первое найденное число, которое считается порогом.
     Возвращает найденную категорию или None.
     """
     best_category = None
@@ -44,19 +45,19 @@ def check_ferry_price_from_site(vehicle_description, direction="Ro_Ge"):
     """
     Получает тариф исключительно с сайта, используя get_ferry_prices() из файла price.py.
     
-    Шаги:
+    Алгоритм:
       1. Извлекает длину из vehicle_description.
-      2. Загружает тарифы с сайта.
-      3. Находит категорию, соответствующую извлечённой длине.
-      4. Если категория найдена, возвращает тариф, используя данные из website_prices.
-         Если в ячейке с ценой обнаружены два значения (например, зачёркнутое и актуальное),
-         то в итоговом ответе выводится информация об обоих (например, "актуальное значение (предложение), старое значение: ... (зачёркнуто)").
-      5. Если длина не указана, возвращает наводящий вопрос, если транспортное средство не относится к исключениям.
+      2. Если длина не указана (и транспортное средство не относится к исключениям), возвращает наводящий вопрос.
+      3. Загружает тарифы с сайта.
+      4. Находит тарифную категорию, соответствующую извлечённой длине.
+      5. Из выбранной категории извлекает активную цену и, если доступна, зачёркнутую цену для указанного направления.
+      6. Формирует ответ, в котором отображается активное значение (и, при наличии, информация о зачёркнутом значении), а также примечание.
+      7. Если активная цена не получена, возвращает сообщение о недоступности данных.
     """
     extracted_length = extract_length(vehicle_description)
     logger.debug(f"Из описания '{vehicle_description}' извлечена длина: {extracted_length}")
     
-    # Список ключевых слов для ТС, для которых длина не требуется
+    # Транспортные средства, для которых длина не требуется
     exceptions = ["контейнер", "мини", "легков", "мото"]
     if extracted_length is None:
         if not any(keyword in vehicle_description.lower() for keyword in exceptions):
@@ -76,7 +77,7 @@ def check_ferry_price_from_site(vehicle_description, direction="Ro_Ge"):
     if category is None:
         return f"Не найдена тарифная категория для транспортного средства длиной {extracted_length} метров."
     
-    # Получаем цены для выбранной категории и направления
+    # Извлекаем активное и (опционально) старое значения цены в зависимости от направления
     if direction == "Ro_Ge":
         active_price = website_prices[category].get("price_Ro_Ge", "")
         old_price = website_prices[category].get("old_price_Ro_Ge", "")
@@ -84,17 +85,21 @@ def check_ferry_price_from_site(vehicle_description, direction="Ro_Ge"):
         active_price = website_prices[category].get("price_Ge_Ro", "")
         old_price = website_prices[category].get("old_price_Ge_Ro", "")
     
+    if not active_price:
+        return "Цена для выбранной категории не получена."
+    
     remark = website_prices[category].get("remark", "")
     
-    # Формируем итоговый ответ
+    # Формируем итоговый ответ. Если есть зачёркнутая цена, указываем её.
     if old_price:
         response_message = (f"Цена перевозки для категории '{category}' ({direction.replace('_', ' ')}) составляет "
-                            f"{active_price} (предложение), старое значение: {old_price} (зачёркнуто).")
+                            f"{active_price} (предложение), предыдущая цена: {old_price} (зачёрнуто).")
     else:
         response_message = f"Цена перевозки для категории '{category}' ({direction.replace('_', ' ')}) составляет {active_price}."
     
     if remark:
         response_message += f" Примечание: {remark}"
+    
     logger.debug(f"Итоговый ответ: {response_message}")
     return response_message
 
