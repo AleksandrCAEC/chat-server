@@ -89,7 +89,7 @@ def prepare_chat_context(client_code):
         system_instructions = "Инструкция для ассистента (не показывать клиенту): " + " ".join(internal_rules)
         messages.append({"role": "system", "content": system_instructions})
     
-    # Добавляем общую информацию из Bible.xlsx (только FAQ, где FAQ != "-" и Verification != "RULE")
+    # Добавляем общую информацию из Bible.xlsx (FAQ и Answers, где FAQ != "-" и Verification != "RULE")
     for index, row in bible_df.iterrows():
         faq = row.get("FAQ", "").strip()
         answer = row.get("Answers", "").strip()
@@ -117,6 +117,27 @@ def prepare_chat_context(client_code):
     else:
         logger.info(f"Файл клиента с кодом {client_code} не найден.")
     return messages
+
+###############################################
+# ФУНКЦИЯ ДЛЯ ИЗВЛЕЧЕНИЯ ПОСЛЕДНЕГО ОПИСАНИЯ ТС
+###############################################
+def get_last_vehicle_description(client_code):
+    """
+    Извлекает последнее сообщение от клиента, содержащее информацию о транспортном средстве,
+    из истории переписки (использует prepare_chat_context).
+    Возвращает текст или None, если подходящее сообщение не найдено.
+    """
+    try:
+        messages = prepare_chat_context(client_code)
+    except Exception as e:
+        logger.error(f"Ошибка получения истории переписки: {e}")
+        return None
+    for msg in reversed(messages):
+        if msg.get("role") == "user":
+            text = msg.get("content", "").strip()
+            if text and (re.search(r'\d+', text) or any(kw in text.lower() for kw in ["фура", "грузовик", "минивэн", "minivan", "тягач", "еврофура"])):
+                return text
+    return None
 
 ###############################################
 # ЭНДПОИНТ /register-client
@@ -205,13 +226,16 @@ def chat():
 
         update_last_visit(client_code)
         
-        # Обработка запроса о тарифе. Теперь лишних наводящих вопросов нет – используется только входящее сообщение.
+        # Обработка запроса о тарифе.
         if "цена" in user_message.lower() or "прайс" in user_message.lower():
+            # Определяем направление на основании ключевых слов в сообщении.
             lower_msg = user_message.lower()
             if "из поти" in lower_msg:
                 direction = "Ge_Ro"
             elif "из констанца" in lower_msg or "из констанцы" in lower_msg:
                 direction = "Ro_Ge"
+            elif "грузия" in lower_msg or "из груз" in lower_msg:
+                direction = "Ge_Ro"
             else:
                 direction = "Ro_Ge"
             response_message = check_ferry_price(vehicle_description=user_message, direction=direction)
