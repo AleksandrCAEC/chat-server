@@ -47,7 +47,7 @@ logger.info("Текущие переменные окружения:")
 pprint.pprint(dict(os.environ))
 
 # Глобальный словарь для хранения состояния уточняющих вопросов (guiding questions)
-# Дополнительные guiding questions отключены – единственный возможный уточняющий вопрос касается направления.
+# Дополнительные уточняющие вопросы отключены – единственный возможный уточняющий вопрос касается направления.
 pending_guiding = {}
 
 ###############################################
@@ -121,7 +121,7 @@ def prepare_chat_context(client_code):
     return messages
 
 ###############################################
-# ФУНКЦИЯ ДЛЯ ИЗВЛЕЧЕНИЯ ПОСЛЕДНЕГО ОПИСАНИЯ ТС
+# ФУНКЦИЯ ДЛЯ ИЗВЛЕЧЕНИЯ ПОСЛЕДНЕГО ПОЛНОГО ОПИСАНИЯ ТС
 ###############################################
 def get_last_vehicle_description(client_code):
     """
@@ -134,7 +134,6 @@ def get_last_vehicle_description(client_code):
     except Exception as e:
         logger.error(f"Ошибка получения истории переписки: {e}")
         return None
-    # Ищем последнее сообщение, в котором упоминается тип ТС и есть числовые данные (например, длина)
     for msg in reversed(messages):
         if msg.get("role") == "user":
             text = msg.get("content", "").strip()
@@ -248,11 +247,10 @@ def chat():
                 add_message_to_client_file(client_code, response_message, is_assistant=True)
                 return jsonify({'reply': response_message}), 200
             
-            # Если сообщение слишком короткое, считаем его уточняющим и используем последнее полное описание из истории.
+            # Если сообщение слишком короткое (например, содержит только направление), используем последнее полное описание из истории.
             if len(user_message) < 20:
                 last_description = get_last_vehicle_description(client_code)
                 if last_description:
-                    # Не объединяем текущее сообщение, а используем последнее полное описание.
                     logger.debug(f"Используем последнее полное описание транспортного средства: '{last_description}'")
                     response_message = check_ferry_price(vehicle_description=last_description, direction=direction)
                 else:
