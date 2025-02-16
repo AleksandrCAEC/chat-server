@@ -120,7 +120,7 @@ def prepare_chat_context(client_code):
     return messages
 
 ###############################################
-# ФУНКЦИЯ ДЛЯ ИЗВЛЕЧЕНИЯ ПОСЛЕДНЕГО ПОЛНОГО ОПИСАНИЯ ТС
+# ФУНКЦИЯ ДЛЯ ИЗВЛЕЧЕНИЯ ПОЛНОГО ОПИСАНИЯ ТС
 ###############################################
 def get_last_vehicle_description(client_code):
     """
@@ -245,15 +245,14 @@ def chat():
                 add_message_to_client_file(client_code, response_message, is_assistant=True)
                 return jsonify({'reply': response_message}), 200
             
-            # Если сообщение кажется уточняющим (содержит только направление), используем последнее полное описание из истории.
-            direction_keywords = {"поти", "констанца", "констанцы", "грузия", "груз"}
-            words = set(re.findall(r'\w+', lower_msg))
-            # Если все слова принадлежат к группе направлений или служебным словам, считаем это уточнением.
-            if words.issubset(direction_keywords.union({"из", "а", "в", "для", "мой", "своего", "с"})):
+            # Если сообщение выглядит как уточнение (короткое сообщение) – используем последнее полное описание
+            if len(user_message) < 20:
                 last_description = get_last_vehicle_description(client_code)
                 if last_description:
-                    logger.debug(f"Используем последнее полное описание: '{last_description}'")
-                    response_message = check_ferry_price(vehicle_description=last_description, direction=direction)
+                    # Удаляем из полного описания любые упоминания направлений.
+                    cleaned_description = re.sub(r'\bиз\s+\w+(?:\s+в\s+\w+)?', '', last_description, flags=re.IGNORECASE).strip()
+                    logger.debug(f"Используем последнее полное описание (очищенное): '{cleaned_description}'")
+                    response_message = check_ferry_price(vehicle_description=cleaned_description, direction=direction)
                 else:
                     response_message = check_ferry_price(vehicle_description=user_message, direction=direction)
             else:
