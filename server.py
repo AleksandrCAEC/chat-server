@@ -228,7 +228,7 @@ def chat():
         # Обработка запроса о тарифе.
         if any(kw in user_message.lower() for kw in ["цена", "прайс", "минивэн", "minivan", "truck", "траk"]):
             lower_msg = user_message.lower()
-            # Определяем направление по ключевым словам.
+            # Определяем направление по ключевым словам:
             if "из поти" in lower_msg:
                 direction = "Ge_Ro"
             elif "из констанца" in lower_msg or "из констанцы" in lower_msg or "из констанцу" in lower_msg:
@@ -241,7 +241,9 @@ def chat():
                 add_message_to_client_file(client_code, response_message, is_assistant=True)
                 return jsonify({'reply': response_message}), 200
             
-            # Если пользователь уточняет коротким сообщением типа "А из констанцы?" – используем последнее полное описание
+            logger.debug(f"Определённое направление: {direction}")
+            
+            # Если пользователь уточняет коротким сообщением типа "а из констанцы?" – используем последнее полное описание
             if lower_msg in ["а из констанцы?", "из констанцы", "а из констанцы"]:
                 last_description = get_last_vehicle_description(client_code)
                 if last_description:
@@ -249,7 +251,6 @@ def chat():
                         r'\b(?:из|в)\s+(?:поти(?:й)?|констанца(?:ты)?|констанцу|грузия)\b',
                         '', last_description, flags=re.IGNORECASE
                     ).strip()
-                    # Добавляем явное указание нового направления
                     if direction == "Ro_Ge":
                         new_direction_clause = ", направление: Констанца-Поти"
                     elif direction == "Ge_Ro":
@@ -265,12 +266,11 @@ def chat():
                 else:
                     response_message = check_ferry_price(vehicle_description=user_message, direction=direction)
             else:
-                # Если сообщение длинное, очищаем его от указаний портов
+                # Для более длинного сообщения очищаем его от упоминаний портов и добавляем новое направление
                 cleaned_description = re.sub(
                     r'\b(?:из|в)\s+(?:поти(?:й)?|констанца(?:ты)?|констанцу|грузия)\b',
                     '', user_message, flags=re.IGNORECASE
                 ).strip()
-                # Перед добавлением нового направления удаляем старые директивы, если они есть
                 cleaned_description = re.sub(r",\s*направление:\s*.*$", "", cleaned_description, flags=re.IGNORECASE).strip()
                 if direction == "Ro_Ge":
                     new_direction_clause = ", направление: Констанца-Поти"
