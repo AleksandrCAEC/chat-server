@@ -11,7 +11,7 @@ from datetime import datetime
 from clientdata import register_or_update_client, verify_client_code, update_last_visit
 from client_caec import add_message_to_client_file, find_client_file_id, get_sheets_service, CLIENT_FILES_DIR
 from bible import load_bible_data, save_bible_pair
-from price_handler import check_ferry_price, load_price_data  # Функция check_ferry_price получает тарифы с сайта
+from price_handler import check_ferry_price, load_price_data  # Тарифы получаются через эту функцию
 from flask_cors import CORS
 import openpyxl
 
@@ -77,8 +77,7 @@ def prepare_chat_context(client_code):
         raise Exception("Bible.xlsx не найден или недоступен.")
     logger.info(f"Bible.xlsx содержит {len(bible_df)} записей.")
     
-    # Загружаем внутренние правила (инструкции) из Bible.xlsx: строки, где FAQ равен "-" и Verification равен "RULE"
-    # Эти инструкции НЕ передаются клиенту.
+    # Загружаем внутренние правила (инструкции) из Bible.xlsx: строки с FAQ равным "-" и Verification равным "RULE"
     internal_rules = []
     for index, row in bible_df.iterrows():
         faq = row.get("FAQ", "").strip()
@@ -90,7 +89,7 @@ def prepare_chat_context(client_code):
         system_instructions = "Инструкция для ассистента (не показывать клиенту): " + " ".join(internal_rules)
         messages.append({"role": "system", "content": system_instructions})
     
-    # Добавляем общую информацию (FAQ и Answers, где FAQ не равен "-" и Verification != "RULE")
+    # Добавляем общую информацию из Bible.xlsx (только FAQ, где FAQ != "-" и Verification != "RULE")
     for index, row in bible_df.iterrows():
         faq = row.get("FAQ", "").strip()
         answer = row.get("Answers", "").strip()
@@ -118,27 +117,6 @@ def prepare_chat_context(client_code):
     else:
         logger.info(f"Файл клиента с кодом {client_code} не найден.")
     return messages
-
-###############################################
-# ФУНКЦИЯ ДЛЯ ИЗВЛЕЧЕНИЯ ПОСЛЕДНЕГО ОПИСАНИЯ ТС
-###############################################
-def get_last_vehicle_description(client_code):
-    """
-    Извлекает последнее сообщение от клиента, содержащее информацию о транспортном средстве,
-    из истории переписки (использует prepare_chat_context).
-    Возвращает текст или None, если подходящее сообщение не найдено.
-    """
-    try:
-        messages = prepare_chat_context(client_code)
-    except Exception as e:
-        logger.error(f"Ошибка получения истории переписки: {e}")
-        return None
-    for msg in reversed(messages):
-        if msg.get("role") == "user":
-            text = msg.get("content", "").strip()
-            if text and (re.search(r'\d+', text) or any(kw in text.lower() for kw in ["фура", "грузовик", "минивэн", "minivan", "тягач", "еврофура"])):
-                return text
-    return None
 
 ###############################################
 # ЭНДПОИНТ /register-client
@@ -212,7 +190,7 @@ def chat():
             logger.error("Ошибка: Сообщение и код клиента не могут быть пустыми")
             return jsonify({'error': 'Сообщение и код клиента не могут быть пустыми'}), 400
 
-        # Проверяем наличие ключевых файлов: Bible.xlsx и файл клиента.
+        # Проверяем наличие ключевых файлов: Bible.xlsx и файла клиента.
         try:
             bible_data = load_bible_data()
         except Exception as e:
@@ -227,32 +205,16 @@ def chat():
 
         update_last_visit(client_code)
         
-        # Обработка follow‑up запросов по тарифам.
+        # Обработка запроса о тарифе. Теперь лишних наводящих вопросов нет – используется только входящее сообщение.
         if "цена" in user_message.lower() or "прайс" in user_message.lower():
-            # Если сообщение недостаточно информативно, пробуем объединить его с последним полным описанием ТС из истории.
-            if len(user_message) < 20 or not re.search(r'\d+', user_message):
-                last_description = get_last_vehicle_description(client_code)
-                if last_description:
-                    combined_description = last_description + " " + user_message
-                    logger.debug(f"Используем комбинированное описание: '{combined_description}'")
-                    if "из поти" in user_message.lower():
-                        direction = "Ge_Ro"
-                    elif "из констанца" in user_message.lower() or "из констанцы" in user_message.lower():
-                        direction = "Ro_Ge"
-                    else:
-                        direction = "Ro_Ge"
-                    response_message = check_ferry_price(vehicle_description=combined_description, direction=direction)
-                else:
-                    response_message = check_ferry_price(vehicle_description=user_message, direction="Ge_Ro" if "поти" in user_message.lower() else "Ro_Ge")
+            lower_msg = user_message.lower()
+            if "из поти" in lower_msg:
+                direction = "Ge_Ro"
+            elif "из констанца" in lower_msg or "из констанцы" in lower_msg:
+                direction = "Ro_Ge"
             else:
-                lower_msg = user_message.lower()
-                if "из поти" in lower_msg:
-                    direction = "Ge_Ro"
-                elif "из констанца" in lower_msg or "из констанцы" in lower_msg:
-                    direction = "Ro_Ge"
-                else:
-                    direction = "Ro_Ge"
-                response_message = check_ferry_price(vehicle_description=user_message, direction=direction)
+                direction = "Ro_Ge"
+            response_message = check_ferry_price(vehicle_description=user_message, direction=direction)
         else:
             messages = prepare_chat_context(client_code)
             messages.append({"role": "user", "content": user_message})
