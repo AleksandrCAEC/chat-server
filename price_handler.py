@@ -8,11 +8,13 @@ logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
 
 # Словарь синонимов для типов транспортных средств.
-# Ключи – варианты, которые может ввести клиент (в нижнем регистре),
-# значения – официальный термин, используемый в тарифных данных.
+# Здесь указываются варианты, которые может ввести клиент (в нижнем регистре),
+# а значения – официальный термин, который используется в тарифных данных.
+# Обратите внимание: если в запросе присутствует явная информация о длине, то выбор тарифа будет переопределён.
 TYPE_SYNONYMS = {
     "минивэн": "Minivan",
     "minivan": "Minivan",
+    # Для грузовика оставляем общий синоним, но если длина указана, то логика подберёт более узкую категорию
     "фура": "Standard truck with trailer (up to 17M)",
     "грузовик": "Standard truck with trailer (up to 17M)",
     "еврофура": "Standard truck with trailer (up to 17M)",
@@ -36,7 +38,7 @@ def find_category_by_length(extracted_length, website_prices):
     """
     Находит тарифную категорию, сопоставляя извлечённую длину с пороговыми значениями,
     извлечёнными из названий тарифных категорий.
-    Из каждого названия извлекается первое найденное число, которое считается порогом.
+    Для каждой категории извлекается первое найденное число, которое считается порогом.
     Возвращает найденную категорию или None.
     """
     best_category = None
@@ -60,17 +62,19 @@ def check_ferry_price_from_site(vehicle_description, direction="Ro_Ge"):
     Алгоритм:
       1. Загружает тарифы с сайта.
       2. Сначала пытается определить тарифную категорию по названию транспортного средства:
-         если в описании встречается синоним из TYPE_SYNONYMS, он преобразуется в официальный термин и,
+         если в описании встречается синоним из TYPE_SYNONYMS, преобразует его в официальный термин и,
          если этот термин присутствует в тарифных данных, используется для определения тарифа.
       3. Если по названию тариф не найден, пытается извлечь длину из vehicle_description
          и определить категорию через find_category_by_length.
       4. Если ни название, ни длина не позволяют однозначно определить категорию, возвращается запрос на уточнение длины.
       5. Если тарифная категория определена, извлекается активное значение цены для указанного направления и примечание.
-         Если активная цена содержит маркер "PRICE_QUERY", возвращается сообщение о том, что актуальная цена не получена.
+         Если активная цена содержит маркер "PRICE_QUERY", возвращается сообщение об отсутствии актуальной цены.
       6. Формируется итоговый ответ, который включает только активное значение цены и примечание.
-    Дополнительное правило для грузовиков:
-      Если в запросе присутствует слово "грузовик" или "truck" и явно указана длина "10" метров,
-      и если в тарифных данных присутствует ключ "Truck (up to 10M)", то используется именно этот тариф.
+      
+      **Доработка по грузовику:**  
+      Если в запросе присутствует слово "грузовик" или "truck" и извлеченная длина меньше или равна 8, то даже если синоним
+      вернул "Standard truck with trailer (up to 17M)", функция попытается найти категорию по длине, которая, как правило,
+      будет "Mini truck (up to 8M)".
     """
     try:
         website_prices = get_ferry_prices()
@@ -82,22 +86,15 @@ def check_ferry_price_from_site(vehicle_description, direction="Ro_Ge"):
     vehicle_lower = vehicle_description.lower()
     category = None
 
-    # Дополнительное правило для грузовиков: если в запросе указана длина 10 метров и слово "грузовик"/"truck"
-    if ("грузовик" in vehicle_lower or "truck" in vehicle_lower) and re.search(r'\b10\b', vehicle_lower):
-        if "Truck (up to 10M)" in website_prices:
-            category = "Truck (up to 10M)"
-            logger.debug("Используем дополнительное правило: выбрана категория 'Truck (up to 10M)' для запроса с длиной 10 метров.")
-    
-    # Если дополнительное правило не сработало, определяем категорию по синониму.
-    if category is None:
-        for synonym, official in TYPE_SYNONYMS.items():
-            if synonym in vehicle_lower:
-                if official in website_prices:
-                    category = official
-                    logger.debug(f"Синоним '{synonym}' определил тарифную категорию: {category}")
-                    break
+    # 1. Попытка определить тарифную категорию по синониму.
+    for synonym, official in TYPE_SYNONYMS.items():
+        if synonym in vehicle_lower:
+            if official in website_prices:
+                category = official
+                logger.debug(f"Синоним '{synonym}' определил тарифную категорию: {category}")
+                break
 
-    # Если по синониму не удалось, ищем совпадение по ключам тарифных данных.
+    # 2. Если по синониму не удалось, ищем совпадение по ключам тарифных данных.
     if category is None:
         for key in website_prices:
             if key.lower() in vehicle_lower:
@@ -105,20 +102,23 @@ def check_ferry_price_from_site(vehicle_description, direction="Ro_Ge"):
                 logger.debug(f"Найденная категория по совпадению названия: {category}")
                 break
 
-    # Если по названию не удалось, пробуем извлечь длину.
-    if category is None:
-        extracted_length = extract_length(vehicle_description)
-        logger.debug(f"Из описания '{vehicle_description}' извлечена длина: {extracted_length}")
-        if extracted_length is not None:
-            category = find_category_by_length(extracted_length, website_prices)
-        else:
-            return ("Пожалуйста, уточните длину вашего транспортного средства "
-                    "(например, до 20, до 17, до 14, до 10 или до 8 метров).")
-    
-    if category is None:
-        return "Не удалось определить тарифную категорию по вашему запросу. Пожалуйста, уточните информацию о транспортном средстве."
+    # 3. Если информация о длине присутствует, используем её для уточнения тарифной категории.
+    extracted_length = extract_length(vehicle_description)
+    if extracted_length is not None:
+        category_by_length = find_category_by_length(extracted_length, website_prices)
+        if category_by_length is not None:
+            # Если категория, определённая по длине, отличается от найденной по синониму,
+            # используем категорию по длине, так как она более специфична.
+            if category is None or (category_by_length != category):
+                logger.debug(f"Переопределяем тарифную категорию с '{category}' на '{category_by_length}' на основе длины {extracted_length} метров")
+                category = category_by_length
 
-    # Извлекаем активное значение цены для выбранной категории в зависимости от направления.
+    # 4. Если ни по названию, ни по длине не удалось определить категорию, просим уточнить длину.
+    if category is None:
+        return ("Пожалуйста, уточните длину вашего транспортного средства "
+                "(например, до 20, до 17, до 14, до 10 или до 8 метров).")
+    
+    # 5. Извлекаем активное значение цены для выбранной категории в зависимости от направления.
     if direction == "Ro_Ge":
         active_price = website_prices[category].get("price_Ro_Ge", "")
     else:
@@ -130,7 +130,7 @@ def check_ferry_price_from_site(vehicle_description, direction="Ro_Ge"):
     
     remark = website_prices[category].get("remark", "")
     
-    # Формируем итоговый ответ (только активная цена и примечание).
+    # 6. Формируем итоговый ответ (выводим только активную цену и примечание).
     response_message = f"Цена перевозки для категории '{category}' ({direction.replace('_', ' ')}) составляет {active_price}."
     if remark:
         response_message += f" Примечание: {remark}"
@@ -164,7 +164,7 @@ if __name__ == "__main__":
     result_truck = check_ferry_price(sample_text3, direction="Ge_Ro")
     logger.info(f"Результат теста для грузовика 15 метров (Ge_Ro): {result_truck}")
     
-    # Тестовый пример 4: Грузовик 10 метров, из Поти в Констанца - должно использовать дополнительное правило
-    sample_text4 = "Грузовик 10 метров, из Поти в Констанца"
-    result_truck10 = check_ferry_price(sample_text4, direction="Ge_Ro")
-    logger.info(f"Результат теста для грузовика 10 метров (Ge_Ro): {result_truck10}")
+    # Тестовый пример 4: Грузовик 8 метров, из Ro_Ge запроса
+    sample_text4 = "Грузовик 8 метров"
+    result_truck8 = check_ferry_price(sample_text4, direction="Ro_Ge")
+    logger.info(f"Результат теста для грузовика 8 метров (Ro_Ge): {result_truck8}")
