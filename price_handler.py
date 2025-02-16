@@ -38,7 +38,7 @@ def find_category_by_length(extracted_length, website_prices):
                 if best_threshold is None or threshold < best_threshold:
                     best_threshold = threshold
                     best_category = category
-    logger.debug(f"Найденная категория: {best_category} для длины {extracted_length}")
+    logger.debug(f"Найденная категория по длине: {best_category} для длины {extracted_length}")
     return best_category
 
 def check_ferry_price_from_site(vehicle_description, direction="Ro_Ge"):
@@ -46,16 +46,17 @@ def check_ferry_price_from_site(vehicle_description, direction="Ro_Ge"):
     Получает тариф исключительно с сайта, используя get_ferry_prices() из файла price.py.
     
     Алгоритм:
-      1. Пытаемся извлечь тарифную категорию по названию ТС: если одно из ключевых слов тарифных категорий
-         встречается в описании, используем его.
-      2. Если по названию тариф не определён, пытаемся извлечь длину из описания и сопоставить её с тарифными категориями.
-      3. Если ни название, ни длина не позволяют определить тарифную категорию, то:
-           - Если описание не содержит исключающих слов (для типов, где длина обязательна), возвращается запрос на уточнение длины.
-           - Иначе, если транспортное средство относится к типам, где длина не требуется, пытаемся найти категорию по совпадению.
-      4. Если тарифная категория найдена, извлекаем из неё активную цену (и, если есть, зачёркнутую цену) для указанного направления, а также примечание.
-      5. Формируем и возвращаем итоговый ответ.
+      1. Загружает тарифы с сайта.
+      2. Пытается определить тарифную категорию по названию транспортного средства.
+         Если в описании (vehicle_description) встречается слово, совпадающее (без учета регистра)
+         с одним из ключей в website_prices, категория определяется на основании названия.
+      3. Если по названию тариф не найден, пытается извлечь длину из vehicle_description.
+         Если длина найдена, выбирается категория по диапазону с помощью find_category_by_length.
+      4. Если ни название, ни длина не позволяют определить категорию, возвращается запрос на уточнение.
+      5. Если тарифная категория определена, извлекаются активная цена (и, если есть, зачёркнутая цена)
+         для выбранного направления, а также примечание.
+      6. Формируется итоговый ответ.
     """
-    # Попытка определить тариф по названию транспортного средства
     try:
         website_prices = get_ferry_prices()
         logger.debug(f"Получены тарифы с сайта: {website_prices}")
@@ -63,8 +64,8 @@ def check_ferry_price_from_site(vehicle_description, direction="Ro_Ge"):
         logger.error(f"Ошибка при получении тарифов с сайта: {e}")
         return "Ошибка при получении тарифов с сайта."
     
+    # 1. Попытка определить категорию по названию транспортного средства.
     category_by_name = None
-    # Перебираем все ключи, полученные из сайта, и ищем совпадение с описанием (без учета регистра)
     for key in website_prices:
         if key.lower() in vehicle_description.lower():
             category_by_name = key
@@ -74,30 +75,31 @@ def check_ferry_price_from_site(vehicle_description, direction="Ro_Ge"):
     if category_by_name:
         category = category_by_name
     else:
-        # Если по названию тариф не определён, пробуем извлечь длину
+        # 2. Если по названию не найдено, пытаемся извлечь длину.
         extracted_length = extract_length(vehicle_description)
         logger.debug(f"Из описания '{vehicle_description}' извлечена длина: {extracted_length}")
         if extracted_length is not None:
             category = find_category_by_length(extracted_length, website_prices)
         else:
-            # Если длина не указана, возвращаем запрос на уточнение
-            # Список исключающих слов, для которых длина не требуется:
+            # 3. Если длина не указана, и по названию тариф не определён.
+            # Список типов, для которых длина не требуется:
             exceptions = ["контейнер", "минивэн", "легков", "мото"]
             if not any(keyword in vehicle_description.lower() for keyword in exceptions):
                 return ("Пожалуйста, уточните длину вашего транспортного средства "
                         "(например, до 20, до 17, до 14, до 10 или до 8 метров).")
             else:
-                # Пытаемся найти тарифную категорию по совпадению ключевых слов
+                # Если описание относится к типам, для которых длина не требуется,
+                # пытаемся найти категорию по совпадению ключевых слов в тарифах.
                 for key in website_prices:
                     for keyword in exceptions:
-                        if keyword in key.lower():
+                        if keyword in key.lower() or keyword in vehicle_description.lower():
                             category = key
                             logger.debug(f"Найденная категория по исключающему слову '{keyword}': {category}")
                             break
                     if category:
                         break
                 if category is None:
-                    return "Для данного типа транспортного средства длина не требуется для расчета тарифа."
+                    return "Для данного типа транспортного средства тарифные данные не найдены."
 
     if category is None:
         return "Не удалось определить тарифную категорию по вашему запросу. Пожалуйста, уточните информацию о транспортном средстве."
@@ -115,7 +117,7 @@ def check_ferry_price_from_site(vehicle_description, direction="Ro_Ge"):
     
     remark = website_prices[category].get("remark", "")
     
-    # Формируем итоговый ответ
+    # Формирование итогового ответа
     if old_price:
         response_message = (f"Цена перевозки для категории '{category}' ({direction.replace('_', ' ')}) составляет "
                             f"{active_price} (предложение), предыдущая цена: {old_price} (зачёрнуто).")
@@ -144,12 +146,12 @@ if __name__ == "__main__":
     result_ge_ro = check_ferry_price(sample_text1, direction="Ge_Ro")
     logger.info(f"Результат теста (Ge_Ro): {result_ge_ro}")
     
-    # Тестовый пример 2: Клиент указывает "Минивэн, Констанца-Поти" (без указания длины)
-    sample_text2 = "Минивэн, Констанца-Поти"
+    # Тестовый пример 2: Клиент указывает "Минивэн" без указания длины
+    sample_text2 = "Минивэн"
     result_minivan = check_ferry_price(sample_text2, direction="Ro_Ge")
     logger.info(f"Результат теста для минивэна: {result_minivan}")
     
-    # Тестовый пример 3: Клиент указывает "Грузовик, из Поти в Констанца, 15 метров"
+    # Тестовый пример 3: Клиент указывает "Грузовик 15 метров, из Поти в Констанца"
     sample_text3 = "Грузовик 15 метров, из Поти в Констанца"
     result_truck = check_ferry_price(sample_text3, direction="Ge_Ro")
     logger.info(f"Результат теста для грузовика 15 метров (Ge_Ro): {result_truck}")
