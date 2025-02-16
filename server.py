@@ -99,7 +99,7 @@ def prepare_chat_context(client_code):
         if faq and faq != "-" and answer and verification != "RULE":
             messages.append({"role": "system", "content": f"Вопрос: {faq}\nОтвет: {answer}"})
     
-    # Добавляем историю переписки из уникального файла клиента
+    # Добавляем историю переписки из уникального файла клиента.
     spreadsheet_id = find_client_file_id(client_code)
     if spreadsheet_id:
         sheets_service = get_sheets_service()
@@ -229,9 +229,10 @@ def chat():
         update_last_visit(client_code)
         
         # Обработка запроса о тарифе.
+        # Если сообщение содержит слова "цена", "прайс", "минивэн"/"minivan", "truck" и т.п.
         if ("цена" in user_message.lower() or "прайс" in user_message.lower() or 
             "минивэн" in user_message.lower() or "minivan" in user_message.lower() or
-            "траk" in user_message.lower() or "truck" in user_message.lower()):
+            "truck" in user_message.lower() or "траk" in user_message.lower()):
             lower_msg = user_message.lower()
             # Определяем направление, если оно явно указано.
             if "из поти" in lower_msg:
@@ -247,7 +248,7 @@ def chat():
                 add_message_to_client_file(client_code, response_message, is_assistant=True)
                 return jsonify({'reply': response_message}), 200
             
-            # Если сообщение слишком короткое (например, содержит только направление), используем последнее полное описание из истории.
+            # Если сообщение содержит только направление (менее 20 символов), используем последнее полное описание из истории.
             if len(user_message) < 20:
                 last_description = get_last_vehicle_description(client_code)
                 if last_description:
