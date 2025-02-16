@@ -47,7 +47,7 @@ logger.info("Текущие переменные окружения:")
 pprint.pprint(dict(os.environ))
 
 # Глобальный словарь для хранения состояния уточняющих вопросов (guiding questions)
-# Сейчас уточняющие вопросы отключены – единственный вопрос, который может быть задан, касается направления.
+# Дополнительные guiding questions отключены – единственный возможный уточняющий вопрос касается направления.
 pending_guiding = {}
 
 ###############################################
@@ -91,7 +91,7 @@ def prepare_chat_context(client_code):
         system_instructions = "Инструкция для ассистента (не показывать клиенту): " + " ".join(internal_rules)
         messages.append({"role": "system", "content": system_instructions})
     
-    # Добавляем общую информацию из Bible.xlsx (FAQ и Answers, где FAQ != "-" и Verification != "RULE")
+    # Добавляем общую информацию из Bible.xlsx (только FAQ и Answers, где FAQ != "-" и Verification != "RULE")
     for index, row in bible_df.iterrows():
         faq = row.get("FAQ", "").strip()
         answer = row.get("Answers", "").strip()
@@ -125,7 +125,7 @@ def prepare_chat_context(client_code):
 ###############################################
 def get_last_vehicle_description(client_code):
     """
-    Извлекает последнее сообщение от клиента, содержащее информацию о транспортном средстве,
+    Извлекает последнее полное сообщение от клиента, содержащее информацию о транспортном средстве,
     из истории переписки (использует prepare_chat_context).
     Возвращает текст или None, если подходящее сообщение не найдено.
     """
@@ -134,6 +134,7 @@ def get_last_vehicle_description(client_code):
     except Exception as e:
         logger.error(f"Ошибка получения истории переписки: {e}")
         return None
+    # Ищем последнее сообщение, в котором упоминается тип ТС и есть числовые данные (например, длина)
     for msg in reversed(messages):
         if msg.get("role") == "user":
             text = msg.get("content", "").strip()
@@ -228,9 +229,10 @@ def chat():
 
         update_last_visit(client_code)
         
-        # Обработка запроса о тарифе: если сообщение содержит "цена", "прайс", "минивэн" или "minivan"
+        # Обработка запроса о тарифе.
         if ("цена" in user_message.lower() or "прайс" in user_message.lower() or 
-            "минивэн" in user_message.lower() or "minivan" in user_message.lower()):
+            "минивэн" in user_message.lower() or "minivan" in user_message.lower() or
+            "траk" in user_message.lower() or "truck" in user_message.lower()):
             lower_msg = user_message.lower()
             # Определяем направление, если оно явно указано.
             if "из поти" in lower_msg:
@@ -246,13 +248,13 @@ def chat():
                 add_message_to_client_file(client_code, response_message, is_assistant=True)
                 return jsonify({'reply': response_message}), 200
             
-            # Если входящее сообщение слишком короткое, объединяем его с предыдущим описанием ТС.
+            # Если сообщение слишком короткое, считаем его уточняющим и используем последнее полное описание из истории.
             if len(user_message) < 20:
                 last_description = get_last_vehicle_description(client_code)
                 if last_description:
-                    combined_description = last_description + " " + user_message
-                    logger.debug(f"Используем комбинированное описание: '{combined_description}'")
-                    response_message = check_ferry_price(vehicle_description=combined_description, direction=direction)
+                    # Не объединяем текущее сообщение, а используем последнее полное описание.
+                    logger.debug(f"Используем последнее полное описание транспортного средства: '{last_description}'")
+                    response_message = check_ferry_price(vehicle_description=last_description, direction=direction)
                 else:
                     response_message = check_ferry_price(vehicle_description=user_message, direction=direction)
             else:
