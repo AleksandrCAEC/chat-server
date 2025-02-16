@@ -243,47 +243,25 @@ def chat():
             
             logger.debug(f"Определённое направление: {direction}")
             
-            # Если пользователь уточняет коротким сообщением типа "а из констанцы?" – используем последнее полное описание
-            if lower_msg in ["а из констанцы?", "из констанцы", "а из констанцы"]:
-                last_description = get_last_vehicle_description(client_code)
-                if last_description:
-                    cleaned_description = re.sub(
-                        r'\b(?:из|в)\s+(?:поти(?:й)?|констанца(?:ты)?|констанцу|грузия)\b',
-                        '', last_description, flags=re.IGNORECASE
-                    ).strip()
-                    if direction == "Ro_Ge":
-                        new_direction_clause = ", направление: Констанца-Поти"
-                    elif direction == "Ge_Ro":
-                        new_direction_clause = ", направление: Поти-Констанца"
-                    elif direction == "Custom":
-                        new_direction_clause = ", направление: Констанца->Грузия"
-                    else:
-                        new_direction_clause = ""
-                    updated_description = cleaned_description + new_direction_clause
-                    logger.debug(f"Используем обновлённое описание: '{updated_description}'")
-                    response_message = check_ferry_price(vehicle_description=updated_description, direction=direction)
-                    response_message = re.sub(r"^Извините[^.]*\.\s*", "", response_message, flags=re.IGNORECASE)
-                else:
-                    response_message = check_ferry_price(vehicle_description=user_message, direction=direction)
+            # Мы исключаем использование сохранённой переписки для тарифных запросов.
+            # Всегда формируем запрос к источнику, используя входящее сообщение.
+            cleaned_description = re.sub(
+                r'\b(?:из|в)\s+(?:поти(?:й)?|констанца(?:ты)?|констанцу|грузия)\b',
+                '', user_message, flags=re.IGNORECASE
+            ).strip()
+            # Добавляем явное указание нового направления
+            if direction == "Ro_Ge":
+                new_direction_clause = ", направление: Констанца-Поти"
+            elif direction == "Ge_Ro":
+                new_direction_clause = ", направление: Поти-Констанца"
+            elif direction == "Custom":
+                new_direction_clause = ", направление: Констанца->Грузия"
             else:
-                # Для более длинного сообщения очищаем его от упоминаний портов и добавляем новое направление
-                cleaned_description = re.sub(
-                    r'\b(?:из|в)\s+(?:поти(?:й)?|констанца(?:ты)?|констанцу|грузия)\b',
-                    '', user_message, flags=re.IGNORECASE
-                ).strip()
-                cleaned_description = re.sub(r",\s*направление:\s*.*$", "", cleaned_description, flags=re.IGNORECASE).strip()
-                if direction == "Ro_Ge":
-                    new_direction_clause = ", направление: Констанца-Поти"
-                elif direction == "Ge_Ro":
-                    new_direction_clause = ", направление: Поти-Констанца"
-                elif direction == "Custom":
-                    new_direction_clause = ", направление: Констанца->Грузия"
-                else:
-                    new_direction_clause = ""
-                updated_description = cleaned_description + new_direction_clause
-                logger.debug(f"Используем обновлённое описание: '{updated_description}'")
-                response_message = check_ferry_price(vehicle_description=updated_description, direction=direction)
-                response_message = re.sub(r"^Извините[^.]*\.\s*", "", response_message, flags=re.IGNORECASE)
+                new_direction_clause = ""
+            updated_description = cleaned_description + new_direction_clause
+            logger.debug(f"Используем обновлённое описание: '{updated_description}'")
+            response_message = check_ferry_price(vehicle_description=updated_description, direction=direction)
+            response_message = re.sub(r"^Извините[^.]*\.\s*", "", response_message, flags=re.IGNORECASE)
         else:
             messages = prepare_chat_context(client_code)
             messages.append({"role": "user", "content": user_message})
