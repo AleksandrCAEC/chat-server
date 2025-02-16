@@ -228,7 +228,7 @@ def chat():
         # Обработка запроса о тарифе.
         if any(kw in user_message.lower() for kw in ["цена", "прайс", "минивэн", "minivan", "truck", "траk"]):
             lower_msg = user_message.lower()
-            # Определяем направление по ключевым словам.
+            # Определяем направление по ключевым словам
             if "из поти" in lower_msg:
                 direction = "Ge_Ro"
             elif "из констанца" in lower_msg or "из констанцы" in lower_msg or "из констанцу" in lower_msg:
@@ -241,12 +241,12 @@ def chat():
                 add_message_to_client_file(client_code, response_message, is_assistant=True)
                 return jsonify({'reply': response_message}), 200
             
-            # Всегда очищаем описание от упоминаний портов, чтобы избежать конфликтов
+            # Очищаем исходное сообщение от упоминаний портов
             cleaned_description = re.sub(
                 r'\b(?:из|в)\s+(?:поти(?:й)?|констанца(?:ты)?|констанцу|грузия)\b',
                 '', user_message, flags=re.IGNORECASE
             ).strip()
-            # Если исходное сообщение короткое, используем последнее полное описание
+            # Если сообщение короткое, используем последнее полное описание
             if len(user_message) < 20:
                 last_description = get_last_vehicle_description(client_code)
                 if last_description:
@@ -254,6 +254,8 @@ def chat():
                         r'\b(?:из|в)\s+(?:поти(?:й)?|констанца(?:ты)?|констанцу|грузия)\b',
                         '', last_description, flags=re.IGNORECASE
                     ).strip()
+            # Перед добавлением нового направления удаляем старые директивы, если они есть
+            cleaned_description = re.sub(r",\s*направление:\s*.*$", "", cleaned_description, flags=re.IGNORECASE).strip()
             # Добавляем явное указание нового направления
             if direction == "Ro_Ge":
                 new_direction_clause = ", направление: Констанца-Поти"
