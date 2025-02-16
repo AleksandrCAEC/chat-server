@@ -11,7 +11,7 @@ from datetime import datetime
 from clientdata import register_or_update_client, verify_client_code, update_last_visit
 from client_caec import add_message_to_client_file, find_client_file_id, get_sheets_service, CLIENT_FILES_DIR
 from bible import load_bible_data, save_bible_pair
-from price_handler import check_ferry_price, load_price_data  # Тарифы получаются через эту функцию
+from price_handler import check_ferry_price, load_price_data  # Функция check_ferry_price получает тарифы с сайта
 from flask_cors import CORS
 import openpyxl
 
@@ -77,7 +77,20 @@ def prepare_chat_context(client_code):
         raise Exception("Bible.xlsx не найден или недоступен.")
     logger.info(f"Bible.xlsx содержит {len(bible_df)} записей.")
     
-    # Добавляем информацию из Bible.xlsx, исключая внутренние инструкции (где FAQ равен "-" и Verification == "RULE")
+    # Загружаем внутренние правила (инструкции) из Bible.xlsx: строки, где FAQ равен "-" и Verification равен "RULE"
+    # Эти инструкции НЕ передаются клиенту.
+    internal_rules = []
+    for index, row in bible_df.iterrows():
+        faq = row.get("FAQ", "").strip()
+        answer = row.get("Answers", "").strip()
+        verification = str(row.get("Verification", "")).strip().upper()
+        if faq == "-" and verification == "RULE" and answer:
+            internal_rules.append(answer)
+    if internal_rules:
+        system_instructions = "Инструкция для ассистента (не показывать клиенту): " + " ".join(internal_rules)
+        messages.append({"role": "system", "content": system_instructions})
+    
+    # Добавляем общую информацию (FAQ и Answers, где FAQ не равен "-" и Verification != "RULE")
     for index, row in bible_df.iterrows():
         faq = row.get("FAQ", "").strip()
         answer = row.get("Answers", "").strip()
@@ -113,14 +126,13 @@ def get_last_vehicle_description(client_code):
     """
     Извлекает последнее сообщение от клиента, содержащее информацию о транспортном средстве,
     из истории переписки (использует prepare_chat_context).
-    Если найдено, возвращает текст; иначе, возвращает None.
+    Возвращает текст или None, если подходящее сообщение не найдено.
     """
     try:
         messages = prepare_chat_context(client_code)
     except Exception as e:
         logger.error(f"Ошибка получения истории переписки: {e}")
         return None
-    # Перебираем сообщения от клиента в обратном порядке
     for msg in reversed(messages):
         if msg.get("role") == "user":
             text = msg.get("content", "").strip()
@@ -200,7 +212,7 @@ def chat():
             logger.error("Ошибка: Сообщение и код клиента не могут быть пустыми")
             return jsonify({'error': 'Сообщение и код клиента не могут быть пустыми'}), 400
 
-        # Проверяем наличие ключевых файлов
+        # Проверяем наличие ключевых файлов: Bible.xlsx и файл клиента.
         try:
             bible_data = load_bible_data()
         except Exception as e:
@@ -215,9 +227,9 @@ def chat():
 
         update_last_visit(client_code)
         
-        # Если запрос связан с тарифами (содержит "цена" или "прайс")
+        # Обработка follow‑up запросов по тарифам.
         if "цена" in user_message.lower() or "прайс" in user_message.lower():
-            # Если сообщение недостаточно информативно, пробуем дополнить его историей.
+            # Если сообщение недостаточно информативно, пробуем объединить его с последним полным описанием ТС из истории.
             if len(user_message) < 20 or not re.search(r'\d+', user_message):
                 last_description = get_last_vehicle_description(client_code)
                 if last_description:
