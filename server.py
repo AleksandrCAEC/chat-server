@@ -11,7 +11,7 @@ from datetime import datetime
 from clientdata import register_or_update_client, verify_client_code, update_last_visit
 from client_caec import add_message_to_client_file, find_client_file_id, get_sheets_service, CLIENT_FILES_DIR
 from bible import load_bible_data, save_bible_pair
-from price_handler import check_ferry_price, load_price_data  # Функция check_ferry_price отвечает за сбор данных с сайта
+from price_handler import check_ferry_price, load_price_data  # Тарифы получаются через эту функцию
 from flask_cors import CORS
 import openpyxl
 
@@ -32,7 +32,7 @@ os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = "/etc/secrets/service_account_jso
 # Инициализация OpenAI
 openai.api_key = os.getenv("OPENAI_API_KEY")
 
-# Инициализация Flask‑приложения и CORS
+# Инициализация Flask-приложения и CORS
 app = Flask(__name__)
 CORS(app)
 
@@ -76,20 +76,25 @@ def prepare_chat_context(client_code):
     if bible_df is None:
         raise Exception("Bible.xlsx не найден или недоступен.")
     logger.info(f"Bible.xlsx содержит {len(bible_df)} записей.")
-    bible_context = "Информация о компании (FAQ):\n"
+    # Загружаем внутренние правила (не для показа клиенту)
+    internal_rules = []
     for index, row in bible_df.iterrows():
-        faq = row.get("FAQ", "")
-        answer = row.get("Answers", "")
+        faq = row.get("FAQ", "").strip()
+        answer = row.get("Answers", "").strip()
         verification = str(row.get("Verification", "")).strip().upper()
-        if faq and answer and verification != "CHECK":
-            bible_context += f"Вопрос: {faq}\nОтвет: {answer}\n\n"
-    system_message = {
-        "role": "system",
-        "content": f"Вы – умный ассистент компании CAEC. Используйте следующую информацию для ответов:\n{bible_context}"
-    }
-    messages.append(system_message)
-    
-    # Чтение истории переписки из уникального файла клиента
+        if faq == "-" and verification == "RULE" and answer:
+            internal_rules.append(answer)
+    if internal_rules:
+        system_instructions = "Инструкция для ассистента (не показывать клиенту): " + " ".join(internal_rules)
+        messages.append({"role": "system", "content": system_instructions})
+    # Добавляем обычную информацию из Bible.xlsx (FAQ и Answers, где Verification != "RULE")
+    for index, row in bible_df.iterrows():
+        faq = row.get("FAQ", "").strip()
+        answer = row.get("Answers", "").strip()
+        verification = str(row.get("Verification", "")).strip().upper()
+        if faq and faq != "-" and answer and verification != "RULE":
+            messages.append({"role": "system", "content": f"Вопрос: {faq}\nОтвет: {answer}"})
+    # Добавляем историю переписки из уникального файла клиента
     spreadsheet_id = find_client_file_id(client_code)
     if spreadsheet_id:
         sheets_service = get_sheets_service()
@@ -109,6 +114,29 @@ def prepare_chat_context(client_code):
     else:
         logger.info(f"Файл клиента с кодом {client_code} не найден.")
     return messages
+
+###############################################
+# ФУНКЦИЯ ДЛЯ ИЗВЛЕЧЕНИЯ ПОСЛЕДНЕГО ОПИСАНИЯ ТС
+###############################################
+def get_last_vehicle_description(client_code):
+    """
+    Извлекает последнее сообщение от клиента, содержащее информацию о транспортном средстве,
+    из истории переписки (использует prepare_chat_context).
+    Если найдено, возвращает текст; иначе, возвращает None.
+    """
+    try:
+        messages = prepare_chat_context(client_code)
+    except Exception as e:
+        logger.error(f"Ошибка получения истории переписки: {e}")
+        return None
+    # Перебираем сообщения от клиента в обратном порядке
+    for msg in reversed(messages):
+        if msg.get("role") == "user":
+            text = msg.get("content", "").strip()
+            # Если сообщение содержит хотя бы одно ключевое слово или число, считаем, что это описание ТС.
+            if text and (re.search(r'\d+', text) or any(kw in text.lower() for kw in ["фура", "грузовик", "минивэн", "minivan", "тягач", "еврофура"])):
+                return text
+    return None
 
 ###############################################
 # ЭНДПОИНТ /register-client
@@ -176,13 +204,13 @@ def chat():
     try:
         data = request.json
         logger.info(f"Получен запрос на чат: {data}")
-        user_message = data.get("message", "")
-        client_code = data.get("client_code", "")
+        user_message = data.get("message", "").strip()
+        client_code = data.get("client_code", "").strip()
         if not user_message or not client_code:
             logger.error("Ошибка: Сообщение и код клиента не могут быть пустыми")
             return jsonify({'error': 'Сообщение и код клиента не могут быть пустыми'}), 400
 
-        # Проверка наличия ключевых файлов: Bible.xlsx и файла клиента
+        # Проверяем наличие ключевых файлов
         try:
             bible_data = load_bible_data()
         except Exception as e:
@@ -197,25 +225,31 @@ def chat():
 
         update_last_visit(client_code)
         
-        if client_code in pending_guiding:
-            pending = pending_guiding[client_code]
-            pending.setdefault("answers", []).append(user_message)
-            pending["current_index"] += 1
-            if pending["current_index"] < len(pending["conditions"]):
-                response_message = pending["conditions"][pending["current_index"]]
+        # Обработка follow-up запросов, если сообщение связано с тарифами.
+        if "цена" in user_message.lower() or "прайс" in user_message.lower():
+            # Если сообщение недостаточно информативно (например, короткое или не содержит цифр)
+            if len(user_message) < 20 or not re.search(r'\d+', user_message):
+                last_description = get_last_vehicle_description(client_code)
+                if last_description:
+                    combined_description = last_description + " " + user_message
+                    logger.debug(f"Используем комбинированное описание: '{combined_description}'")
+                    # Определяем направление на основании текущего сообщения
+                    if "из поти" in user_message.lower():
+                        direction = "Ge_Ro"
+                    elif "из констанца" in user_message.lower() or "из констанцы" in user_message.lower():
+                        direction = "Ro_Ge"
+                    response_message = check_ferry_price(vehicle_description=combined_description, direction=direction)
+                else:
+                    response_message = check_ferry_price(vehicle_description=user_message, direction="Ge_Ro" if "поти" in user_message.lower() else "Ro_Ge")
             else:
-                final_price = check_ferry_price(pending["vehicle_type"], direction="Ro_Ge")
-                response_message = f"Спасибо, ваши ответы приняты. {final_price}"
-                del pending_guiding[client_code]
-        elif "цена" in user_message.lower() or "прайс" in user_message.lower():
-            lower_msg = user_message.lower()
-            if "из поти" in lower_msg:
-                direction = "Ge_Ro"
-            elif "из констанца" in lower_msg or "из констанцы" in lower_msg:
-                direction = "Ro_Ge"
-            else:
-                direction = "Ro_Ge"
-            response_message = check_ferry_price(vehicle_description=user_message, direction=direction)
+                lower_msg = user_message.lower()
+                if "из поти" in lower_msg:
+                    direction = "Ge_Ro"
+                elif "из констанца" in lower_msg or "из констанцы" in lower_msg:
+                    direction = "Ro_Ge"
+                else:
+                    direction = "Ro_Ge"
+                response_message = check_ferry_price(vehicle_description=user_message, direction=direction)
         else:
             messages = prepare_chat_context(client_code)
             messages.append({"role": "user", "content": user_message})
@@ -335,9 +369,10 @@ def setup_webhook():
     finally:
         loop.close()
 
+global_loop = asyncio.new_event_loop()
+asyncio.set_event_loop(global_loop)
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 8080))
-    # Запускаем настройку webhook в отдельном потоке, чтобы не блокировать запуск Flask-сервера
     threading.Thread(target=setup_webhook).start()
     logger.info(f"✅ Сервер запущен на порту {port}")
     app.run(host='0.0.0.0', port=port, debug=False, threaded=True)
