@@ -77,7 +77,7 @@ def prepare_chat_context(client_code):
         raise Exception("Bible.xlsx не найден или недоступен.")
     logger.info(f"Bible.xlsx содержит {len(bible_df)} записей.")
     
-    # Внутренние правила (FAQ = "-" и Verification = "RULE") используются только для внутренней логики.
+    # Загрузка внутренних правил (FAQ = "-" и Verification = "RULE") – убедитесь, что в Bible.xlsx отсутствуют инструкции о годе выпуска.
     internal_rules = []
     for index, row in bible_df.iterrows():
         faq = row.get("FAQ", "").strip()
@@ -89,7 +89,7 @@ def prepare_chat_context(client_code):
         system_instructions = "Инструкция для ассистента (не показывать клиенту): " + " ".join(internal_rules)
         messages.append({"role": "system", "content": system_instructions})
     
-    # Добавляем общую информацию из Bible.xlsx (только строки, где FAQ != "-" и Verification != "RULE")
+    # Общая информация из Bible.xlsx (без дополнительных инструкций, которые могут запрашивать год выпуска)
     for index, row in bible_df.iterrows():
         faq = row.get("FAQ", "").strip()
         answer = row.get("Answers", "").strip()
@@ -97,7 +97,7 @@ def prepare_chat_context(client_code):
         if faq and faq != "-" and answer and verification != "RULE":
             messages.append({"role": "system", "content": f"Вопрос: {faq}\nОтвет: {answer}"})
     
-    # Добавляем историю переписки из уникального файла клиента.
+    # История переписки из уникального файла клиента.
     spreadsheet_id = find_client_file_id(client_code)
     if spreadsheet_id:
         sheets_service = get_sheets_service()
@@ -242,12 +242,15 @@ def chat():
                 add_message_to_client_file(client_code, response_message, is_assistant=True)
                 return jsonify({'reply': response_message}), 200
             
-            # Если сообщение кажется уточняющим (короткое сообщение), используем последнее полное описание
+            # Если сообщение выглядит как уточнение (короткое сообщение), используем последнее полное описание.
             if len(user_message) < 20:
                 last_description = get_last_vehicle_description(client_code)
                 if last_description:
-                    # Очищаем последнее описание от упоминаний направлений (удаляем "из ..." и "в ..." с перечислением портов)
-                    cleaned_description = re.sub(r'(?:\bиз\s+(?:поти|констанца|констанцы|грузия)\b)|(?:\bв\s+(?:поти|констанца|констанцы|грузия)\b)', '', last_description, flags=re.IGNORECASE).strip()
+                    # Удаляем из полного описания любые упоминания направлений.
+                    cleaned_description = re.sub(
+                        r'\b(?:из|в)\s+(?:поти|констанца|констанцы|грузия)\b', 
+                        '', last_description, flags=re.IGNORECASE
+                    ).strip()
                     logger.debug(f"Используем последнее полное описание (очищенное): '{cleaned_description}'")
                     response_message = check_ferry_price(vehicle_description=cleaned_description, direction=direction)
                 else:
