@@ -97,7 +97,7 @@ def prepare_chat_context(client_code):
         if faq and faq != "-" and answer and verification != "RULE":
             messages.append({"role": "system", "content": f"Вопрос: {faq}\nОтвет: {answer}"})
     
-    # История переписки из файла клиента.
+    # Добавление истории переписки из файла клиента.
     spreadsheet_id = find_client_file_id(client_code)
     if spreadsheet_id:
         sheets_service = get_sheets_service()
@@ -133,6 +133,16 @@ def get_last_vehicle_description(client_code):
             if text and (re.search(r'\d+', text) or any(kw in text.lower() for kw in ["фура", "грузовик", "минивэн", "minivan", "тягач", "еврофура"])):
                 return text
     return None
+
+###############################################
+# Функция для извлечения портов из текста
+###############################################
+def extract_ports(text):
+    # Извлекаем порт отправления после "из" и порт назначения после "в"
+    sending = re.search(r'\bиз\s+(\w+)', text, flags=re.IGNORECASE)
+    destination = re.search(r'\bв\s+(\w+)', text, flags=re.IGNORECASE)
+    return (sending.group(1).lower() if sending else None,
+            destination.group(1).lower() if destination else None)
 
 ###############################################
 # Эндпоинт /register-client
@@ -216,40 +226,53 @@ def chat():
         # Обработка запроса о тарифе.
         if any(kw in user_message.lower() for kw in ["цена", "прайс", "минивэн", "minivan", "truck", "траk"]):
             lower_msg = user_message.lower()
-            if "из поти" in lower_msg:
-                direction = "Ge_Ro"
-            elif "из констанца" in lower_msg or "из констанцы" in lower_msg:
-                direction = "Ro_Ge"
-            elif "грузия" in lower_msg or "из груз" in lower_msg:
-                direction = "Ge_Ro"
+            # Сначала пытаемся извлечь порты из сообщения
+            sending_port, destination_port = extract_ports(user_message)
+            if sending_port and destination_port:
+                # Если оба порта указаны, определяем направление по их сочетанию
+                if sending_port in ["поти", "потии"] and destination_port in ["констанца", "констанцы"]:
+                    direction = "Ge_Ro"
+                elif sending_port in ["констанца", "констанцы"] and destination_port in ["поти"]:
+                    direction = "Ro_Ge"
+                elif sending_port in ["констанца", "констанцы"] and destination_port in ["грузия"]:
+                    # Пример: для "из констанцы в грузию" тариф задается по данным источника (ожидается 1750 EUR для трака до 10 м)
+                    direction = "Custom"  # Флаг, который потом можно обработать в check_ferry_price
+                else:
+                    direction = "Ro_Ge"  # Значение по умолчанию
+                updated_description = f"{user_message}, направление: {sending_port.capitalize()} -> {destination_port.capitalize()}"
+                logger.debug(f"Обновлённое описание с портами: '{updated_description}'")
+                response_message = check_ferry_price(vehicle_description=updated_description, direction=direction)
+                response_message = re.sub(r"^Извините[^.]*\.\s*", "", response_message, flags=re.IGNORECASE)
             else:
-                response_message = "Пожалуйста, уточните направление отправки (например, Поти-Констанца или Констанца-Поти)."
-                add_message_to_client_file(client_code, user_message, is_assistant=False)
-                add_message_to_client_file(client_code, response_message, is_assistant=True)
-                return jsonify({'reply': response_message}), 200
-            
-            # Если сообщение выглядит как короткое уточнение (менее 20 символов)
-            if len(user_message) < 20:
-                last_description = get_last_vehicle_description(client_code)
-                if last_description:
-                    # Очищаем описание от старых упоминаний портов, оставляя числовую информацию (например, "17 метров")
-                    cleaned_description = re.sub(
-                        r'\b(?:из|в)\s+(?:поти(?:й)?|констанца(?:ты)?|грузия)\b', '', last_description, flags=re.IGNORECASE
-                    ).strip()
-                    # Добавляем явное указание нового направления
-                    if direction == "Ro_Ge":
-                        new_direction_clause = ", направление: Констанца-Поти"
+                # Если порты не распознаны, если сообщение короткое – используем последнее полное описание
+                if len(user_message) < 20:
+                    last_description = get_last_vehicle_description(client_code)
+                    if last_description:
+                        cleaned_description = re.sub(
+                            r'\b(?:из|в)\s+(?:поти(?:й)?|констанца(?:ты)?|грузия)\b', '', last_description, flags=re.IGNORECASE
+                        ).strip()
+                        # Если пользователь уточняет только направление, добавляем явное указание
+                        if lower_msg.startswith("а"):
+                            # Попытка определить новое направление по содержимому уточнения
+                            if "констанца" in lower_msg and "грузия" in lower_msg:
+                                new_direction_clause = ", направление: Констанца->Грузия"
+                                direction = "Custom"
+                            elif "констанца" in lower_msg:
+                                new_direction_clause = ", направление: Констанца-Поти"
+                                direction = "Ro_Ge"
+                            else:
+                                new_direction_clause = ", направление: Поти-Констанца"
+                                direction = "Ge_Ro"
+                        else:
+                            new_direction_clause = ""
+                        updated_description = cleaned_description + new_direction_clause
+                        logger.debug(f"Используем обновлённое описание: '{updated_description}'")
+                        response_message = check_ferry_price(vehicle_description=updated_description, direction=direction)
+                        response_message = re.sub(r"^Извините[^.]*\.\s*", "", response_message, flags=re.IGNORECASE)
                     else:
-                        new_direction_clause = ", направление: Поти-Констанца"
-                    updated_description = cleaned_description + new_direction_clause
-                    logger.debug(f"Используем обновлённое описание: '{updated_description}'")
-                    response_message = check_ferry_price(vehicle_description=updated_description, direction=direction)
-                    # Удаляем извинения из ответа, если они есть.
-                    response_message = re.sub(r"^Извините[^.]*\.\s*", "", response_message, flags=re.IGNORECASE)
+                        response_message = check_ferry_price(vehicle_description=user_message, direction=direction)
                 else:
                     response_message = check_ferry_price(vehicle_description=user_message, direction=direction)
-            else:
-                response_message = check_ferry_price(vehicle_description=user_message, direction=direction)
         else:
             messages = prepare_chat_context(client_code)
             messages.append({"role": "user", "content": user_message})
