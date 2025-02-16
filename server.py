@@ -47,7 +47,7 @@ logger.info("Текущие переменные окружения:")
 pprint.pprint(dict(os.environ))
 
 # Глобальный словарь для хранения состояния последовательного уточнения (guiding questions)
-# Сейчас guiding questions отключены – никаких уточняющих вопросов не задаём.
+# Guiding questions отключены – никаких дополнительных уточняющих вопросов не задаётся.
 pending_guiding = {}
 
 ###############################################
@@ -79,7 +79,7 @@ def prepare_chat_context(client_code):
     logger.info(f"Bible.xlsx содержит {len(bible_df)} записей.")
     
     # Загружаем внутренние правила (инструкции) из Bible.xlsx:
-    # Строки, где FAQ равен "-" и Verification равен "RULE" – эти инструкции используются только для внутренней логики.
+    # Строки, где FAQ равен "-" и Verification равен "RULE", используются для внутренней логики, но не передаются клиенту.
     internal_rules = []
     for index, row in bible_df.iterrows():
         faq = row.get("FAQ", "").strip()
@@ -91,7 +91,7 @@ def prepare_chat_context(client_code):
         system_instructions = "Инструкция для ассистента (не показывать клиенту): " + " ".join(internal_rules)
         messages.append({"role": "system", "content": system_instructions})
     
-    # Добавляем общую информацию из Bible.xlsx (FAQ и Answers, где FAQ != "-" и Verification != "RULE")
+    # Добавляем общую информацию из Bible.xlsx (только FAQ и Answers, где FAQ != "-" и Verification != "RULE")
     for index, row in bible_df.iterrows():
         faq = row.get("FAQ", "").strip()
         answer = row.get("Answers", "").strip()
@@ -137,7 +137,6 @@ def get_last_vehicle_description(client_code):
     for msg in reversed(messages):
         if msg.get("role") == "user":
             text = msg.get("content", "").strip()
-            # Если сообщение содержит хотя бы одно ключевое слово, характерное для описания ТС
             if text and (re.search(r'\d+', text) or any(kw in text.lower() for kw in ["фура", "грузовик", "минивэн", "minivan", "тягач", "еврофура"])):
                 return text
     return None
@@ -229,7 +228,7 @@ def chat():
 
         update_last_visit(client_code)
         
-        # Обработка запроса о тарифе.
+        # Обработка запроса о тарифе: теперь используются только данные из запроса.
         if "цена" in user_message.lower() or "прайс" in user_message.lower():
             lower_msg = user_message.lower()
             if "из поти" in lower_msg:
@@ -240,7 +239,7 @@ def chat():
                 direction = "Ge_Ro"
             else:
                 direction = "Ro_Ge"
-            # Используем только данные из запроса – никаких объединений с историей, никаких уточняющих вопросов.
+            # Используем только данные, переданные в сообщении; никаких уточняющих вопросов не задаём.
             response_message = check_ferry_price(vehicle_description=user_message, direction=direction)
         else:
             messages = prepare_chat_context(client_code)
