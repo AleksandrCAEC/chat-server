@@ -13,10 +13,10 @@ def get_ferry_prices():
     Возвращает словарь вида:
       {
          "VehicleType1": {
-             "price_Ro_Ge": "Цена для направления Romania -> Georgia",
-             "price_Ge_Ro": "Цена для направления Georgia -> Romania",
-             "remark": "Remark",
-             "conditions": [ "Condition1 текст", "Condition2 текст", ... ]
+             "price_Ro_Ge": <цена для направления Romania -> Georgia>,
+             "price_Ge_Ro": <цена для направления Georgia -> Romania>,
+             "remark": <замечание>,
+             "conditions": [ <Condition1>, <Condition2>, ... ]
          },
          ...
       }
