@@ -10,24 +10,24 @@ from googleapiclient.discovery import build
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
-# Проверяем наличие переменной окружения и файла с учетными данными.
-service_account_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
-if not service_account_path or not os.path.exists(service_account_path):
-    # Если файл по указанному пути не найден, переопределяем путь на локальный файл.
+# Получаем путь из переменной окружения или задаем значение по умолчанию
+service_account_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS", "./service_account.json")
+if not os.path.exists(service_account_path):
+    logger.warning(f"Файл учетных данных {service_account_path} не найден. Переустанавливаем путь на './service_account.json'")
     service_account_path = "./service_account.json"
     os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = service_account_path
-    logger.info(f"Используем путь к учетным данным: {service_account_path}")
 else:
     logger.info(f"Найден файл учетных данных: {service_account_path}")
 
-# Реальный идентификатор вашей таблицы Google Sheets
+# Используем реальный идентификатор таблицы Google Sheets (из вашей ссылки)
 BIBLE_SPREADSHEET_ID = "1QB3Jv7cL5hNwDKx9rQF6FCrKHW7IHPAqrUg7FIvY7Dk"
 
 def get_sheets_service():
+    """
+    Инициализирует и возвращает объект сервиса Google Sheets.
+    """
     try:
-        credentials = Credentials.from_service_account_file(
-            os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
-        )
+        credentials = Credentials.from_service_account_file(os.getenv("GOOGLE_APPLICATION_CREDENTIALS"))
         service = build('sheets', 'v4', credentials=credentials)
         return service
     except Exception as e:
@@ -35,9 +35,15 @@ def get_sheets_service():
         raise
 
 def load_bible_data():
+    """
+    Загружает данные из Google Sheets таблицы Bible.xlsx и возвращает их в виде DataFrame.
+    Если структура файла соответствует новой схеме, ожидаются столбцы:
+      FAQ, Answers, Verification, rule, Remark.
+    Если данных нет, возвращается пустой DataFrame с соответствующими столбцами.
+    """
     try:
         service = get_sheets_service()
-        # Диапазон: ожидаются столбцы: FAQ, Answers, Verification, rule, Remark
+        # Укажите диапазон, который охватывает все нужные столбцы.
         range_name = "Bible!A2:E"
         result = service.spreadsheets().values().get(
             spreadsheetId=BIBLE_SPREADSHEET_ID,
@@ -55,9 +61,17 @@ def load_bible_data():
         return None
 
 def upload_or_update_file(file_name, file_stream):
+    """
+    Заглушка для функции обновления или создания файла на Google Drive.
+    Реализуйте при необходимости.
+    """
     pass
 
 def ensure_local_bible_file(local_path):
+    """
+    Если локальный файл не существует, создает его с заголовками.
+    Используется для резервного копирования или временных файлов.
+    """
     if not os.path.exists(local_path):
         try:
             directory = os.path.dirname(local_path)
@@ -73,6 +87,10 @@ def ensure_local_bible_file(local_path):
             raise
 
 def save_bible_pair(question, answer):
+    """
+    Добавляет новую строку в Google Sheets таблицу Bible.xlsx с вопросом, ответом и статусом "Check".
+    Если возникает ошибка записи, создается временный локальный файл Temp_Bible.xlsx.
+    """
     try:
         service = get_sheets_service()
         new_row = [[question, answer, "Check", "", ""]]
@@ -103,14 +121,15 @@ def get_rule(rule_key):
     """
     Возвращает текст правила (шаблон или инструкцию) по ключу rule_key.
     Для этого ищутся строки, где:
-      - Столбец FAQ равен "-" (внутренняя инструкция),
-      - Столбец Verification содержит "RULE",
+      - Столбец FAQ равен "-" (означает, что это внутренняя инструкция),
+      - Столбец Verification содержит "RULE" (без учета регистра),
       - Столбец Remark (ключ) совпадает с rule_key (без учета регистра).
     Если правило найдено, возвращается значение из столбца Answers; иначе возвращается строка вида "<rule_key>".
     """
     df = load_bible_data()
     if df is None:
         return f"<{rule_key}>"
+    # Фильтруем строки, где FAQ равен "-" и Verification равен "RULE"
     rules_df = df[(df["FAQ"].str.strip() == "-") & (df["Verification"].str.upper() == "RULE")]
     matching = rules_df[rules_df["Remark"].str.strip().str.lower() == rule_key.lower()]
     if not matching.empty:
