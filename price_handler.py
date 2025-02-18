@@ -6,7 +6,7 @@ from price import get_ferry_prices
 from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
 import requests
-from bible import load_bible_data
+from bible import load_bible_data, get_rule
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -17,10 +17,10 @@ def get_sheets_service():
     try:
         credentials = Credentials.from_service_account_file(os.getenv("GOOGLE_APPLICATION_CREDENTIALS"))
         service = build('sheets', 'v4', credentials=credentials)
-        logger.info("Google Sheets API service initialized successfully.")
+        logger.info(get_rule("sheets_initialized"))
         return service
     except Exception as e:
-        logger.error(f"Ошибка инициализации Google Sheets API: {e}")
+        logger.error(f"{get_rule('sheets_init_error')}: {e}")
         raise
 
 def send_telegram_notification(message):
@@ -32,15 +32,15 @@ def send_telegram_notification(message):
             payload = {"chat_id": telegram_chat_id, "text": message, "parse_mode": "HTML"}
             response = requests.post(url, json=payload)
             response.raise_for_status()
-            logger.info(f"Уведомление отправлено: {response.json()}")
+            logger.info(f"{get_rule('notification_sent')}: {response.json()}")
     except Exception as ex:
         if hasattr(ex, 'retry_after'):
             delay = ex.retry_after
-            logger.warning(f"Flood control exceeded. Retrying in {delay} seconds.")
+            logger.warning(f"{get_rule('flood_control')} {delay}")
             time.sleep(delay)
             send_telegram_notification(message)
         else:
-            logger.error(f"Ошибка при отправке уведомления: {ex}")
+            logger.error(f"{get_rule('notification_error')}: {ex}")
 
 def remove_timestamp(text):
     return re.sub(r'^\d{2}\.\d{2}\.\d{2}\s+\d{2}:\d{2}\s*-\s*', '', text)
@@ -49,10 +49,10 @@ def parse_price(price_str):
     try:
         cleaned = re.sub(r'[^\d.]', '', price_str)
         value = float(cleaned)
-        logger.info(f"Parsed price '{price_str}' -> {value}")
+        logger.info(f"Parsed price from rule: {price_str} -> {value}")
         return value
     except Exception as e:
-        logger.error(f"Ошибка парсинга цены из '{price_str}': {e}")
+        logger.error(f"{get_rule('price_parse_error')}: {e}")
         return None
 
 def get_guiding_question(condition_marker):
@@ -63,22 +63,18 @@ def get_guiding_question(condition_marker):
         ver = str(row.get("Verification", "")).strip().upper()
         if ver == condition_marker.upper():
             question = row.get("FAQ", "").strip()
-            logger.info(f"Найден guiding вопрос для {condition_marker}: {question}")
+            logger.info(f"{get_rule('guiding_question_found')} {condition_marker}: {question}")
             return question
-    logger.info(f"Guiding вопрос для {condition_marker} не найден.")
+    logger.info(f"{get_rule('guiding_question_not_found')} {condition_marker}")
     return None
 
 def check_ferry_price(vehicle_type, direction="Ro_Ge"):
-    """
-    Получает актуальные тарифы с сайта и предоставляет цену.
-    Файл price.xlsx отключен, поэтому используются только данные с сайта.
-    """
     try:
         website_prices = get_ferry_prices()
-        logger.info(f"Получены цены с сайта: {website_prices}")
+        logger.info(f"{get_rule('website_prices_received')}: {website_prices}")
         
         if vehicle_type not in website_prices:
-            msg = f"Извините, актуальная цена для '{vehicle_type}' не найдена на сайте."
+            msg = get_rule("price_not_found").format(vehicle_type=vehicle_type)
             logger.error(msg)
             return msg
         
@@ -88,25 +84,29 @@ def check_ferry_price(vehicle_type, direction="Ro_Ge"):
             website_price_str = website_prices[vehicle_type].get("price_Ge_Ro", "")
         
         website_price_str = remove_timestamp(website_price_str).strip()
-        logger.info(f"Цена с сайта для {vehicle_type}: '{website_price_str}'")
+        logger.info(f"Price for {vehicle_type}: '{website_price_str}'")
         
         if not re.search(r'\d', website_price_str) or website_price_str.upper() in ["PRICE_QUERY", "BASE_PRICE"]:
-            logger.info(f"Сайт вернул некорректное значение для {vehicle_type}.")
+            logger.info(f"{get_rule('invalid_price_returned')} for {vehicle_type}")
             return website_price_str
         
-        response_message = f"Цена перевозки для '{vehicle_type}' ({direction.replace('_', ' ')}) составляет {website_price_str}."
+        response_message = get_rule("price_response_template").format(
+            vehicle_type=vehicle_type,
+            direction=direction.replace('_', ' '),
+            price=website_price_str
+        )
         remark = website_prices[vehicle_type].get("remark", "")
         if remark:
-            response_message += f" Примечание: {remark}"
+            response_message += " " + remark
         conditions = website_prices[vehicle_type].get("conditions", [])
         if conditions:
-            response_message += "\nДля более точного расчёта, пожалуйста, ответьте на следующие вопросы:"
+            response_message += "\n" + get_rule("guiding_questions_prompt")
             for marker in conditions:
-                response_message += f"\n{marker}"
+                response_message += "\n" + marker
         return response_message
     except Exception as e:
-        logger.error(f"Ошибка при получении цены: {e}")
-        return "Произошла ошибка при получении цены. Пожалуйста, попробуйте позже."
+        logger.error(f"{get_rule('price_error')}: {e}")
+        return get_rule("price_error_message")
 
 def get_openai_response(messages):
     start_time = time.time()
@@ -121,10 +121,10 @@ def get_openai_response(messages):
             )
             return response
         except Exception as e:
-            logger.error(f"Попытка {attempt+1} ошибки в OpenAI: {e}")
+            logger.error(f"OpenAI error attempt {attempt+1}: {e}")
             attempt += 1
             if time.time() - start_time > 180:
-                send_telegram_notification("Ошибка соединения: запрос к OpenAI длится более 3 минут.")
+                send_telegram_notification(get_rule("openai_timeout_message"))
                 return None
             time.sleep(2)
 
