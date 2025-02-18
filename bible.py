@@ -10,11 +10,14 @@ from googleapiclient.discovery import build
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
-# Если переменная окружения не установлена, используем путь по умолчанию.
-if not os.getenv("GOOGLE_APPLICATION_CREDENTIALS"):
-    os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = "./service_account.json"
+# Проверяем наличие переменной окружения и файла с учетными данными.
+service_account_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
+if not service_account_path or not os.path.exists(service_account_path):
+    service_account_path = "./service_account.json"
+    os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = service_account_path
+    logger.info(f"Используем путь к учетным данным: {service_account_path}")
 
-# Реальный идентификатор таблицы (взятый из вашей ссылки)
+# Реальный идентификатор вашей таблицы Google Sheets
 BIBLE_SPREADSHEET_ID = "1QB3Jv7cL5hNwDKx9rQF6FCrKHW7IHPAqrUg7FIvY7Dk"
 
 def get_sheets_service():
@@ -98,7 +101,7 @@ def get_rule(rule_key):
     Возвращает текст правила (шаблон или инструкцию) по ключу rule_key.
     Для этого ищутся строки, где:
       - Столбец FAQ равен "-" (внутренняя инструкция),
-      - Столбец Verification содержит "RULE",
+      - Столбец Verification содержит "RULE" (без учета регистра),
       - Столбец Remark (ключ) совпадает с rule_key (без учета регистра).
     Если правило найдено, возвращается значение из столбца Answers; иначе возвращается строка вида "<rule_key>".
     """
