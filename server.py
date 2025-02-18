@@ -28,7 +28,6 @@ from telegram.ext import (
 
 USE_PRICE_FILE = False
 
-# Используем переменную окружения или путь по умолчанию для учетных данных
 os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = os.getenv("GOOGLE_APPLICATION_CREDENTIALS", "./service_account.json")
 openai.api_key = os.getenv("OPENAI_API_KEY")
 
@@ -85,7 +84,6 @@ def get_openai_response(messages):
             logger.error(f"Попытка {attempt+1} ошибки в OpenAI: {e}")
             attempt += 1
             if time.time() - start_time > 180:
-                # Здесь можно добавить уведомление
                 return None
             time.sleep(2)
 
@@ -93,11 +91,11 @@ def prepare_chat_context(client_code):
     messages = []
     bible_df = load_bible_data()
     if bible_df is None:
-        raise Exception(get_rule("bible_not_available"))
+        raise Exception(get_rule())
     logger.info(f"Bible.xlsx содержит {len(bible_df)} записей.")
-    # Собираем внутренние инструкции: строки с FAQ = "-" и Verification = "RULE"
+    # Собираем внутренние инструкции: строки, где FAQ = "-" и Verification = "RULE"
     rules_df = bible_df[(bible_df["FAQ"].str.strip() == "-") & (bible_df["Verification"].str.upper() == "RULE")]
-    system_rule = "\n".join(rules_df["Answers"].dropna().tolist())
+    system_rule = "\n".join(rules_df["Answers"].tolist())
     system_message = {
         "role": "system",
         "content": f"Вы – умный ассистент компании CAEC. Используйте следующие инструкции для ответов:\n{system_rule}"
