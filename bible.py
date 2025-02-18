@@ -1,40 +1,45 @@
+# bible.py
 import os
 import pandas as pd
 from openpyxl import Workbook, load_workbook
+from openpyxl.styles import Alignment, numbers
 import logging
 from datetime import datetime
+import shutil  # для копирования файлов
+
 from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
-# Используем переменную окружения или путь по умолчанию (относительный к корню проекта)
-default_path = "./service_account.json"
-service_account_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS", default_path)
-service_account_path = os.path.abspath(service_account_path)
-if not os.path.exists(service_account_path):
-    logger.warning(f"Файл учетных данных {service_account_path} не найден. Проверьте, что он существует, или задайте корректный путь.")
-else:
-    logger.info(f"Найден файл учетных данных: {service_account_path}")
-
-# Реальный идентификатор таблицы Google Sheets (из вашей ссылки)
+# Укажите идентификатор Google Sheets таблицы Bible.xlsx
+# Например: "1QB3Jv7cL5hNwDKx9rQF6FCrKHW7IHPAqrUg7FIvY7Dk"
 BIBLE_SPREADSHEET_ID = "1QB3Jv7cL5hNwDKx9rQF6FCrKHW7IHPAqrUg7FIvY7Dk"
 
 def get_sheets_service():
+    """
+    Инициализирует и возвращает объект сервиса Google Sheets.
+    """
     try:
-        credentials = Credentials.from_service_account_file(service_account_path)
+        from google.oauth2.service_account import Credentials
+        credentials = Credentials.from_service_account_file(
+            os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
+        )
         service = build('sheets', 'v4', credentials=credentials)
         return service
     except Exception as e:
-        logger.error(f"Error initializing Sheets API: {e}")
+        logger.error(f"Ошибка инициализации Google Sheets API: {e}")
         raise
 
 def load_bible_data():
+    """
+    Загружает данные из Google Sheets таблицы Bible.xlsx и возвращает их в виде DataFrame.
+    Предполагается, что данные находятся на листе с именем "Bible" и в диапазоне A2:C,
+    где строка 1 содержит заголовки: FAQ, Answers, Verification.
+    """
     try:
         service = get_sheets_service()
-        # Ожидается, что лист "Bible" содержит столбцы: FAQ, Answers, Verification
-        # Для внутренних инструкций в FAQ должен стоять знак "-", а в Verification — "RULE"
         range_name = "Bible!A2:C"
         result = service.spreadsheets().values().get(
             spreadsheetId=BIBLE_SPREADSHEET_ID,
@@ -45,13 +50,23 @@ def load_bible_data():
             df = pd.DataFrame(values, columns=["FAQ", "Answers", "Verification"])
         else:
             df = pd.DataFrame(columns=["FAQ", "Answers", "Verification"])
-        logger.info(f"Bible data loaded. Records: {len(df)}")
+        logger.info(f"Bible data loaded. Количество записей: {len(df)}")
         return df
     except Exception as e:
-        logger.error(f"Error loading Bible data: {e}")
+        logger.error(f"Ошибка при загрузке данных из Bible.xlsx: {e}")
         return None
 
+def upload_or_update_file(file_name, file_stream):
+    """
+    Обновляет или создаёт файл на Google Drive (реализация уже имеется в вашем проекте).
+    """
+    pass
+
 def ensure_local_bible_file(local_path):
+    """
+    Если локальный файл не существует, создает его с заголовками.
+    Этот вариант используется для резервного копирования или временных файлов.
+    """
     if not os.path.exists(local_path):
         try:
             directory = os.path.dirname(local_path)
@@ -61,12 +76,17 @@ def ensure_local_bible_file(local_path):
             ws = wb.active
             ws.append(["FAQ", "Answers", "Verification"])
             wb.save(local_path)
-            logger.info(f"Local Bible file created: {local_path}")
+            logger.info(f"Локальный файл {local_path} создан с заголовками.")
         except Exception as e:
-            logger.error(f"Error creating local Bible file {local_path}: {e}")
+            logger.error(f"Ошибка при создании локального файла {local_path}: {e}")
             raise
 
 def save_bible_pair(question, answer):
+    """
+    Добавляет новую строку в Google Sheets таблицу Bible.xlsx с вопросом, ответом и статусом "Check".
+    Если возникает ошибка записи, создается временный локальный файл Temp_Bible.xlsx.
+    Каждый день (при первом сохранении после полуночи) создается резервная копия Reserv_Bible_YYYYMMDD.xlsx.
+    """
     try:
         service = get_sheets_service()
         new_row = [[question, answer, "Check"]]
@@ -78,9 +98,10 @@ def save_bible_pair(question, answer):
             insertDataOption="INSERT_ROWS",
             body=body
         ).execute()
-        logger.info(f"New pair added: FAQ='{question}', Answers='{answer}', Verification='Check'. Result: {result}")
+        logger.info(f"Новая пара добавлена в Google Sheets: FAQ='{question}', Answers='{answer}', Verification='Check'. Ответ API: {result}")
     except Exception as e:
-        logger.error(f"Error saving pair to Bible: {e}")
+        logger.error(f"Ошибка при сохранении пары в Google Sheets: {e}")
+        # Создаем временный локальный файл Temp_Bible.xlsx и сохраняем новую строку туда
         try:
             temp_file = os.path.join(os.getcwd(), "Temp_Bible.xlsx")
             ensure_local_bible_file(temp_file)
@@ -88,29 +109,19 @@ def save_bible_pair(question, answer):
             ws = wb.active
             ws.append([question, answer, "Check"])
             wb.save(temp_file)
-            logger.error(f"Temporary Bible file created: {temp_file}")
+            logger.error(f"Временный файл {temp_file} создан из-за ошибки записи в оригинальный файл.")
         except Exception as e2:
-            logger.error(f"Error creating temporary Bible file: {e2}")
+            logger.error(f"Ошибка при создании временного файла Temp_Bible.xlsx: {e2}")
         raise
 
-def get_rule():
-    """
-    Возвращает объединённый текст всех внутренних инструкций,
-    то есть строк, где в столбце FAQ стоит "-" и в столбце Verification записано "RULE".
-    Если таких строк нет, возвращается "<no_rules_found>".
-    """
-    df = load_bible_data()
-    if df is None:
-        return "<no_rules_found>"
-    internal_rules = df[
-        (df["FAQ"].str.strip() == "-") &
-        (df["Verification"].str.upper() == "RULE")
-    ]
-    if internal_rules.empty:
-        return "<no_rules_found>"
-    lines = internal_rules["Answers"].tolist()
-    return "\n".join(lines)
-
-if __name__ == "__main__":
-    df = load_bible_data()
-    logger.info(df)
+    # После успешного сохранения в Google Sheets, создаем резервную копию, если еще не создана сегодня
+    try:
+        today_str = datetime.now().strftime("%Y%m%d")
+        backup_file = os.path.join(os.getcwd(), "CAEC_API_Data", "BIG_DATA", f"Reserv_Bible_{today_str}.xlsx")
+        if not os.path.exists(backup_file):
+            df = load_bible_data()
+            if df is not None:
+                df.to_excel(backup_file, index=False)
+                logger.info(f"Резервная копия создана: {backup_file}")
+    except Exception as e:
+        logger.error(f"Ошибка при создании резервной копии Reserv_Bible: {e}")
