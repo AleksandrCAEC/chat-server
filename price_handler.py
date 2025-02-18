@@ -17,7 +17,7 @@ def get_sheets_service():
     try:
         credentials = Credentials.from_service_account_file(os.getenv("GOOGLE_APPLICATION_CREDENTIALS"))
         service = build('sheets', 'v4', credentials=credentials)
-        logger.info(get_rule())  # Выводим общие инструкции
+        logger.info(get_rule())
         return service
     except Exception as e:
         logger.error(f"{get_rule()}: {e}")
@@ -61,8 +61,6 @@ def get_guiding_question(condition_marker):
         return None
     for index, row in bible_df.iterrows():
         if row["Verification"].strip().upper() == "RULE":
-            # Здесь ожидаем, что данная строка – внутренняя инструкция, но отдельные ключи не используются
-            # Можно вернуть текст из Answers, если нужно
             question = row["Answers"].strip()
             logger.info(f"{get_rule()} {condition_marker}: {question}")
             return question
