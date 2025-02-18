@@ -69,6 +69,10 @@ def get_guiding_question(condition_marker):
     return None
 
 def check_ferry_price(vehicle_type, direction="Ro_Ge"):
+    """
+    Получает актуальные тарифы с сайта и возвращает типовой тариф.
+    Файл price.xlsx отключен, поэтому используются данные с сайта.
+    """
     try:
         website_prices = get_ferry_prices()
         logger.info(f"{get_rule('website_prices_received')}: {website_prices}")
