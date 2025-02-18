@@ -61,18 +61,16 @@ def get_guiding_question(condition_marker):
         return None
     for index, row in bible_df.iterrows():
         ver = str(row.get("Verification", "")).strip().upper()
-        if ver == condition_marker.upper():
-            question = row.get("FAQ", "").strip()
-            logger.info(f"{get_rule('guiding_question_found')} {condition_marker}: {question}")
-            return question
+        if ver == "RULE":
+            # Для правил, ключ хранится в столбце Remark, а текст правила — в Answers
+            if row.get("Remark", "").strip().lower() == condition_marker.lower():
+                question = row.get("Answers", "").strip()
+                logger.info(f"{get_rule('guiding_question_found')} {condition_marker}: {question}")
+                return question
     logger.info(f"{get_rule('guiding_question_not_found')} {condition_marker}")
     return None
 
 def check_ferry_price(vehicle_type, direction="Ro_Ge"):
-    """
-    Получает актуальные тарифы с сайта и возвращает типовой тариф.
-    Файл price.xlsx отключен, поэтому используются данные с сайта.
-    """
     try:
         website_prices = get_ferry_prices()
         logger.info(f"{get_rule('website_prices_received')}: {website_prices}")
