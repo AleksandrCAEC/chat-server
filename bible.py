@@ -9,13 +9,12 @@ from googleapiclient.discovery import build
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
-# Получаем путь из переменной окружения или используем значение по умолчанию
+# Получаем путь к файлу учетных данных из переменной окружения или используем значение по умолчанию
 default_path = "./service_account.json"
 service_account_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS", default_path)
-service_account_path = os.path.abspath(service_account_path)  # используем абсолютный путь
-
+service_account_path = os.path.abspath(service_account_path)
 if not os.path.exists(service_account_path):
-    logger.warning(f"Файл учетных данных {service_account_path} не найден. Проверьте, что он существует и переменная окружения GOOGLE_APPLICATION_CREDENTIALS указывает на правильный путь.")
+    logger.warning(f"Файл учетных данных {service_account_path} не найден. Проверьте, что он существует, или задайте корректный путь в переменной окружения.")
 else:
     logger.info(f"Найден файл учетных данных: {service_account_path}")
 
@@ -34,17 +33,17 @@ def get_sheets_service():
 def load_bible_data():
     try:
         service = get_sheets_service()
-        # Ожидается, что в таблице столбцы: FAQ, Answers, Verification, rule, Remark
-        range_name = "Bible!A2:E"
+        # Ожидается, что в таблице столбцы: FAQ, Answers, Verification, Remark
+        range_name = "Bible!A2:D"
         result = service.spreadsheets().values().get(
             spreadsheetId=BIBLE_SPREADSHEET_ID,
             range=range_name
         ).execute()
         values = result.get("values", [])
         if values:
-            df = pd.DataFrame(values, columns=["FAQ", "Answers", "Verification", "rule", "Remark"])
+            df = pd.DataFrame(values, columns=["FAQ", "Answers", "Verification", "Remark"])
         else:
-            df = pd.DataFrame(columns=["FAQ", "Answers", "Verification", "rule", "Remark"])
+            df = pd.DataFrame(columns=["FAQ", "Answers", "Verification", "Remark"])
         logger.info(f"Bible data loaded. Records: {len(df)}")
         return df
     except Exception as e:
@@ -59,7 +58,7 @@ def ensure_local_bible_file(local_path):
                 os.makedirs(directory, exist_ok=True)
             wb = Workbook()
             ws = wb.active
-            ws.append(["FAQ", "Answers", "Verification", "rule", "Remark"])
+            ws.append(["FAQ", "Answers", "Verification", "Remark"])
             wb.save(local_path)
             logger.info(f"Local Bible file created: {local_path}")
         except Exception as e:
@@ -69,11 +68,11 @@ def ensure_local_bible_file(local_path):
 def save_bible_pair(question, answer):
     try:
         service = get_sheets_service()
-        new_row = [[question, answer, "Check", "", ""]]
+        new_row = [[question, answer, "Check", ""]]
         body = {"values": new_row}
         result = service.spreadsheets().values().append(
             spreadsheetId=BIBLE_SPREADSHEET_ID,
-            range="Bible!A:E",
+            range="Bible!A:D",
             valueInputOption="RAW",
             insertDataOption="INSERT_ROWS",
             body=body
@@ -86,7 +85,7 @@ def save_bible_pair(question, answer):
             ensure_local_bible_file(temp_file)
             wb = load_workbook(temp_file)
             ws = wb.active
-            ws.append([question, answer, "Check", "", ""])
+            ws.append([question, answer, "Check", ""])
             wb.save(temp_file)
             logger.error(f"Temporary Bible file created: {temp_file}")
         except Exception as e2:
@@ -97,17 +96,17 @@ def get_rule(rule_key):
     """
     Возвращает текст правила (шаблон или инструкцию) по ключу rule_key.
     Ищутся строки, где:
-      - Столбец FAQ равен "-" (внутренняя инструкция),
+      - Столбец FAQ равен "-" (означает, что это внутренняя инструкция),
       - Столбец Verification равен "RULE" (без учета регистра),
-      - Столбец 'rule' совпадает с rule_key (без учета регистра).
+      - Столбец Remark совпадает с rule_key (без учета регистра).
     Если правило найдено, возвращается значение из столбца Answers;
     иначе возвращается строка вида "<rule_key>".
     """
     df = load_bible_data()
     if df is None:
         return f"<{rule_key}>"
-    rules_df = df[(df["FAQ"].str.strip() == "-") & (df["Verification"].str.upper() == "RULE")]
-    matching = rules_df[rules_df["rule"].str.strip().str.lower() == rule_key.lower()]
+    internal_rules = df[(df["FAQ"].str.strip() == "-") & (df["Verification"].str.upper() == "RULE")]
+    matching = internal_rules[internal_rules["Remark"].str.strip().str.lower() == rule_key.lower()]
     if not matching.empty:
         return matching.iloc[0]["Answers"]
     else:
