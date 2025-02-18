@@ -28,7 +28,7 @@ from telegram.ext import (
 
 USE_PRICE_FILE = False
 
-# Если переменная окружения не переопределена, используем путь по умолчанию
+# Используем переменную окружения или путь по умолчанию для учетных данных
 os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = os.getenv("GOOGLE_APPLICATION_CREDENTIALS", "./service_account.json")
 openai.api_key = os.getenv("OPENAI_API_KEY")
 
@@ -85,7 +85,7 @@ def get_openai_response(messages):
             logger.error(f"Попытка {attempt+1} ошибки в OpenAI: {e}")
             attempt += 1
             if time.time() - start_time > 180:
-                # При истечении таймаута можно отправить уведомление (если нужно)
+                # Здесь можно добавить уведомление
                 return None
             time.sleep(2)
 
@@ -95,7 +95,7 @@ def prepare_chat_context(client_code):
     if bible_df is None:
         raise Exception(get_rule("bible_not_available"))
     logger.info(f"Bible.xlsx содержит {len(bible_df)} записей.")
-    # Формируем системное сообщение, объединяя все внутренние правила
+    # Собираем внутренние инструкции: строки с FAQ = "-" и Verification = "RULE"
     rules_df = bible_df[(bible_df["FAQ"].str.strip() == "-") & (bible_df["Verification"].str.upper() == "RULE")]
     system_rule = "\n".join(rules_df["Answers"].dropna().tolist())
     system_message = {
