@@ -1,82 +1,107 @@
-import requests
-from bs4 import BeautifulSoup
+import os
+import pandas as pd
+from openpyxl import Workbook, load_workbook
+from openpyxl.styles import Alignment, numbers
 import logging
+from datetime import datetime
+import shutil
 
-# Настройка логирования
-logging.basicConfig(level=logging.DEBUG, format="%(asctime)s - %(levelname)s - %(message)s")
+from google.oauth2.service_account import Credentials
+from googleapiclient.discovery import build
+
 logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
 
-# URL тарифной страницы
-TARIFF_URL = "https://e60shipping.com/en/32/static/tariff.html"
+BIBLE_SPREADSHEET_ID = "1QB3Jv7cL5hNwDKx9rQF6FCrKHW7IHPAqrUg7FIvY7Dk"
 
-def get_ferry_prices():
+def get_sheets_service():
+    try:
+        from google.oauth2.service_account import Credentials
+        credentials = Credentials.from_service_account_file(
+            os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
+        )
+        service = build('sheets', 'v4', credentials=credentials)
+        return service
+    except Exception as e:
+        logger.error(f"Ошибка инициализации Google Sheets API: {e}")
+        raise
+
+def load_bible_data():
     """
-    Делает HTTP-запрос к странице тарифов и извлекает информацию из таблицы.
-    Возвращает словарь вида:
-      {
-         "VehicleType1": {
-             "price_Ro_Ge": "Цена для направления Romania -> Georgia",
-             "price_Ge_Ro": "Цена для направления Georgia -> Romania",
-             "remark": "Remark",
-             "conditions": [ "Condition1 текст", "Condition2 текст", ... ]
-         },
-         ...
-      }
-    Если таблица не найдена или в ней нет данных, возвращает пустой словарь.
+    Загружает данные из Google Sheets таблицы Bible.xlsx и возвращает их в виде DataFrame.
+    Ожидается, что данные находятся на листе с именем "Bible" и в диапазоне A2:D,
+    где строка 1 содержит заголовки: FAQ, Answers, Verification, rule.
     """
     try:
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0 Safari/537.36"
-        }
-        response = requests.get(TARIFF_URL, headers=headers)
-        response.raise_for_status()
-        logger.info(f"Запрос к тарифной странице выполнен успешно. Код ответа: {response.status_code}")
-        html_text = response.text
-        logger.info(f"Длина полученного HTML: {len(html_text)} символов")
+        service = get_sheets_service()
+        range_name = "Bible!A2:D"
+        result = service.spreadsheets().values().get(
+            spreadsheetId=BIBLE_SPREADSHEET_ID,
+            range=range_name
+        ).execute()
+        values = result.get("values", [])
+        if values:
+            df = pd.DataFrame(values, columns=["FAQ", "Answers", "Verification", "rule"])
+        else:
+            df = pd.DataFrame(columns=["FAQ", "Answers", "Verification", "rule"])
+        logger.info(f"Bible data loaded. Количество записей: {len(df)}")
+        return df
     except Exception as e:
-        logger.error(f"Ошибка при запросе к тарифной странице: {e}")
-        return {}
+        logger.error(f"Ошибка при загрузке данных из Bible.xlsx: {e}")
+        return None
 
-    soup = BeautifulSoup(html_text, 'html.parser')
-    
-    # Попытка найти таблицу тарифов
-    table = soup.find('table')
-    if not table:
-        logger.error("Таблица тарифов не найдена на странице.")
-        return {}
-    
-    rows = table.find_all('tr')
-    if not rows or len(rows) < 2:
-        logger.error("В таблице тарифов нет данных для обработки.")
-        return {}
-    
-    prices = {}
-    # Предполагается, что первая строка - заголовок, остальные - данные
-    for row in rows[1:]:
-        cols = row.find_all('td')
-        if len(cols) < 4:
-            logger.debug("Пропущена строка с недостаточным количеством столбцов.")
-            continue
-        vehicle_type = cols[0].get_text(strip=True)
-        price_Ro_Ge = cols[1].get_text(strip=True)
-        price_Ge_Ro = cols[2].get_text(strip=True)
-        remark = cols[3].get_text(strip=True)
-        conditions = []
-        if len(cols) > 4:
-            for col in cols[4:]:
-                text = col.get_text(strip=True)
-                if text:
-                    conditions.append(text)
-        prices[vehicle_type] = {
-            "price_Ro_Ge": price_Ro_Ge,
-            "price_Ge_Ro": price_Ge_Ro,
-            "remark": remark,
-            "conditions": conditions
-        }
-    
-    logger.info(f"Извлечены тарифы: {prices}")
-    return prices
+def upload_or_update_file(file_name, file_stream):
+    pass
 
-if __name__ == "__main__":
-    prices = get_ferry_prices()
-    logger.info(f"Результат: {prices}")
+def ensure_local_bible_file(local_path):
+    if not os.path.exists(local_path):
+        try:
+            directory = os.path.dirname(local_path)
+            if not os.path.exists(directory):
+                os.makedirs(directory, exist_ok=True)
+            wb = Workbook()
+            ws = wb.active
+            ws.append(["FAQ", "Answers", "Verification", "rule"])
+            wb.save(local_path)
+            logger.info(f"Локальный файл {local_path} создан с заголовками.")
+        except Exception as e:
+            logger.error(f"Ошибка при создании локального файла {local_path}: {e}")
+            raise
+
+def save_bible_pair(question, answer):
+    try:
+        service = get_sheets_service()
+        new_row = [[question, answer, "Check", ""]]
+        body = {"values": new_row}
+        result = service.spreadsheets().values().append(
+            spreadsheetId=BIBLE_SPREADSHEET_ID,
+            range="Bible!A:D",
+            valueInputOption="RAW",
+            insertDataOption="INSERT_ROWS",
+            body=body
+        ).execute()
+        logger.info(f"Новая пара добавлена в Google Sheets: FAQ='{question}', Answers='{answer}', Verification='Check'. Ответ API: {result}")
+    except Exception as e:
+        logger.error(f"Ошибка при сохранении пары в Google Sheets: {e}")
+        try:
+            temp_file = os.path.join(os.getcwd(), "Temp_Bible.xlsx")
+            ensure_local_bible_file(temp_file)
+            wb = load_workbook(temp_file)
+            ws = wb.active
+            ws.append([question, answer, "Check", ""])
+            wb.save(temp_file)
+            logger.error(f"Временный файл {temp_file} создан из-за ошибки записи в оригинальный файл.")
+        except Exception as e2:
+            logger.error(f"Ошибка при создании временного файла Temp_Bible.xlsx: {e2}")
+        raise
+
+    try:
+        today_str = datetime.now().strftime("%Y%m%d")
+        backup_file = os.path.join(os.getcwd(), "CAEC_API_Data", "BIG_DATA", f"Reserv_Bible_{today_str}.xlsx")
+        if not os.path.exists(backup_file):
+            df = load_bible_data()
+            if df is not None:
+                df.to_excel(backup_file, index=False)
+                logger.info(f"Резервная копия создана: {backup_file}")
+    except Exception as e:
+        logger.error(f"Ошибка при создании резервной копии Reserv_Bible: {e}")
