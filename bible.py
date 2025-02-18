@@ -9,11 +9,13 @@ from googleapiclient.discovery import build
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
-# Получаем путь к файлу учетных данных из переменной окружения или используем значение по умолчанию
-service_account_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS", "./service_account.json")
+# Получаем путь из переменной окружения или используем значение по умолчанию
+default_path = "./service_account.json"
+service_account_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS", default_path)
+service_account_path = os.path.abspath(service_account_path)  # используем абсолютный путь
+
 if not os.path.exists(service_account_path):
-    logger.warning(f"Файл учетных данных {service_account_path} не найден. Пожалуйста, разместите service_account.json в корне проекта или задайте корректный путь.")
-    # Если файла нет, дальнейшая работа с Google Sheets невозможна.
+    logger.warning(f"Файл учетных данных {service_account_path} не найден. Проверьте, что он существует и переменная окружения GOOGLE_APPLICATION_CREDENTIALS указывает на правильный путь.")
 else:
     logger.info(f"Найден файл учетных данных: {service_account_path}")
 
@@ -94,8 +96,8 @@ def save_bible_pair(question, answer):
 def get_rule(rule_key):
     """
     Возвращает текст правила (шаблон или инструкцию) по ключу rule_key.
-    Для этого ищутся строки, где:
-      - Столбец FAQ равен "-" (означает внутреннюю инструкцию),
+    Ищутся строки, где:
+      - Столбец FAQ равен "-" (внутренняя инструкция),
       - Столбец Verification равен "RULE" (без учета регистра),
       - Столбец 'rule' совпадает с rule_key (без учета регистра).
     Если правило найдено, возвращается значение из столбца Answers;
