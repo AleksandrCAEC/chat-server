@@ -13,45 +13,45 @@ def get_ferry_prices():
     Возвращает словарь вида:
       {
          "VehicleType1": {
-             "price_Ro_Ge": <цена для направления Romania -> Georgia>,
-             "price_Ge_Ro": <цена для направления Georgia -> Romania>,
-             "remark": <замечание>,
-             "conditions": [ <Condition1>, <Condition2>, ... ]
+             "price_Ro_Ge": "Цена для направления Romania -> Georgia",
+             "price_Ge_Ro": "Цена для направления Georgia -> Romania",
+             "remark": "Remark",
+             "conditions": [ "Condition1 текст", "Condition2 текст", ... ]
          },
          ...
       }
-    Логика извлечения данных реализована в коде; примеры и описания правил задаются через внешние настройки.
+    Если таблица не найдена или в ней нет данных, возвращает пустой словарь.
     """
     try:
         headers = {
-            "User-Agent": "Mozilla/5.0"
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0 Safari/537.36"
         }
         response = requests.get(TARIFF_URL, headers=headers)
         response.raise_for_status()
-        logger.info(f"Tariff page request successful. Status: {response.status_code}")
+        logger.info(f"Запрос к тарифной странице выполнен успешно. Код ответа: {response.status_code}")
         html_text = response.text
-        logger.info(f"HTML length: {len(html_text)}")
+        logger.info(f"Длина полученного HTML: {len(html_text)} символов")
     except Exception as e:
-        logger.error(f"Error requesting tariff page: {e}")
+        logger.error(f"Ошибка при запросе к тарифной странице: {e}")
         return {}
 
     soup = BeautifulSoup(html_text, 'html.parser')
     
     table = soup.find('table')
     if not table:
-        logger.error("Tariff table not found.")
+        logger.error("Таблица тарифов не найдена на странице.")
         return {}
     
     rows = table.find_all('tr')
     if not rows or len(rows) < 2:
-        logger.error("No data in tariff table.")
+        logger.error("В таблице тарифов нет данных для обработки.")
         return {}
     
     prices = {}
     for row in rows[1:]:
         cols = row.find_all('td')
         if len(cols) < 4:
-            logger.debug("Skipping row with insufficient columns.")
+            logger.debug("Пропущена строка с недостаточным количеством столбцов.")
             continue
         vehicle_type = cols[0].get_text(strip=True)
         price_Ro_Ge = cols[1].get_text(strip=True)
@@ -70,9 +70,9 @@ def get_ferry_prices():
             "conditions": conditions
         }
     
-    logger.info(f"Extracted tariffs: {prices}")
+    logger.info(f"Извлечены тарифы: {prices}")
     return prices
 
 if __name__ == "__main__":
     prices = get_ferry_prices()
-    logger.info(f"Result: {prices}")
+    logger.info(f"Результат: {prices}")
