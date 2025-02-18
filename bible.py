@@ -60,6 +60,8 @@ def upload_or_update_file(file_name, file_stream):
     """
     Обновляет или создаёт файл на Google Drive (реализация уже имеется в вашем проекте).
     """
+    # Здесь должна быть ваша реализация загрузки файла на Google Drive.
+    # Например, она может быть такой же, как в client_caec.py.
     pass
 
 def ensure_local_bible_file(local_path):
@@ -119,6 +121,9 @@ def save_bible_pair(question, answer):
         today_str = datetime.now().strftime("%Y%m%d")
         backup_file = os.path.join(os.getcwd(), "CAEC_API_Data", "BIG_DATA", f"Reserv_Bible_{today_str}.xlsx")
         if not os.path.exists(backup_file):
+            # Скопировать содержимое оригинального файла из Google Sheets
+            # Для простоты здесь используем локальное копирование из временной загрузки (если у вас есть локальный кэш оригинала)
+            # Если оригинальный файл локально отсутствует, можно загрузить данные из Google Sheets и сохранить их локально
             df = load_bible_data()
             if df is not None:
                 df.to_excel(backup_file, index=False)
