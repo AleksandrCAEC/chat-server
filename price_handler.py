@@ -1,196 +1,238 @@
+# price_handler.py
 import os
-import logging
 import re
-from price import get_ferry_prices  # Функция для получения тарифов с сайта
+import logging
+import time
+from price import get_ferry_prices
+from google.oauth2.service_account import Credentials
+from googleapiclient.discovery import build
+import requests
+from bible import load_bible_data  # Функция для работы с Bible.xlsx
 
-# Настройка логирования
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.DEBUG)
+logger.setLevel(logging.INFO)
 
-# Словарь синонимов для типов транспортных средств.
-# Если в запросе содержится "минивэн" или "minivan", тариф сразу будет определён как "Minivan"
-TYPE_SYNONYMS = {
-    "минивэн": "Minivan",
-    "minivan": "Minivan",
-    "фура": "Standard truck with trailer (up to 17M)",
-    "грузовик": "Standard truck with trailer (up to 17M)",
-    "еврофура": "Standard truck with trailer (up to 17M)",
-    "тягач": "Standard truck with trailer (up to 17M)"
-}
+# Используем предоставленный Spreadsheet ID для файла Price.xlsx
+PRICE_SPREADSHEET_ID = "1N4VpU1rBw3_MPx6GJRDiSQ03iHhS24noTq5-i6V01z8"
 
-# Категории, для которых уточнение цены по двойному значению НЕ применяется (например, мотоциклы и контейнеры)
-NON_TRUCK_CATEGORIES = {
-    "Motorcycle",
-    "Container 20’",
-    "Container 40’",
-    "Container ref 20’",
-    "Container ref 40’",
-    "Container ref 20’ with charge",
-    "Container ref 40’ with charge"
-}
+def get_sheets_service():
+    try:
+        credentials = Credentials.from_service_account_file(os.getenv("GOOGLE_APPLICATION_CREDENTIALS"))
+        service = build('sheets', 'v4', credentials=credentials)
+        logger.info("Google Sheets API service initialized successfully.")
+        return service
+    except Exception as e:
+        logger.error(f"Ошибка инициализации Google Sheets API: {e}")
+        raise
 
-def extract_length(text):
+def load_price_data():
     """
-    Извлекает числовое значение длины (в метрах) из текста.
-    Возвращает число или None, если длина не найдена.
+    Загружает данные из Google Sheets (Price.xlsx) для тарифов.
+    Ожидается, что таблица имеет следующие столбцы:
+      A: Type of the vehicle
+      B: Price_Ro_Ge (направление: Romania -> Georgia)
+      C: Price_Ge_Ro (направление: Georgia -> Romania)
+      D: Remark
+      E: Condition1
+      F: Condition2
+      G: Condition3
+    Возвращает словарь вида:
+      {
+         "fura": {
+             "price_Ro_Ge": "...",
+             "price_Ge_Ro": "...",
+             "remark": "...",
+             "conditions": [ "Condition1", "Condition2", ... ]
+         },
+         ...
+      }
+    Тип транспортного средства приводится к нижнему регистру.
+    Добавляются только те условия, где значение равно "1".
     """
-    match = re.search(r'(\d+)\s*(м|метров)', text.lower())
-    if match:
-        length = int(match.group(1))
-        logger.debug(f"Извлечена длина: {length} метров из текста: '{text}'")
-        return length
-    logger.debug(f"Не удалось извлечь длину из текста: '{text}'")
-    return None
+    try:
+        service = get_sheets_service()
+        # Диапазон обновлён: явно задаем строки до 1000
+        range_name = "Sheet1!A2:G1000"
+        result = service.spreadsheets().values().get(
+            spreadsheetId=PRICE_SPREADSHEET_ID,
+            range=range_name
+        ).execute()
+        values = result.get("values", [])
+        price_data = {}
+        for row in values:
+            if len(row) < 4:
+                continue
+            vehicle_type = row[0].strip().lower()
+            price_Ro_Ge = row[1].strip() if len(row) > 1 else ""
+            price_Ge_Ro = row[2].strip() if len(row) > 2 else ""
+            remark = row[3].strip() if len(row) > 3 else ""
+            conditions = []
+            if len(row) > 4 and row[4].strip() == "1":
+                conditions.append("Condition1")
+            if len(row) > 5 and row[5].strip() == "1":
+                conditions.append("Condition2")
+            if len(row) > 6 and row[6].strip() == "1":
+                conditions.append("Condition3")
+            price_data[vehicle_type] = {
+                "price_Ro_Ge": price_Ro_Ge,
+                "price_Ge_Ro": price_Ge_Ro,
+                "remark": remark,
+                "conditions": conditions
+            }
+        logger.info(f"Данные из Price.xlsx загружены: {price_data}")
+        return price_data
+    except Exception as e:
+        logger.error(f"Ошибка загрузки данных из Price.xlsx: {e}")
+        raise
 
-def find_category_by_length(extracted_length, website_prices):
+def send_telegram_notification(message):
     """
-    Находит тарифную категорию, сопоставляя извлечённую длину с пороговыми значениями,
-    извлечёнными из названий тарифных категорий.
-    
-    Сначала пытается найти число после фразы "up to" (без учета регистра);
-    если такой шаблон не найден, используется первое найденное число.
-    Сортирует категории по возрастанию порога и возвращает первую, для которой extracted_length <= порог.
-    Возвращает найденную категорию или None.
+    Отправляет уведомление через Telegram, используя переменные окружения.
+    Если возникает исключение, связанное с ограничением Flood control, ждет указанное время.
     """
-    categories_with_threshold = []
-    for category in website_prices:
-        match = re.search(r'up to (\d+)', category, re.IGNORECASE)
-        if not match:
-            match = re.search(r'(\d+)', category)
-        if match:
-            threshold = int(match.group(1))
-            categories_with_threshold.append((category, threshold))
-    if not categories_with_threshold:
-        logger.debug("Не удалось извлечь пороговые значения ни из одной категории")
+    try:
+        telegram_bot_token = os.getenv("TELEGRAM_BOT_TOKEN")
+        telegram_chat_id = os.getenv("TELEGRAM_CHAT_ID")
+        if telegram_bot_token and telegram_chat_id:
+            url = f"https://api.telegram.org/bot{telegram_bot_token}/sendMessage"
+            payload = {"chat_id": telegram_chat_id, "text": message, "parse_mode": "HTML"}
+            response = requests.post(url, json=payload)
+            response.raise_for_status()
+            logger.info(f"Уведомление отправлено: {response.json()}")
+    except Exception as ex:
+        # Если ограничение Flood control, ждем указанное время
+        if hasattr(ex, 'retry_after'):
+            delay = ex.retry_after
+            logger.warning(f"Flood control exceeded. Retrying in {delay} seconds.")
+            time.sleep(delay)
+            send_telegram_notification(message)
+        else:
+            logger.error(f"Ошибка при отправке уведомления: {ex}")
+
+def remove_timestamp(text):
+    """
+    Удаляет временной штамп из начала строки.
+    Пример: "10.02.25 09:33 - 2200 (EUR)" -> "2200 (EUR)"
+    """
+    return re.sub(r'^\d{2}\.\d{2}\.\d{2}\s+\d{2}:\d{2}\s*-\s*', '', text)
+
+def parse_price(price_str):
+    """
+    Извлекает числовое значение из строки цены.
+    Пример: "2200 (EUR)" -> 2200.0
+    """
+    try:
+        cleaned = re.sub(r'[^\d.]', '', price_str)
+        value = float(cleaned)
+        logger.info(f"Parsed price '{price_str}' -> {value}")
+        return value
+    except Exception as e:
+        logger.error(f"Ошибка парсинга цены из '{price_str}': {e}")
         return None
-    sorted_categories = sorted(categories_with_threshold, key=lambda x: x[1])
-    logger.debug(f"Отсортированные категории: {sorted_categories}")
-    for category, threshold in sorted_categories:
-        if extracted_length <= threshold:
-            logger.debug(f"Выбрана категория '{category}' для длины {extracted_length} (порог {threshold})")
-            return category
-    logger.debug(f"Ни одна категория не удовлетворяет условию для длины {extracted_length}")
+
+def get_guiding_question(condition_marker):
+    """
+    Ищет в файле Bible.xlsx строку, где значение в столбце Verification совпадает с condition_marker
+    (например, "CONDITION1") и возвращает соответствующий вопрос из столбца FAQ.
+    Если ничего не найдено, возвращает None.
+    """
+    bible_df = load_bible_data()
+    if bible_df is None:
+        return None
+    for index, row in bible_df.iterrows():
+        ver = str(row.get("Verification", "")).strip().upper()
+        if ver == condition_marker.upper():
+            question = row.get("FAQ", "").strip()
+            logger.info(f"Найден guiding вопрос для {condition_marker}: {question}")
+            return question
+    logger.info(f"Guiding вопрос для {condition_marker} не найден.")
     return None
 
-def check_ferry_price_from_site(vehicle_description, direction="Ro_Ge"):
+def check_ferry_price(vehicle_type, direction="Ro_Ge"):
     """
-    Получает тариф с сайта, используя get_ferry_prices().
-    
-    Алгоритм:
-      1. Загружает тарифы с сайта.
-      2. Определяет тарифную категорию по синониму: если в описании встречается синоним из TYPE_SYNONYMS,
-         используется соответствующий официальный термин.
-      3. Если категория не определена, ищется совпадение по ключам тарифных данных.
-      4. Если в запросе явно указана длина и выбранная категория не является "Minivan", тарифная категория переопределяется
-         по значению длины через find_category_by_length.
-      5. Если ни название, ни длина не позволяют однозначно определить категорию (для грузовиков),
-         возвращается сообщение с просьбой уточнить данные.
-      6. Если тарифная категория определена, извлекается активная цена для указанного направления и примечание.
-         Для категорий, не входящих в NON_TRUCK_CATEGORIES, если активная цена содержит два значения,
-         оставляется только второе (актуальное).
-      7. Формируется итоговый ответ, который включает только активную цену и примечание.
+    Получает актуальные тарифы с сайта и сравнивает их с данными из Price.xlsx.
+    Если сайт возвращает некорректное значение (PLACEHOLDER или без цифр), используется запасная цена.
+    Если цена с сайта не совпадает с ценой из файла, менеджеру отправляется уведомление, а возвращается цена из файла.
     """
     try:
         website_prices = get_ferry_prices()
-        logger.debug(f"Получены тарифы с сайта: {website_prices}")
+        logger.info(f"Получены цены с сайта: {website_prices}")
+        sheet_prices = load_price_data()
+        
+        if vehicle_type not in website_prices:
+            msg = f"Извините, актуальная цена для '{vehicle_type}' не найдена на сайте."
+            logger.error(msg)
+            return msg
+        if vehicle_type not in sheet_prices:
+            msg = f"Извините, информация о тарифах для '{vehicle_type}' отсутствует в нашей базе."
+            logger.error(msg)
+            return msg
+        
+        if direction == "Ro_Ge":
+            website_price_str = website_prices[vehicle_type].get("price_Ro_Ge", "")
+            sheet_price_str = sheet_prices[vehicle_type].get("price_Ro_Ge", "")
+        else:
+            website_price_str = website_prices[vehicle_type].get("price_Ge_Ro", "")
+            sheet_price_str = sheet_prices[vehicle_type].get("price_Ge_Ro", "")
+        
+        website_price_str = remove_timestamp(website_price_str).strip()
+        logger.info(f"Цена с сайта для {vehicle_type}: '{website_price_str}'")
+        
+        if not re.search(r'\d', website_price_str) or website_price_str.upper() in ["PRICE_QUERY", "BASE_PRICE"]:
+            fallback_price_str = sheet_price_str
+            logger.info(f"Сайт вернул некорректное значение. Используем запасную цену: '{fallback_price_str}'")
+            return fallback_price_str
+        
+        website_price_value = parse_price(website_price_str)
+        sheet_price_value = parse_price(sheet_price_str)
+        
+        if website_price_value is None or sheet_price_value is None:
+            logger.error("Не удалось распарсить цену.")
+            return "Произошла ошибка при получении цены. Пожалуйста, попробуйте позже."
+        
+        if website_price_value != sheet_price_value:
+            message_to_manager = (f"ВНИМАНИЕ: Для '{vehicle_type}' цены различаются. "
+                                  f"Сайт: {website_price_str}, Файл: {sheet_price_str}.")
+            send_telegram_notification(message_to_manager)
+            logger.info("Возвращаем запасную цену из файла.")
+            return sheet_price_str
+        else:
+            response_message = f"Цена перевозки для '{vehicle_type}' ({direction.replace('_', ' ')}) составляет {website_price_str}."
+            remark = sheet_prices[vehicle_type].get("remark", "")
+            if remark:
+                response_message += f" Примечание: {remark}"
+            conditions = sheet_prices[vehicle_type].get("conditions", [])
+            if conditions:
+                response_message += "\nДля более точного расчёта, пожалуйста, ответьте на следующие вопросы:"
+                for marker in conditions:
+                    response_message += f"\n{marker}"
+            return response_message
     except Exception as e:
-        logger.error(f"Ошибка при получении тарифов с сайта: {e}")
-        return "Ошибка при получении тарифов с сайта."
-    
-    vehicle_lower = vehicle_description.lower()
-    category = None
+        logger.error(f"Ошибка при сравнении цен: {e}")
+        return "Произошла ошибка при получении цены. Пожалуйста, попробуйте позже."
 
-    # 1. Определение по синониму.
-    for synonym, official in TYPE_SYNONYMS.items():
-        if synonym in vehicle_lower:
-            if official in website_prices:
-                category = official
-                logger.debug(f"Синоним '{synonym}' определил тарифную категорию: {category}")
-                break
-
-    # 2. Если по синониму не удалось, ищем совпадение по ключам.
-    if category is None:
-        for key in website_prices:
-            if key.lower() in vehicle_lower:
-                category = key
-                logger.debug(f"Найденная категория по совпадению названия: {category}")
-                break
-
-    # 3. Если в запросе явно указана длина и выбранная категория не равна "Minivan", переопределяем категорию по длине.
-    extracted_length = extract_length(vehicle_description)
-    if extracted_length is not None and category != "Minivan":
-        category_by_length = find_category_by_length(extracted_length, website_prices)
-        if category_by_length is not None:
-            if category != category_by_length:
-                logger.debug(f"Переопределяем тарифную категорию с '{category}' на '{category_by_length}' на основе длины {extracted_length} метров")
-            category = category_by_length
-    elif extracted_length is None and category not in NON_TRUCK_CATEGORIES:
-        return ("Пожалуйста, уточните длину вашего транспортного средства "
-                "(например, до 20, до 17, до 14, до 10 или до 8 метров).")
-    
-    if category is None:
-        return "Не удалось определить тарифную категорию по вашему запросу. Пожалуйста, уточните информацию о транспортном средстве."
-
-    # 4. Извлекаем активную цену для выбранной категории в зависимости от направления.
-    if direction == "Ro_Ge":
-        active_price = website_prices[category].get("price_Ro_Ge", "")
-    else:
-        active_price = website_prices[category].get("price_Ge_Ro", "")
-    
-    # Если активная цена для категорий, не входящих в NON_TRUCK_CATEGORIES (т.е. для грузовиков),
-    # содержит два значения, оставляем только второе.
-    if category not in NON_TRUCK_CATEGORIES:
-        prices_found = re.findall(r'(\d+)\s*\(EUR\)', active_price)
-        if len(prices_found) > 1:
-            # Берём второе значение.
-            active_price = prices_found[1] + " (EUR)"
-            logger.debug(f"Из активной цены выбрано второе значение: {active_price}")
-    
-    if not active_price:
-        return "Актуальная цена для выбранной категории не получена. Пожалуйста, обратитесь к менеджеру."
-    
-    remark = website_prices[category].get("remark", "")
-    
-    # 5. Формирование итогового ответа.
-    response_message = f"Цена перевозки для категории '{category}' ({direction.replace('_', ' ')}) составляет {active_price}."
-    if remark:
-        response_message += f" Примечание: {remark}"
-    
-    logger.debug(f"Итоговый ответ: {response_message}")
-    return response_message
-
-# Для обратной совместимости с сервером назначаем check_ferry_price как обёртку для check_ferry_price_from_site.
-check_ferry_price = check_ferry_price_from_site
-
-def load_price_data():
-    # Заглушка, так как на данный момент этот метод не используется.
-    return {}
+def get_openai_response(messages):
+    start_time = time.time()
+    attempt = 0
+    while True:
+        try:
+            response = openai.ChatCompletion.create(
+                model="gpt-3.5-turbo",
+                messages=messages,
+                max_tokens=150,
+                timeout=40
+            )
+            return response
+        except Exception as e:
+            logger.error(f"Попытка {attempt+1} ошибки в OpenAI: {e}")
+            attempt += 1
+            if time.time() - start_time > 180:
+                send_telegram_notification("Ошибка соединения: запрос к OpenAI длится более 3 минут.")
+                return None
+            time.sleep(2)
 
 if __name__ == "__main__":
-    # Тестовый пример 1: Фура с указанием длины
-    sample_text1 = "Фура 17 метров, Констанца-Поти, без ADR, без груза"
-    result_ro_ge = check_ferry_price(sample_text1, direction="Ro_Ge")
-    logger.info(f"Результат теста (Ro_Ge): {result_ro_ge}")
-    
-    result_ge_ro = check_ferry_price(sample_text1, direction="Ge_Ro")
-    logger.info(f"Результат теста (Ge_Ro): {result_ge_ro}")
-    
-    # Тестовый пример 2: Минивэн без указания длины (для минивэнов длина не учитывается)
-    sample_text2 = "Минивэн"
-    result_minivan = check_ferry_price(sample_text2, direction="Ge_Ro")
-    logger.info(f"Результат теста для минивэна: {result_minivan}")
-    
-    # Тестовый пример 3: Грузовик 15 метров, из Поти в Констанца
-    sample_text3 = "Грузовик 15 метров, из Поти в Констанца"
-    result_truck = check_ferry_price(sample_text3, direction="Ge_Ro")
-    logger.info(f"Результат теста для грузовика 15 метров (Ge_Ro): {result_truck}")
-    
-    # Тестовый пример 4: Грузовик 10 метров, из Поти в Констанца
-    sample_text4 = "Грузовик 10 метров, из Поти в Констанца"
-    result_truck10 = check_ferry_price(sample_text4, direction="Ge_Ro")
-    logger.info(f"Результат теста для грузовика 10 метров (Ge_Ro): {result_truck10}")
-    
-    # Тестовый пример 5: Грузовик 8 метров, из Ro_Ge запроса (ожидается категория для 8 метров, например, "Mini truck (up to 8M)")
-    sample_text5 = "Грузовик 8 метров"
-    result_truck8 = check_ferry_price(sample_text5, direction="Ro_Ge")
-    logger.info(f"Результат теста для грузовика 8 метров (Ro_Ge): {result_truck8}")
+    vehicle = "fura"  # Используйте "truck" или "fura" (в нижнем регистре)
+    direction = "Ro_Ge"  # или "Ge_Ro"
+    message = check_ferry_price(vehicle, direction)
+    print(message)
