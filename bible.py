@@ -13,9 +13,12 @@ logger.setLevel(logging.INFO)
 # Проверяем наличие переменной окружения и файла с учетными данными.
 service_account_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
 if not service_account_path or not os.path.exists(service_account_path):
+    # Если файл по указанному пути не найден, переопределяем путь на локальный файл.
     service_account_path = "./service_account.json"
     os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = service_account_path
     logger.info(f"Используем путь к учетным данным: {service_account_path}")
+else:
+    logger.info(f"Найден файл учетных данных: {service_account_path}")
 
 # Реальный идентификатор вашей таблицы Google Sheets
 BIBLE_SPREADSHEET_ID = "1QB3Jv7cL5hNwDKx9rQF6FCrKHW7IHPAqrUg7FIvY7Dk"
@@ -101,7 +104,7 @@ def get_rule(rule_key):
     Возвращает текст правила (шаблон или инструкцию) по ключу rule_key.
     Для этого ищутся строки, где:
       - Столбец FAQ равен "-" (внутренняя инструкция),
-      - Столбец Verification содержит "RULE" (без учета регистра),
+      - Столбец Verification содержит "RULE",
       - Столбец Remark (ключ) совпадает с rule_key (без учета регистра).
     Если правило найдено, возвращается значение из столбца Answers; иначе возвращается строка вида "<rule_key>".
     """
