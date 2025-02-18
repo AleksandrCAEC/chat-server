@@ -16,7 +16,6 @@ from price_handler import check_ferry_price, parse_price, remove_timestamp, get_
 from flask_cors import CORS
 import openpyxl
 
-# Импорт для Telegram Bot
 from telegram import Update, Bot
 from telegram.ext import (
     ApplicationBuilder,
@@ -27,7 +26,6 @@ from telegram.ext import (
     filters
 )
 
-# Флаг выбора источника (сейчас сайт является основным, в будущем возможно подключение price.xlsx)
 USE_PRICE_FILE = False
 
 os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = "/etc/secrets/service_account_json"
@@ -47,16 +45,12 @@ pprint.pprint(dict(os.environ))
 
 pending_guiding = {}
 
-# Ключевые слова для запроса цены
 PRICE_KEYWORDS = ["цена", "прайс"]
 
 def get_vehicle_type(client_text):
-    """
-    Определяет тип транспортного средства по входящему сообщению клиента с использованием алгоритма нечёткого сопоставления.
-    """
     client_text_lower = client_text.lower()
     if USE_PRICE_FILE:
-        from price_handler import load_price_data  # Если потребуется, можно использовать данные из файла
+        from price_handler import load_price_data
         data = load_price_data()
     else:
         from price import get_ferry_prices
@@ -90,7 +84,6 @@ def get_openai_response(messages):
             logger.error(f"OpenAI error attempt {attempt+1}: {e}")
             attempt += 1
             if time.time() - start_time > 180:
-                # Возвращаем сообщение об ошибке, определённое во внешнем правиле
                 return None
             time.sleep(2)
 
@@ -99,8 +92,9 @@ def prepare_chat_context(client_code):
     bible_df = load_bible_data()
     if bible_df is None:
         raise Exception(get_rule("bible_not_available"))
-    # Сбор всех правил системного сообщения из столбца rule
-    system_rule = "\n".join(bible_df["rule"].dropna().tolist())
+    # Собираем все строки правил: FAQ равен "-" и Verification = "RULE"
+    rules_df = bible_df[(bible_df["FAQ"].str.strip() == "-") & (bible_df["Verification"].str.upper() == "RULE")]
+    system_rule = "\n".join(rules_df["Answers"].dropna().tolist())
     system_message = {"role": "system", "content": system_rule}
     messages.append(system_message)
     
@@ -134,7 +128,6 @@ def register_client():
             msg = get_rule("new_client_message").format(**result)
         else:
             msg = get_rule("returning_client_message").format(**result)
-        # Здесь можно отправить уведомление через Telegram, если требуется
         return jsonify(result), 200
     except Exception as e:
         logger.error(f"Error in /register-client: {e}")
@@ -169,7 +162,7 @@ def chat():
         update_last_visit(client_code)
         update_activity_status()
         
-        # Правило: не отправлять сообщение о том, что расчет ещё в процессе
+        # Правило: не отправлять сообщение о задержке расчёта
         if client_code in pending_guiding:
             pending = pending_guiding[client_code]
             pending.setdefault("answers", []).append(user_message)
@@ -230,7 +223,6 @@ def chat():
 def home():
     return jsonify({"status": get_rule("server_running")}), 200
 
-# Настройка Telegram Bot
 from telegram.ext import ConversationHandler
 
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
