@@ -18,7 +18,7 @@ if not os.path.exists(service_account_path):
 else:
     logger.info(f"Найден файл учетных данных: {service_account_path}")
 
-# Используем реальный идентификатор вашей таблицы Google Sheets, взятый из ссылки
+# Используем реальный идентификатор вашей таблицы Google Sheets (из вашей ссылки)
 BIBLE_SPREADSHEET_ID = "1QB3Jv7cL5hNwDKx9rQF6FCrKHW7IHPAqrUg7FIvY7Dk"
 
 def get_sheets_service():
@@ -33,7 +33,7 @@ def get_sheets_service():
 def load_bible_data():
     try:
         service = get_sheets_service()
-        # Ожидаются столбцы: FAQ, Answers, Verification, rule, Remark
+        # Ожидается, что в таблице столбцы: FAQ, Answers, Verification, rule, Remark
         range_name = "Bible!A2:E"
         result = service.spreadsheets().values().get(
             spreadsheetId=BIBLE_SPREADSHEET_ID,
@@ -98,14 +98,15 @@ def get_rule(rule_key):
     Ищутся строки, где:
       - Столбец FAQ равен "-" (означает внутреннюю инструкцию),
       - Столбец Verification равен "RULE" (без учета регистра),
-      - Столбец Remark (ключ) совпадает с rule_key (без учета регистра).
-    Если правило найдено, возвращается значение из столбца Answers; иначе возвращается строка вида "<rule_key>".
+      - Столбец "rule" совпадает с rule_key (без учета регистра).
+    Если правило найдено, возвращается значение из столбца Answers;
+    иначе возвращается строка вида "<rule_key>".
     """
     df = load_bible_data()
     if df is None:
         return f"<{rule_key}>"
     rules_df = df[(df["FAQ"].str.strip() == "-") & (df["Verification"].str.upper() == "RULE")]
-    matching = rules_df[rules_df["Remark"].str.strip().str.lower() == rule_key.lower()]
+    matching = rules_df[rules_df["rule"].str.strip().str.lower() == rule_key.lower()]
     if not matching.empty:
         return matching.iloc[0]["Answers"]
     else:
