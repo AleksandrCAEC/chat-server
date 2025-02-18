@@ -10,7 +10,8 @@ from googleapiclient.discovery import build
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
-BIBLE_SPREADSHEET_ID = "1QB3Jv7cL5hNwDKx9rQF6FCrKHW7IHPAqrUg7FIvY7Dk"  # Замените на реальный ID
+# Используйте реальный идентификатор вашей таблицы Google Sheets
+BIBLE_SPREADSHEET_ID = "1QB3Jv7cL5hNwDKx9rQF6FCrKHW7IHPAqrUg7FIvY7Dk"
 
 def get_sheets_service():
     try:
@@ -26,14 +27,14 @@ def get_sheets_service():
 def load_bible_data():
     try:
         service = get_sheets_service()
-        range_name = "Bible!A2:E"  # Если у вас есть еще столбец Remark, можно указать его
+        # Диапазон: ожидаются столбцы: FAQ, Answers, Verification, rule, Remark
+        range_name = "Bible!A2:E"
         result = service.spreadsheets().values().get(
             spreadsheetId=BIBLE_SPREADSHEET_ID,
             range=range_name
         ).execute()
         values = result.get("values", [])
         if values:
-            # Ожидается, что столбцы: FAQ, Answers, Verification, rule, Remark
             df = pd.DataFrame(values, columns=["FAQ", "Answers", "Verification", "rule", "Remark"])
         else:
             df = pd.DataFrame(columns=["FAQ", "Answers", "Verification", "rule", "Remark"])
@@ -64,7 +65,7 @@ def ensure_local_bible_file(local_path):
 def save_bible_pair(question, answer):
     try:
         service = get_sheets_service()
-        new_row = [[question, answer, "Check", "", ""]]  # Для обычных вопросов rule и Remark могут быть пустыми
+        new_row = [[question, answer, "Check", "", ""]]  # Для обычных вопросов internal rule не используется
         body = {"values": new_row}
         result = service.spreadsheets().values().append(
             spreadsheetId=BIBLE_SPREADSHEET_ID,
@@ -90,18 +91,16 @@ def save_bible_pair(question, answer):
 
 def get_rule(rule_key):
     """
-    Функция возвращает правило (шаблон или текст) по ключу rule_key.
+    Возвращает текст правила (шаблон или инструкцию) по ключу rule_key.
     Для этого ищутся строки, где:
-      - FAQ равно "-" (то есть это внутренняя инструкция),
-      - Verification содержит значение "RULE" (без учета регистра),
-      - Remark (ключ) совпадает с rule_key (без учета регистра).
-    Если правило найдено, возвращается значение из столбца Answers.
-    Если не найдено, возвращается строка вида "<rule_key>".
+      - Столбец FAQ равен "-" (внутренняя инструкция),
+      - Столбец Verification содержит "RULE" (без учета регистра),
+      - Столбец Remark (ключ) совпадает с rule_key (без учета регистра).
+    Если правило найдено, возвращается значение из столбца Answers; иначе возвращается строка вида "<rule_key>".
     """
     df = load_bible_data()
     if df is None:
         return f"<{rule_key}>"
-    # Отбираем строки, где FAQ равен "-" и Verification == "RULE"
     rules_df = df[(df["FAQ"].str.strip() == "-") & (df["Verification"].str.upper() == "RULE")]
     matching = rules_df[rules_df["Remark"].str.strip().str.lower() == rule_key.lower()]
     if not matching.empty:
