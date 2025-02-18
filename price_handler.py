@@ -60,11 +60,10 @@ def get_guiding_question(condition_marker):
     if bible_df is None:
         return None
     for index, row in bible_df.iterrows():
-        ver = str(row.get("Verification", "")).strip().upper()
-        if ver == "RULE":
-            # Для правил, ключ хранится в столбце Remark, а текст правила — в Answers
-            if row.get("Remark", "").strip().lower() == condition_marker.lower():
-                question = row.get("Answers", "").strip()
+        if row["Verification"].strip().upper() == "RULE":
+            # Используем столбец "rule" для ключа
+            if row["rule"].strip().lower() == condition_marker.lower():
+                question = row["Answers"].strip()
                 logger.info(f"{get_rule('guiding_question_found')} {condition_marker}: {question}")
                 return question
     logger.info(f"{get_rule('guiding_question_not_found')} {condition_marker}")
@@ -115,6 +114,7 @@ def get_openai_response(messages):
     attempt = 0
     while True:
         try:
+            import openai
             response = openai.ChatCompletion.create(
                 model="gpt-3.5-turbo",
                 messages=messages,
