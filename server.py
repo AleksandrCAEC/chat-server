@@ -28,7 +28,7 @@ from telegram.ext import (
 
 USE_PRICE_FILE = False
 
-os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = "/etc/secrets/service_account_json"
+os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = os.getenv("GOOGLE_APPLICATION_CREDENTIALS", "./service_account.json")
 openai.api_key = os.getenv("OPENAI_API_KEY")
 
 app = Flask(__name__)
@@ -92,7 +92,7 @@ def prepare_chat_context(client_code):
     bible_df = load_bible_data()
     if bible_df is None:
         raise Exception(get_rule("bible_not_available"))
-    # Собираем все строки правил: FAQ равен "-" и Verification = "RULE"
+    # Собираем все внутренние правила из строк, где FAQ равен "-" и Verification = "RULE"
     rules_df = bible_df[(bible_df["FAQ"].str.strip() == "-") & (bible_df["Verification"].str.upper() == "RULE")]
     system_rule = "\n".join(rules_df["Answers"].dropna().tolist())
     system_message = {"role": "system", "content": system_rule}
