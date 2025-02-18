@@ -17,10 +17,10 @@ def get_sheets_service():
     try:
         credentials = Credentials.from_service_account_file(os.getenv("GOOGLE_APPLICATION_CREDENTIALS"))
         service = build('sheets', 'v4', credentials=credentials)
-        logger.info(get_rule("sheets_initialized"))
+        logger.info(get_rule())  # Выводим общие инструкции
         return service
     except Exception as e:
-        logger.error(f"{get_rule('sheets_init_error')}: {e}")
+        logger.error(f"{get_rule()}: {e}")
         raise
 
 def send_telegram_notification(message):
@@ -32,15 +32,15 @@ def send_telegram_notification(message):
             payload = {"chat_id": telegram_chat_id, "text": message, "parse_mode": "HTML"}
             response = requests.post(url, json=payload)
             response.raise_for_status()
-            logger.info(f"{get_rule('notification_sent')}: {response.json()}")
+            logger.info(f"{get_rule()}: {response.json()}")
     except Exception as ex:
         if hasattr(ex, 'retry_after'):
             delay = ex.retry_after
-            logger.warning(f"{get_rule('flood_control')} {delay} секунд.")
+            logger.warning(f"{get_rule()} {delay} секунд.")
             time.sleep(delay)
             send_telegram_notification(message)
         else:
-            logger.error(f"{get_rule('notification_error')}: {ex}")
+            logger.error(f"{get_rule()}: {ex}")
 
 def remove_timestamp(text):
     return re.sub(r'^\d{2}\.\d{2}\.\d{2}\s+\d{2}:\d{2}\s*-\s*', '', text)
@@ -52,7 +52,7 @@ def parse_price(price_str):
         logger.info(f"Parsed price '{price_str}' -> {value}")
         return value
     except Exception as e:
-        logger.error(f"{get_rule('price_parse_error')}: {e}")
+        logger.error(f"{get_rule()}: {e}")
         return None
 
 def get_guiding_question(condition_marker):
@@ -61,17 +61,18 @@ def get_guiding_question(condition_marker):
         return None
     for index, row in bible_df.iterrows():
         if row["Verification"].strip().upper() == "RULE":
-            if row["rule"].strip().lower() == condition_marker.lower():
-                question = row["Answers"].strip()
-                logger.info(f"{get_rule('guiding_question_found')} {condition_marker}: {question}")
-                return question
-    logger.info(f"{get_rule('guiding_question_not_found')} {condition_marker}")
+            # Здесь ожидаем, что данная строка – внутренняя инструкция, но отдельные ключи не используются
+            # Можно вернуть текст из Answers, если нужно
+            question = row["Answers"].strip()
+            logger.info(f"{get_rule()} {condition_marker}: {question}")
+            return question
+    logger.info(f"{get_rule()} {condition_marker}")
     return None
 
 def check_ferry_price(vehicle_type, direction="Ro_Ge"):
     try:
         website_prices = get_ferry_prices()
-        logger.info(f"{get_rule('website_prices_received')}: {website_prices}")
+        logger.info(f"{get_rule()}: {website_prices}")
         
         if vehicle_type not in website_prices:
             msg = f"Извините, актуальная цена для '{vehicle_type}' не найдена на сайте."
@@ -87,7 +88,7 @@ def check_ferry_price(vehicle_type, direction="Ro_Ge"):
         logger.info(f"Цена с сайта для {vehicle_type}: '{website_price_str}'")
         
         if not re.search(r'\d', website_price_str) or website_price_str.upper() in ["PRICE_QUERY", "BASE_PRICE"]:
-            logger.info(f"{get_rule('invalid_price_returned')} для {vehicle_type}")
+            logger.info(f"{get_rule()} для {vehicle_type}")
             return website_price_str
         
         response_message = f"Цена перевозки для '{vehicle_type}' ({direction.replace('_', ' ')}) составляет {website_price_str}."
@@ -101,8 +102,8 @@ def check_ferry_price(vehicle_type, direction="Ro_Ge"):
                 response_message += f"\n{marker}"
         return response_message
     except Exception as e:
-        logger.error(f"{get_rule('price_error')}: {e}")
-        return get_rule("price_error_message")
+        logger.error(f"{get_rule()}: {e}")
+        return get_rule()
 
 def get_openai_response(messages):
     start_time = time.time()
@@ -121,7 +122,7 @@ def get_openai_response(messages):
             logger.error(f"Попытка {attempt+1} ошибки в OpenAI: {e}")
             attempt += 1
             if time.time() - start_time > 180:
-                send_telegram_notification(get_rule("openai_timeout_message"))
+                send_telegram_notification(get_rule())
                 return None
             time.sleep(2)
 
