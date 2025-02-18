@@ -178,13 +178,10 @@ def chat():
 
         update_last_visit(client_code)
         
-        # Логика обработки guiding questions (pending_guiding) и определения цены
-        # Упрощённо представим, что guiding questions идут из Price.xlsx
-        if client_code in pending_guiding:
-            # ...
-            pass
-        
-        # Если запрос содержит ключевые слова о цене, обрабатываем через get_price_response
+        # Логика обработки guiding questions (pending_guiding)...
+        # (При желании дописать)
+
+        # Если запрос содержит ключевые слова о цене
         if is_price_query(user_message):
             vehicle_type = get_vehicle_type(user_message)
             if not vehicle_type:
@@ -222,7 +219,7 @@ from telegram.ext import ConversationHandler
 
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 if not TELEGRAM_BOT_TOKEN:
-    logger.error("Переменная окружения TELEGRAM_BOT_TOKEN не задана!")
+    logger.error("Переменная окружения TELEGRAM_BOT_TOKEN не настроена!")
     exit(1)
 
 BIBLE_ASK_ACTION, BIBLE_ASK_QUESTION, BIBLE_ASK_ANSWER = range(3)
