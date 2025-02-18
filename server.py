@@ -11,7 +11,7 @@ import requests
 from datetime import datetime
 from clientdata import register_or_update_client, verify_client_code, update_last_visit, update_activity_status
 from client_caec import add_message_to_client_file, find_client_file_id, get_sheets_service, CLIENT_FILES_DIR
-from bible import load_bible_data, save_bible_pair
+from bible import load_bible_data, save_bible_pair, get_rule
 from price_handler import check_ferry_price, parse_price, remove_timestamp, get_guiding_question, get_openai_response
 from flask_cors import CORS
 import openpyxl
@@ -28,7 +28,8 @@ from telegram.ext import (
 
 USE_PRICE_FILE = False
 
-os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = "/etc/secrets/service_account_json"
+# Если переменная окружения не переопределена, используем путь по умолчанию
+os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = os.getenv("GOOGLE_APPLICATION_CREDENTIALS", "./service_account.json")
 openai.api_key = os.getenv("OPENAI_API_KEY")
 
 app = Flask(__name__)
@@ -48,11 +49,6 @@ pending_guiding = {}
 PRICE_KEYWORDS = ["цена", "прайс", "сколько стоит", "во сколько обойдется"]
 
 def get_vehicle_type(client_text):
-    """
-    Определяет тип транспортного средства по сообщению клиента.
-    Если USE_PRICE_FILE == True, используются данные из price.xlsx,
-    иначе данные берутся с сайта.
-    """
     client_text_lower = client_text.lower()
     if USE_PRICE_FILE:
         from price_handler import load_price_data
@@ -89,7 +85,7 @@ def get_openai_response(messages):
             logger.error(f"Попытка {attempt+1} ошибки в OpenAI: {e}")
             attempt += 1
             if time.time() - start_time > 180:
-                send_telegram_notification("Ошибка соединения: запрос к OpenAI длится более 3 минут.")
+                # При истечении таймаута можно отправить уведомление (если нужно)
                 return None
             time.sleep(2)
 
@@ -97,22 +93,14 @@ def prepare_chat_context(client_code):
     messages = []
     bible_df = load_bible_data()
     if bible_df is None:
-        raise Exception("Bible.xlsx не найден или недоступен.")
+        raise Exception(get_rule("bible_not_available"))
     logger.info(f"Bible.xlsx содержит {len(bible_df)} записей.")
-    bible_context = "Информация о компании (FAQ) и правила общения:\n"
-    for index, row in bible_df.iterrows():
-        faq = row.get("FAQ", "")
-        answer = row.get("Answers", "")
-        verification = str(row.get("Verification", "")).strip().upper()
-        rule = row.get("rule", "").strip()
-        if faq and answer and verification != "CHECK":
-            bible_context += f"Вопрос: {faq}\nОтвет: {answer}\n"
-        if rule:
-            bible_context += f"Правило: {rule}\n"
-        bible_context += "\n"
+    # Формируем системное сообщение, объединяя все внутренние правила
+    rules_df = bible_df[(bible_df["FAQ"].str.strip() == "-") & (bible_df["Verification"].str.upper() == "RULE")]
+    system_rule = "\n".join(rules_df["Answers"].dropna().tolist())
     system_message = {
         "role": "system",
-        "content": f"Вы – умный ассистент компании CAEC. Используйте следующую информацию для ответов:\n{bible_context}"
+        "content": f"Вы – умный ассистент компании CAEC. Используйте следующие инструкции для ответов:\n{system_rule}"
     }
     messages.append(system_message)
     
