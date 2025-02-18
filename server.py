@@ -11,11 +11,12 @@ import requests
 from datetime import datetime
 from clientdata import register_or_update_client, verify_client_code, update_last_visit, update_activity_status
 from client_caec import add_message_to_client_file, find_client_file_id, get_sheets_service, CLIENT_FILES_DIR
-from bible import load_bible_data, save_bible_pair, get_rule
-from price_handler import check_ferry_price, parse_price, remove_timestamp, get_guiding_question, get_openai_response
+from bible import load_bible_data, save_bible_pair
+from price_handler import check_ferry_price, load_price_data, parse_price, remove_timestamp, get_guiding_question, get_openai_response
 from flask_cors import CORS
 import openpyxl
 
+# Импорты для Telegram Bot (python-telegram-bot v20+)
 from telegram import Update, Bot
 from telegram.ext import (
     ApplicationBuilder,
@@ -26,14 +27,17 @@ from telegram.ext import (
     filters
 )
 
-USE_PRICE_FILE = False
+# Установка пути к файлу service_account_json
+os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = "/etc/secrets/service_account_json"
 
-os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = os.getenv("GOOGLE_APPLICATION_CREDENTIALS", "./service_account.json")
+# Инициализация OpenAI
 openai.api_key = os.getenv("OPENAI_API_KEY")
 
+# Инициализация Flask-приложения и CORS
 app = Flask(__name__)
 CORS(app)
 
+# Настройка логирования
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
@@ -43,19 +47,25 @@ logger = logging.getLogger(__name__)
 logger.info("Текущие переменные окружения:")
 pprint.pprint(dict(os.environ))
 
+# Глобальный словарь для хранения состояния guiding вопросов
 pending_guiding = {}
 
+###############################################
+# Функции для обработки запросов о цене
+###############################################
 PRICE_KEYWORDS = ["цена", "прайс", "сколько стоит", "во сколько обойдется"]
 
+def is_price_query(text):
+    return any(keyword in text.lower() for keyword in PRICE_KEYWORDS)
+
 def get_vehicle_type(client_text):
+    """
+    Определяет тип транспортного средства по сообщению клиента с использованием данных из Price.xlsx.
+    Выполняется fuzzy-поиск по ключам из Price.xlsx (приводим к нижнему регистру).
+    """
+    price_data = load_price_data()
+    vehicle_types = list(price_data.keys())
     client_text_lower = client_text.lower()
-    if USE_PRICE_FILE:
-        from price_handler import load_price_data
-        data = load_price_data()
-    else:
-        from price import get_ferry_prices
-        data = get_ferry_prices()
-    vehicle_types = list(data.keys())
     matches = difflib.get_close_matches(client_text_lower, [vt.lower() for vt in vehicle_types], n=1, cutoff=0.3)
     if matches:
         for vt in vehicle_types:
@@ -84,6 +94,7 @@ def get_openai_response(messages):
             logger.error(f"Попытка {attempt+1} ошибки в OpenAI: {e}")
             attempt += 1
             if time.time() - start_time > 180:
+                send_telegram_notification("Ошибка соединения: запрос к OpenAI длится более 3 минут.")
                 return None
             time.sleep(2)
 
@@ -91,14 +102,18 @@ def prepare_chat_context(client_code):
     messages = []
     bible_df = load_bible_data()
     if bible_df is None:
-        raise Exception(get_rule())
+        raise Exception("Bible.xlsx не найден или недоступен.")
     logger.info(f"Bible.xlsx содержит {len(bible_df)} записей.")
-    # Собираем внутренние инструкции: строки, где FAQ = "-" и Verification = "RULE"
-    rules_df = bible_df[(bible_df["FAQ"].str.strip() == "-") & (bible_df["Verification"].str.upper() == "RULE")]
-    system_rule = "\n".join(rules_df["Answers"].tolist())
+    bible_context = "Информация о компании (FAQ):\n"
+    for index, row in bible_df.iterrows():
+        faq = row.get("FAQ", "")
+        answer = row.get("Answers", "")
+        verification = str(row.get("Verification", "")).strip().upper()
+        if faq and answer and verification != "CHECK":
+            bible_context += f"Вопрос: {faq}\nОтвет: {answer}\n\n"
     system_message = {
         "role": "system",
-        "content": f"Вы – умный ассистент компании CAEC. Используйте следующие инструкции для ответов:\n{system_rule}"
+        "content": f"Вы – умный ассистент компании CAEC. Используйте следующую информацию для ответов:\n{bible_context}"
     }
     messages.append(system_message)
     
@@ -122,6 +137,9 @@ def prepare_chat_context(client_code):
         logger.info(f"Файл клиента с кодом {client_code} не найден.")
     return messages
 
+###############################################
+# Эндпоинты регистрации, верификации и чата
+###############################################
 @app.route('/register-client', methods=['POST'])
 def register_client():
     try:
@@ -200,16 +218,37 @@ def chat():
                     final_price = f"Базовая цена: {base_price_str}. Ваши ответы: {', '.join(pending['answers'])}."
                 response_message = f"Спасибо, ваши ответы приняты. {final_price}"
                 del pending_guiding[client_code]
-        elif any(keyword in user_message.lower() for keyword in PRICE_KEYWORDS):
+        elif is_price_query(user_message):
             vehicle_type = get_vehicle_type(user_message)
             if not vehicle_type:
-                response_message = "Извините, не удалось определить тип транспортного средства."
+                response_message = ("Извините, не удалось определить тип транспортного средства. Пожалуйста, укажите, например, 'фура'.")
             else:
-                base_price_str = get_price_response(vehicle_type)
-                if base_price_str:
-                    response_message = base_price_str
+                price_data = load_price_data()
+                if vehicle_type not in price_data:
+                    response_message = f"Извините, информация о тарифах для '{vehicle_type}' отсутствует в нашей базе."
                 else:
-                    response_message = f"Информация о тарифах для '{vehicle_type}' отсутствует."
+                    base_price_str = price_data[vehicle_type].get("price_Ro_Ge", "")
+                    conditions = price_data[vehicle_type].get("conditions", [])
+                    if conditions:
+                        guiding_questions = []
+                        for marker in conditions:
+                            question = get_guiding_question(marker)
+                            if question:
+                                guiding_questions.append(question)
+                        # Фильтруем guiding вопросы, убирая упоминания о длине (например, "метр")
+                        guiding_questions = [q for q in guiding_questions if "тип транспортного средства" not in q.lower() and "метр" not in q.lower()]
+                        if not guiding_questions:
+                            guiding_questions.append(f"Вы всё так же собираетесь отправить {vehicle_type}?")
+                        pending_guiding[client_code] = {
+                            "vehicle_type": vehicle_type,
+                            "guiding_questions": guiding_questions,
+                            "current_index": 0,
+                            "answers": [],
+                            "base_price": base_price_str
+                        }
+                        response_message = f"Базовая цена: {base_price_str}. Дополнительное условие: {guiding_questions[0]}"
+                    else:
+                        response_message = base_price_str
         else:
             messages = prepare_chat_context(client_code)
             messages.append({"role": "user", "content": user_message})
@@ -232,6 +271,9 @@ def chat():
 def home():
     return jsonify({"status": "Server is running!"}), 200
 
+##############################################
+# Интеграция Telegram Bot для команды /bible
+##############################################
 from telegram.ext import ConversationHandler
 
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
@@ -303,6 +345,9 @@ def telegram_webhook():
         logger.error(f"Ошибка обработки Telegram update: {e}")
         return jsonify({'error': str(e)}), 500
 
+##############################################
+# Основной блок запуска
+##############################################
 global_loop = asyncio.new_event_loop()
 asyncio.set_event_loop(global_loop)
 if __name__ == '__main__':
