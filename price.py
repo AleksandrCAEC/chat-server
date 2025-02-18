@@ -8,6 +8,20 @@ logger = logging.getLogger(__name__)
 TARIFF_URL = "https://e60shipping.com/en/32/static/tariff.html"
 
 def get_ferry_prices():
+    """
+    Делает HTTP-запрос к странице тарифов и извлекает информацию из таблицы.
+    Возвращает словарь вида:
+      {
+         "VehicleType1": {
+             "price_Ro_Ge": <цена для направления Romania -> Georgia>,
+             "price_Ge_Ro": <цена для направления Georgia -> Romania>,
+             "remark": <замечание>,
+             "conditions": [ <Condition1>, <Condition2>, ... ]
+         },
+         ...
+      }
+    Логика извлечения данных реализована в коде, а все примеры и описания вынесены во внешнее правило.
+    """
     try:
         headers = {
             "User-Agent": "Mozilla/5.0"
