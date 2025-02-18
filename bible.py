@@ -10,7 +10,7 @@ from googleapiclient.discovery import build
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
-BIBLE_SPREADSHEET_ID = "YOUR_BIBLE_SPREADSHEET_ID"  # Замените на реальный ID
+BIBLE_SPREADSHEET_ID = "1QB3Jv7cL5hNwDKx9rQF6FCrKHW7IHPAqrUg7FIvY7Dk"  # Замените на реальный ID
 
 def get_sheets_service():
     try:
