@@ -10,7 +10,11 @@ from googleapiclient.discovery import build
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
-# Используйте реальный идентификатор вашей таблицы Google Sheets
+# Если переменная окружения не установлена, используем путь по умолчанию.
+if not os.getenv("GOOGLE_APPLICATION_CREDENTIALS"):
+    os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = "./service_account.json"
+
+# Реальный идентификатор таблицы (взятый из вашей ссылки)
 BIBLE_SPREADSHEET_ID = "1QB3Jv7cL5hNwDKx9rQF6FCrKHW7IHPAqrUg7FIvY7Dk"
 
 def get_sheets_service():
@@ -65,7 +69,7 @@ def ensure_local_bible_file(local_path):
 def save_bible_pair(question, answer):
     try:
         service = get_sheets_service()
-        new_row = [[question, answer, "Check", "", ""]]  # Для обычных вопросов internal rule не используется
+        new_row = [[question, answer, "Check", "", ""]]
         body = {"values": new_row}
         result = service.spreadsheets().values().append(
             spreadsheetId=BIBLE_SPREADSHEET_ID,
@@ -94,7 +98,7 @@ def get_rule(rule_key):
     Возвращает текст правила (шаблон или инструкцию) по ключу rule_key.
     Для этого ищутся строки, где:
       - Столбец FAQ равен "-" (внутренняя инструкция),
-      - Столбец Verification содержит "RULE" (без учета регистра),
+      - Столбец Verification содержит "RULE",
       - Столбец Remark (ключ) совпадает с rule_key (без учета регистра).
     Если правило найдено, возвращается значение из столбца Answers; иначе возвращается строка вида "<rule_key>".
     """
