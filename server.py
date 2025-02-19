@@ -10,7 +10,7 @@ from datetime import datetime
 from clientdata import register_or_update_client, verify_client_code, update_last_visit
 from client_caec import add_message_to_client_file, find_client_file_id, get_sheets_service, CLIENT_FILES_DIR
 from bible import load_bible_data, save_bible_pair
-from price_handler import check_ferry_price
+from price_handler import check_ferry_price, parse_price
 from flask_cors import CORS
 import openpyxl
 import json  # Добавлен импорт для работы с JSON
@@ -232,12 +232,27 @@ def chat():
         logger.error(f"❌ Ошибка в /chat: {e}")
         return jsonify({'error': str(e)}), 500
 
-@app.route('/', methods=['GET'])
-def home():
-    return jsonify({"status": "Server is running!"}), 200
+###############################################
+# НОВЫЙ ЭНДПОИНТ: /get-price
+###############################################
+@app.route('/get-price', methods=['POST'])
+def get_price():
+    try:
+        data = request.json
+        logger.info(f"Получен запрос на /get-price: {data}")
+        vehicle_description = data.get("vehicle_description", "")
+        direction = data.get("direction", "Ro_Ge")
+        vehicle_type = get_vehicle_type(vehicle_description)
+        if not vehicle_type:
+            return jsonify({"error": "Не удалось определить тип транспортного средства."}), 400
+        price_response = get_price_response(vehicle_type)
+        return jsonify({"price": price_response}), 200
+    except Exception as e:
+        logger.error(f"Ошибка в /get-price: {e}")
+        return jsonify({"error": str(e)}), 500
 
-##############################################
-# Интеграция Telegram Bot для команды /bible
+###############################################
+# ЭНДПОИНТ ДЛЯ ТЕЛЕГРАМ БОТА (/webhook)
 ##############################################
 from telegram.ext import ConversationHandler
 
