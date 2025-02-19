@@ -9,6 +9,8 @@ from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseUpload, MediaIoBaseDownload
 from config import CLIENT_DATA_PATH, CLIENT_FILES_DIR
+import json
+import os
 import tempfile
 
 logging.basicConfig(
@@ -21,7 +23,6 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Функция для отправки уведомлений через Telegram
 def send_notification(message):
     try:
         import requests
@@ -44,31 +45,29 @@ if not os.path.exists(CLIENT_FILES_DIR):
 
 GOOGLE_DRIVE_FOLDER_ID = "11cQYLDGKlu2Rn_9g8R_4xNA59ikhvJpS"
 
+def get_credentials():
+    env_val = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
+    if env_val is None:
+        raise Exception("Переменная окружения GOOGLE_APPLICATION_CREDENTIALS не установлена.")
+    env_val = env_val.strip()
+    if env_val.startswith("{"):
+        info = json.loads(env_val)
+        return Credentials.from_service_account_info(info)
+    else:
+        return Credentials.from_service_account_file(os.path.abspath(env_val))
+
 def get_drive_service():
     try:
-        credentials = Credentials.from_service_account_file(get_credentials_file())
+        credentials = get_credentials()
         return build("drive", "v3", credentials=credentials)
     except Exception as e:
         logger.error(f"Ошибка инициализации Google Drive API: {e}")
         send_notification(f"Ошибка инициализации Google Drive API: {e}")
         raise
 
-def get_credentials_file():
-    env_val = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
-    if env_val is None:
-        raise Exception("Переменная окружения GOOGLE_APPLICATION_CREDENTIALS не установлена.")
-    env_val = env_val.strip()
-    if env_val.startswith("{"):
-        tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".json", mode="w", encoding="utf-8")
-        tmp.write(env_val)
-        tmp.close()
-        logger.info(f"Credentials written to temporary file: {tmp.name}")
-        return tmp.name
-    return os.path.abspath(env_val)
-
 def get_sheets_service():
     try:
-        credentials = Credentials.from_service_account_file(get_credentials_file())
+        credentials = get_credentials()
         return build('sheets', 'v4', credentials=credentials)
     except Exception as e:
         logger.error(f"Ошибка инициализации Google Sheets API: {e}")
