@@ -1,9 +1,11 @@
 # price_handler.py
 import os
+import re
 import logging
 from price import get_ferry_prices
 from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
+import requests
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -43,7 +45,6 @@ def load_price_data():
     """
     try:
         service = get_sheets_service()
-        # Измените диапазон, если количество столбцов больше
         range_name = "Sheet1!A2:G"
         result = service.spreadsheets().values().get(
             spreadsheetId=PRICE_SPREADSHEET_ID,
@@ -92,16 +93,32 @@ def send_telegram_notification(message):
     except Exception as ex:
         logger.error(f"Ошибка при отправке уведомления: {ex}")
 
+def parse_price(price_str):
+    """
+    Извлекает числовое значение из строки цены.
+    Пример: "2200 (EUR)" -> 2200.0
+    """
+    try:
+        cleaned = re.sub(r'[^\d.]', '', price_str)
+        value = float(cleaned)
+        logger.info(f"Parsed price '{price_str}' -> {value}")
+        return value
+    except Exception as e:
+        logger.error(f"Ошибка парсинга цены из '{price_str}': {e}")
+        return None
+
 def check_ferry_price(vehicle_type, direction="Ro_Ge"):
     """
     Сравнивает тарифы для указанного типа транспортного средства и направления.
-    direction: "Ro_Ge" или "Ge_Ro".
-    
+    direction: "Ro_Ge" для направления Romania -> Georgia, "Ge_Ro" для направления Georgia -> Romania.
     Логика:
       1. Получаем актуальные тарифы с сайта через get_ferry_prices().
       2. Загружаем данные из Price.xlsx через load_price_data().
-      3. Если данных нет в одном из источников – возвращаем сообщение об отсутствии информации.
-      4. Сравниваем цены. Если совпадают, формируем итоговый ответ. Если различаются – сообщаем, что нужна проверка.
+      3. Если для заданного типа транспортного средства данные отсутствуют в одном из источников, возвращаем соответствующее сообщение.
+      4. Сравниваем цены из сайта и из Price.xlsx:
+         - Если цены совпадают, формируем ответ с подтверждённой ценой и добавляем Remark.
+           Если для данного типа транспортного средства указаны условия, добавляем приглашение для уточнения.
+         - Если цены различаются, отправляем уведомление менеджеру и возвращаем сообщение о необходимости уточнения.
     """
     try:
         website_prices = get_ferry_prices()
@@ -139,8 +156,29 @@ def check_ferry_price(vehicle_type, direction="Ro_Ge"):
         logger.error(f"Ошибка при сравнении цен: {e}")
         return "Произошла ошибка при получении цены. Пожалуйста, попробуйте позже."
 
+def get_openai_response(messages):
+    start_time = time.time()
+    attempt = 0
+    while True:
+        try:
+            import openai
+            response = openai.ChatCompletion.create(
+                model="gpt-3.5-turbo",
+                messages=messages,
+                max_tokens=150,
+                timeout=40
+            )
+            return response
+        except Exception as e:
+            logger.error(f"Попытка {attempt+1} ошибки в OpenAI: {e}")
+            attempt += 1
+            if time.time() - start_time > 180:
+                send_telegram_notification(get_rule())
+                return None
+            time.sleep(2)
+
 if __name__ == "__main__":
-    vehicle = "Truck"
+    vehicle = ""
     direction = "Ro_Ge"
     message = check_ferry_price(vehicle, direction)
     print(message)
