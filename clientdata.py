@@ -30,6 +30,9 @@ def get_credentials():
     if env_val is None:
         raise Exception("Переменная окружения GOOGLE_APPLICATION_CREDENTIALS не установлена.")
     env_val = env_val.strip()
+    # Если значение обрамлено кавычками, удаляем их
+    if env_val.startswith('"') and env_val.endswith('"'):
+        env_val = env_val[1:-1].strip()
     if env_val.startswith("{"):
         info = json.loads(env_val)
         return Credentials.from_service_account_info(info)
@@ -236,6 +239,5 @@ def verify_client_code(code):
         return None
 
 if __name__ == "__main__":
-    # Для тестирования можно вызвать load_client_data()
     df = load_client_data()
     logger.info(df)
