@@ -26,16 +26,6 @@ from telegram.ext import (
     filters
 )
 
-# Импорты для обработки текста (при необходимости)
-import nltk
-from nltk.corpus import stopwords
-from nltk.stem import WordNetLemmatizer
-from fuzzywuzzy import fuzz
-
-nltk.download('punkt')
-nltk.download('stopwords')
-nltk.download('wordnet')
-
 USE_PRICE_FILE = False
 
 # Используем переменную окружения или путь по умолчанию для учетных данных
@@ -197,7 +187,6 @@ def chat():
         update_last_visit(client_code)
         update_activity_status()
         
-        # Если сообщение содержит ключевые слова запроса цены, сразу обрабатываем его и возвращаем окончательный ответ
         if is_price_query(user_message):
             vehicle_type = get_vehicle_type(user_message)
             if not vehicle_type:
@@ -205,7 +194,6 @@ def chat():
             else:
                 response_message = get_price_response(vehicle_type)
         else:
-            # Для остальных запросов формируем контекст и передаём запрос в OpenAI
             messages = prepare_chat_context(client_code)
             messages.append({"role": "user", "content": user_message})
             openai_response = openai.ChatCompletion.create(
@@ -223,6 +211,22 @@ def chat():
     except Exception as e:
         logger.error(f"❌ Ошибка в /chat: {e}")
         return jsonify({'error': str(e)}), 500
+
+# Новый эндпоинт для получения цены напрямую с сайта
+@app.route('/get-price', methods=['POST'])
+def get_price():
+    try:
+        data = request.json
+        vehicle_description = data.get("vehicle_description", "").strip()
+        direction = data.get("direction", "Ro_Ge").strip()
+        if not vehicle_description:
+            return jsonify({"error": "Отсутствует описание транспортного средства."}), 400
+        # Немедленно получаем цену с сайта
+        price_response = check_ferry_price(vehicle_description, direction)
+        return jsonify({"price": price_response}), 200
+    except Exception as e:
+        logger.error(f"❌ Ошибка в /get-price: {e}")
+        return jsonify({"error": str(e)}), 500
 
 @app.route('/', methods=['GET'])
 def home():
