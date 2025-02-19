@@ -76,18 +76,19 @@ def is_price_query(text):
 def get_vehicle_type(text):
     """
     Извлекает тип транспортного средства из входного текста.
-    Если входное сообщение на русском, возвращает слово на русском,
-    что позволит правильно сопоставить тарифы с сайта.
+    Если входное сообщение содержит слово 'грузовик', возвращается "Truck".
+    Аналогично, если указана 'фура', возвращается "Fura".
+    Если же на английском, возвращается соответствующий ключ.
     """
     text_lower = text.lower()
     if "грузовик" in text_lower:
-        return "грузовик"
+        return "Truck"
     if "truck" in text_lower:
-        return "truck"
+        return "Truck"
     if "фура" in text_lower:
-        return "фура"
+        return "Fura"
     if "fura" in text_lower:
-        return "fura"
+        return "Fura"
     return None
 
 def get_price_response(vehicle_type, direction="Ro_Ge"):
@@ -108,7 +109,7 @@ def prepare_chat_context(client_code):
         raise Exception("Bible.xlsx не найден или недоступен.")
     logger.info(f"Bible.xlsx содержит {len(bible_df)} записей.")
     
-    # Собираем внутренние инструкции (правила)
+    # Собираем внутренние инструкции (правила) из строк, где FAQ = "-" и Verification = "RULE"
     rules_df = bible_df[(bible_df["FAQ"].str.strip() == "-") & (bible_df["Verification"].str.upper() == "RULE")]
     system_rule = "\n".join(rules_df["Answers"].tolist())
     
@@ -119,6 +120,7 @@ def prepare_chat_context(client_code):
         "3. При формировании ответов используйте исключительно данные, предоставленные в этих инструкциях. "
         "4. Любые дополнительные предположения или информация, противоречащая указанным правилам, должны игнорироваться."
     )
+    
     system_message = {
         "role": "system",
         "content": f"{strict_instructions}\n\n{system_rule}"
