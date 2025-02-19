@@ -12,10 +12,9 @@ from datetime import datetime
 from clientdata import register_or_update_client, verify_client_code, update_last_visit, update_activity_status
 from client_caec import add_message_to_client_file, find_client_file_id, get_sheets_service, CLIENT_FILES_DIR
 from bible import load_bible_data, save_bible_pair, get_rule
-from price_handler import check_ferry_price, parse_price, remove_timestamp, get_guiding_question, get_openai_response
+from price_handler import check_ferry_price, parse_price, remove_timestamp, get_openai_response
 from flask_cors import CORS
 import openpyxl
-import pymorphy2  # Для лемматизации русского текста
 
 from telegram import Update, Bot
 from telegram.ext import (
@@ -50,24 +49,20 @@ pending_guiding = {}
 PRICE_KEYWORDS = ["цена", "прайс", "сколько стоит", "во сколько обойдется"]
 
 def get_vehicle_type(client_text):
-    # Инициализируем лемматизатор
-    morph = pymorphy2.MorphAnalyzer()
-    normalized_words = [morph.parse(word)[0].normal_form for word in client_text.split()]
-    
-    # Определяем тип транспортного средства через лемматизацию
-    known_types = {"truck": "truck", "фура": "фура"}
-    for word in normalized_words:
-        if word in known_types:
-            logger.info(f"Определен тип транспортного средства (лемматизация): {known_types[word]}")
-            return known_types[word]
-    
-    # Если лемматизация не сработала, используем fuzzy matching по исходному тексту
-    text_lower = client_text.lower()
-    matches = difflib.get_close_matches(text_lower, list(known_types.keys()), n=1, cutoff=0.3)
+    client_text_lower = client_text.lower()
+    if USE_PRICE_FILE:
+        from price_handler import load_price_data
+        data = load_price_data()
+    else:
+        from price import get_ferry_prices
+        data = get_ferry_prices()
+    vehicle_types = list(data.keys())
+    matches = difflib.get_close_matches(client_text_lower, [vt.lower() for vt in vehicle_types], n=1, cutoff=0.3)
     if matches:
-        logger.info(f"Определен тип транспортного средства (fuzzy matching): {known_types[matches[0]]}")
-        return known_types[matches[0]]
-    
+        for vt in vehicle_types:
+            if vt.lower() == matches[0]:
+                logger.info(f"Определен тип транспортного средства: {vt}")
+                return vt.lower()
     logger.info("Тип транспортного средства не определен из сообщения клиента.")
     return None
 
@@ -217,7 +212,7 @@ def chat():
                     final_price = f"Базовая цена: {base_price_str}. Ваши ответы: {', '.join(pending['answers'])}."
                 response_message = f"Спасибо, ваши ответы приняты. {final_price}"
                 del pending_guiding[client_code]
-        elif is_price_query(user_message):
+        elif any(keyword in user_message.lower() for keyword in PRICE_KEYWORDS):
             vehicle_type = get_vehicle_type(user_message)
             if not vehicle_type:
                 response_message = "Укажите, пожалуйста, тип транспортного средства (например, фура)."
