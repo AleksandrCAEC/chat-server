@@ -16,15 +16,13 @@ PRICE_SPREADSHEET_ID = "1N4VpU1rBw3_MPx6GJRDiSQ03iHhS24noTq5-i6V01z8"
 
 def get_credentials():
     env_val = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
-    if env_val is None:
+    if not env_val:
         raise Exception("Переменная окружения GOOGLE_APPLICATION_CREDENTIALS не установлена.")
     env_val = env_val.strip()
-    # Удаляем обрамляющие кавычки, если они присутствуют
     if env_val.startswith('"') and env_val.endswith('"'):
         env_val = env_val[1:-1].strip()
     if env_val.startswith("{"):
-        info = json.loads(env_val)
-        return Credentials.from_service_account_info(info)
+        return Credentials.from_service_account_info(json.loads(env_val))
     else:
         return Credentials.from_service_account_file(os.path.abspath(env_val))
 
@@ -65,22 +63,17 @@ def check_ferry_price(vehicle_type, direction="Ro_Ge"):
         website_prices = get_ferry_prices()
         if vehicle_type not in website_prices:
             return f"Извините, актуальная цена для транспортного средства '{vehicle_type}' не найдена на сайте."
-        
         if direction == "Ro_Ge":
             price = website_prices[vehicle_type].get("price_Ro_Ge", "")
         else:
             price = website_prices[vehicle_type].get("price_Ge_Ro", "")
-        
         response_message = f"Цена перевозки для '{vehicle_type}' ({direction.replace('_', ' ')}) составляет {price}."
-        
         remark = website_prices[vehicle_type].get("remark", "")
         if remark:
             response_message += f" Примечание: {remark}"
-        
         condition = website_prices[vehicle_type].get("condition", "")
         if condition:
             response_message += f" Условие: {condition}"
-        
         return response_message
     except Exception as e:
         logger.error(f"Ошибка при получении цены: {e}")
