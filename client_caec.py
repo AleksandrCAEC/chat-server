@@ -1,3 +1,4 @@
+# client_caec.py
 import os
 import pandas as pd
 from datetime import datetime
@@ -10,8 +11,6 @@ from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseUpload, MediaIoBaseDownload
 from config import CLIENT_DATA_PATH, CLIENT_FILES_DIR
 import json
-import os
-import tempfile
 
 logging.basicConfig(
     level=logging.INFO,
@@ -50,6 +49,9 @@ def get_credentials():
     if env_val is None:
         raise Exception("Переменная окружения GOOGLE_APPLICATION_CREDENTIALS не установлена.")
     env_val = env_val.strip()
+    # Удаляем обрамляющие кавычки, если они присутствуют
+    if env_val.startswith('"') and env_val.endswith('"'):
+        env_val = env_val[1:-1].strip()
     if env_val.startswith("{"):
         info = json.loads(env_val)
         return Credentials.from_service_account_info(info)
@@ -143,7 +145,7 @@ def create_client_file(client_code, client_data):
         ]
     }
     try:
-        result = sheets_service.spreadsheets().create(body=body, fields="spreadsheetId").execute()
+        result = get_sheets_service().spreadsheets().create(body=body, fields="spreadsheetId").execute()
         spreadsheet_id = result.get("spreadsheetId")
         logger.info(f"Создан файл клиента {file_title} с spreadsheetId: {spreadsheet_id}")
         drive_service = get_drive_service()
