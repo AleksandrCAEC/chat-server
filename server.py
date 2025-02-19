@@ -74,10 +74,20 @@ def is_price_query(text):
     return any(keyword in text.lower() for keyword in PRICE_KEYWORDS)
 
 def get_vehicle_type(text):
-    known_types = {"truck": "Truck", "грузовик": "Truck", "fura": "Fura", "фура": "Fura"}
-    for key, standard in known_types.items():
-        if key in text.lower():
-            return standard
+    """
+    Извлекает тип транспортного средства из входного текста.
+    Если входное сообщение на русском, возвращает слово на русском,
+    что позволит правильно сопоставить тарифы с сайта.
+    """
+    text_lower = text.lower()
+    if "грузовик" in text_lower:
+        return "грузовик"
+    if "truck" in text_lower:
+        return "truck"
+    if "фура" in text_lower:
+        return "фура"
+    if "fura" in text_lower:
+        return "fura"
     return None
 
 def get_price_response(vehicle_type, direction="Ro_Ge"):
@@ -97,8 +107,11 @@ def prepare_chat_context(client_code):
     if bible_df is None:
         raise Exception("Bible.xlsx не найден или недоступен.")
     logger.info(f"Bible.xlsx содержит {len(bible_df)} записей.")
+    
+    # Собираем внутренние инструкции (правила)
     rules_df = bible_df[(bible_df["FAQ"].str.strip() == "-") & (bible_df["Verification"].str.upper() == "RULE")]
     system_rule = "\n".join(rules_df["Answers"].tolist())
+    
     strict_instructions = (
         "ВНИМАНИЕ: Ниже приведены обязательные правила, которым вы должны строго следовать. "
         "1. Все инструкции, полученные из документа Bible.xlsx, имеют высший приоритет и обязательны к исполнению. "
@@ -111,6 +124,7 @@ def prepare_chat_context(client_code):
         "content": f"{strict_instructions}\n\n{system_rule}"
     }
     messages.append(system_message)
+    
     spreadsheet_id = find_client_file_id(client_code)
     if spreadsheet_id:
         sheets_service = get_sheets_service()
