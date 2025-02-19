@@ -13,6 +13,7 @@ from bible import load_bible_data, save_bible_pair
 from price_handler import check_ferry_price, load_price_data
 from flask_cors import CORS
 import openpyxl
+import json  # Добавлен импорт для работы с JSON
 
 # Импорты для Telegram Bot (python-telegram-bot v20+)
 from telegram import Update, Bot
