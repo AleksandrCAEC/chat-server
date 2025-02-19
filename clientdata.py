@@ -27,15 +27,14 @@ SPREADSHEET_ID = "1eGpB0hiRxXPpYN75-UKyXoar7yh-zne8r8ox-hXrS1I"
 
 def get_credentials():
     env_val = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
-    if env_val is None:
+    if not env_val:
         raise Exception("Переменная окружения GOOGLE_APPLICATION_CREDENTIALS не установлена.")
     env_val = env_val.strip()
     # Если значение обрамлено кавычками, удаляем их
     if env_val.startswith('"') and env_val.endswith('"'):
         env_val = env_val[1:-1].strip()
     if env_val.startswith("{"):
-        info = json.loads(env_val)
-        return Credentials.from_service_account_info(info)
+        return Credentials.from_service_account_info(json.loads(env_val))
     else:
         return Credentials.from_service_account_file(os.path.abspath(env_val))
 
