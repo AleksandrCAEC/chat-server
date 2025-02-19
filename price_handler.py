@@ -7,6 +7,7 @@ from price import get_ferry_prices
 from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
 import requests
+import tempfile
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -14,9 +15,26 @@ logger.setLevel(logging.INFO)
 # Замените на актуальный Spreadsheet ID для файла Price.xlsx
 PRICE_SPREADSHEET_ID = "1N4VpU1rBw3_MPx6GJRDiSQ03iHhS24noTq5-i6V01z8"
 
+def get_credentials_file():
+    """
+    Если переменная окружения GOOGLE_APPLICATION_CREDENTIALS содержит путь, возвращает его;
+    если содержит JSON-текст, записывает его во временный файл и возвращает путь.
+    """
+    env_val = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
+    if env_val is None:
+        raise Exception("Переменная окружения GOOGLE_APPLICATION_CREDENTIALS не установлена.")
+    env_val = env_val.strip()
+    if env_val.startswith("{"):
+        tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".json", mode="w", encoding="utf-8")
+        tmp.write(env_val)
+        tmp.close()
+        logger.info(f"Содержимое переменной окружения записано во временный файл: {tmp.name}")
+        return tmp.name
+    return os.path.abspath(env_val)
+
 def get_sheets_service():
     try:
-        credentials = Credentials.from_service_account_file(os.getenv("GOOGLE_APPLICATION_CREDENTIALS"))
+        credentials = Credentials.from_service_account_file(get_credentials_file())
         return build('sheets', 'v4', credentials=credentials)
     except Exception as e:
         logger.error(f"Ошибка инициализации Google Sheets API: {e}")
