@@ -26,11 +26,9 @@ from telegram.ext import (
     filters
 )
 
-# Инициализация Flask-приложения и CORS
 app = Flask(__name__)
 CORS(app)
 
-# Настройка логирования
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
@@ -40,12 +38,8 @@ logger = logging.getLogger(__name__)
 logger.info("Текущие переменные окружения:")
 pprint.pprint(dict(os.environ))
 
-# Глобальный словарь для хранения состояния последовательного уточнения (guiding questions)
 pending_guiding = {}
 
-###############################################
-# ФУНКЦИЯ ОТПРАВКИ УВЕДОМЛЕНИЙ ЧЕРЕЗ TELEGRAM
-###############################################
 def send_telegram_notification(message):
     telegram_bot_token = os.getenv("TELEGRAM_BOT_TOKEN")
     telegram_chat_id = os.getenv("TELEGRAM_CHAT_ID")
@@ -61,9 +55,6 @@ def send_telegram_notification(message):
     except requests.exceptions.RequestException as e:
         logger.error(f"❌ Ошибка при отправке Telegram уведомления: {e}")
 
-###############################################
-# ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ДЛЯ ОБРАБОТКИ ЗАПРОСОВ О ЦЕНЕ
-###############################################
 PRICE_KEYWORDS = ["цена", "прайс", "сколько стоит", "во сколько обойдется"]
 
 def is_price_query(text):
@@ -84,21 +75,14 @@ def get_price_response(vehicle_type):
         logger.error(f"Ошибка при получении цены для {vehicle_type}: {e}")
         return "Произошла ошибка при получении актуальной цены. Пожалуйста, попробуйте позже."
 
-###############################################
-# ФУНКЦИЯ ПОДГОТОВКИ КОНТЕКСТА (ПАМЯТЬ АССИСТЕНТА)
-###############################################
 def prepare_chat_context(client_code):
     messages = []
     bible_df = load_bible_data()
     if bible_df is None:
         raise Exception("Bible.xlsx не найден или недоступен.")
     logger.info(f"Bible.xlsx содержит {len(bible_df)} записей.")
-    
-    # Собираем внутренние инструкции (правила) из строк, где FAQ = "-" и Verification = "RULE"
     rules_df = bible_df[(bible_df["FAQ"].str.strip() == "-") & (bible_df["Verification"].str.upper() == "RULE")]
     system_rule = "\n".join(rules_df["Answers"].tolist())
-    
-    # Строгие правила, которым АСС должен строго следовать:
     strict_instructions = (
         "ВНИМАНИЕ: Ниже приведены обязательные правила, которым вы должны строго следовать. "
         "1. Все инструкции, полученные из документа Bible.xlsx, имеют высший приоритет и обязательны к исполнению. "
@@ -106,13 +90,11 @@ def prepare_chat_context(client_code):
         "3. При формировании ответов используйте исключительно данные, предоставленные в этих инструкциях. "
         "4. Любые дополнительные предположения или информация, противоречащая указанным правилам, должны игнорироваться."
     )
-    
     system_message = {
         "role": "system",
         "content": f"{strict_instructions}\n\n{system_rule}"
     }
     messages.append(system_message)
-    
     spreadsheet_id = find_client_file_id(client_code)
     if spreadsheet_id:
         sheets_service = get_sheets_service()
@@ -133,9 +115,6 @@ def prepare_chat_context(client_code):
         logger.info(f"Файл клиента с кодом {client_code} не найден.")
     return messages
 
-###############################################
-# ЭНДПОИНТЫ РЕГИСТРАЦИИ, ВЕРИФИКАЦИИ И ЧАТА
-###############################################
 @app.route('/register-client', methods=['POST'])
 def register_client():
     try:
@@ -253,7 +232,7 @@ def get_price():
 
 ###############################################
 # ЭНДПОИНТ ДЛЯ ТЕЛЕГРАМ БОТА (/webhook)
-##############################################
+###############################################
 from telegram.ext import ConversationHandler
 
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
