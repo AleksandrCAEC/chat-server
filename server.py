@@ -7,10 +7,10 @@ from flask import Flask, request, jsonify
 import openai
 import requests
 from datetime import datetime
-from clientdata import register_or_update_client, verify_client_code, update_last_visit
+from clientdata import register_or_update_client, verify_client_code, update_last_visit, update_activity_status
 from client_caec import add_message_to_client_file, find_client_file_id, get_sheets_service, CLIENT_FILES_DIR
 from bible import load_bible_data, save_bible_pair
-from price_handler import check_ferry_price, parse_price
+from price_handler import check_ferry_price, load_price_data, parse_price
 from flask_cors import CORS
 import openpyxl
 import json  # Для работы с JSON
@@ -25,6 +25,12 @@ from telegram.ext import (
     ContextTypes,
     filters
 )
+
+# Устанавливаем переменную окружения для учётных данных
+os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = "/etc/secrets/service_account_json"
+
+# Инициализация OpenAI
+openai.api_key = os.getenv("OPENAI_API_KEY")
 
 app = Flask(__name__)
 CORS(app)
@@ -74,9 +80,9 @@ def get_vehicle_type(text):
             return standard
     return None
 
-def get_price_response(vehicle_type):
+def get_price_response(vehicle_type, direction="Ro_Ge"):
     try:
-        response = check_ferry_price(vehicle_type, direction="Ro_Ge")
+        response = check_ferry_price(vehicle_type, direction)
         return response
     except Exception as e:
         logger.error(f"Ошибка при получении цены для {vehicle_type}: {e}")
@@ -91,11 +97,8 @@ def prepare_chat_context(client_code):
     if bible_df is None:
         raise Exception("Bible.xlsx не найден или недоступен.")
     logger.info(f"Bible.xlsx содержит {len(bible_df)} записей.")
-    
-    # Собираем внутренние инструкции (правила) из строк, где FAQ = "-" и Verification = "RULE"
     rules_df = bible_df[(bible_df["FAQ"].str.strip() == "-") & (bible_df["Verification"].str.upper() == "RULE")]
     system_rule = "\n".join(rules_df["Answers"].tolist())
-    
     strict_instructions = (
         "ВНИМАНИЕ: Ниже приведены обязательные правила, которым вы должны строго следовать. "
         "1. Все инструкции, полученные из документа Bible.xlsx, имеют высший приоритет и обязательны к исполнению. "
@@ -103,7 +106,6 @@ def prepare_chat_context(client_code):
         "3. При формировании ответов используйте исключительно данные, предоставленные в этих инструкциях. "
         "4. Любые дополнительные предположения или информация, противоречащая указанным правилам, должны игнорироваться."
     )
-    
     system_message = {
         "role": "system",
         "content": f"{strict_instructions}\n\n{system_rule}"
@@ -175,41 +177,39 @@ def chat():
             return jsonify({'error': 'Сообщение и код клиента не могут быть пустыми'}), 400
 
         update_last_visit(client_code)
+        update_activity_status()
         
         if client_code in pending_guiding:
             pending = pending_guiding[client_code]
             pending.setdefault("answers", []).append(user_message)
             pending["current_index"] += 1
-            if pending["current_index"] < len(pending["guiding_questions"]):
-                response_message = pending["guiding_questions"][pending["current_index"]]
+            if pending["current_index"] < len(pending["conditions"]):
+                response_message = pending["conditions"][pending["current_index"]]
             else:
-                base_price_str = pending.get("base_price", get_price_response(pending["vehicle_type"]))
-                try:
-                    base_price = parse_price(base_price_str)
-                    multiplier = 1.0
-                    fee = 0
-                    driver_info = None
-                    for ans in pending["answers"]:
-                        if "без водителя" in ans.lower():
-                            driver_info = "without"
-                        elif "с водителем" in ans.lower():
-                            driver_info = "with"
-                        if "adr" in ans.lower():
-                            multiplier = 1.2
-                    if driver_info == "without":
-                        fee = 100
-                    final_cost = (base_price + fee) * multiplier
-                    final_price = f"Базовая цена: {base_price} евро. Итоговая стоимость с учетом ваших ответов: {final_cost} евро."
-                except Exception as ex:
-                    final_price = f"Базовая цена: {base_price_str}. Ваши ответы: {', '.join(pending['answers'])}."
+                final_price = get_price_response(pending["vehicle_type"], direction="Ro_Ge")
                 response_message = f"Спасибо, ваши ответы приняты. {final_price}"
                 del pending_guiding[client_code]
         elif is_price_query(user_message):
             vehicle_type = get_vehicle_type(user_message)
             if not vehicle_type:
-                response_message = "Укажите, пожалуйста, тип транспортного средства (например, фура)."
+                response_message = ("Для определения цены, пожалуйста, уточните тип транспортного средства "
+                                    "(например, грузовик или фура).")
             else:
-                response_message = get_price_response(vehicle_type)
+                price_data = load_price_data()
+                if vehicle_type not in price_data:
+                    response_message = f"Извините, информация о тарифах для '{vehicle_type}' отсутствует в нашей базе."
+                else:
+                    conditions = price_data[vehicle_type].get("conditions", [])
+                    if conditions:
+                        pending_guiding[client_code] = {
+                            "vehicle_type": vehicle_type,
+                            "conditions": conditions,
+                            "current_index": 0,
+                            "answers": []
+                        }
+                        response_message = conditions[0]
+                    else:
+                        response_message = get_price_response(vehicle_type, direction="Ro_Ge")
         else:
             messages = prepare_chat_context(client_code)
             messages.append({"role": "user", "content": user_message})
@@ -243,7 +243,7 @@ def get_price_endpoint():
         vehicle_type = get_vehicle_type(vehicle_description)
         if not vehicle_type:
             return jsonify({"error": "Не удалось определить тип транспортного средства."}), 400
-        price_response = get_price_response(vehicle_type)
+        price_response = get_price_response(vehicle_type, direction)
         return jsonify({"price": price_response}), 200
     except Exception as e:
         logger.error(f"Ошибка в /get-price: {e}")
@@ -256,7 +256,7 @@ from telegram.ext import ConversationHandler
 
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 if not TELEGRAM_BOT_TOKEN:
-    logger.error("Переменная окружения TELEGRAM_BOT_TOKEN не настроена!")
+    logger.error("Переменная окружения TELEGRAM_BOT_TOKEN не задана!")
     exit(1)
 
 BIBLE_ASK_ACTION, BIBLE_ASK_QUESTION, BIBLE_ASK_ANSWER = range(3)
@@ -286,12 +286,12 @@ async def ask_question(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
 async def ask_answer(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     answer = update.message.text.strip()
     question = context.user_data.get('question')
-    logger.info(f"Сохраняем пару: Вопрос='{question}', Ответ='{answer}'")
+    logger.info(f"Сохраняем пару: Вопрос: {question} | Ответ: {answer}")
     try:
         save_bible_pair(question, answer)
     except Exception as e:
         logger.error(f"Ошибка сохранения пары в Bible.xlsx: {e}")
-    await update.message.reply_text("Пара вопрос-ответ сохранена. Статус: 'Check'.")
+    await update.message.reply_text("Пара вопрос-ответ сохранена с отметкой 'Check'.")
     return ConversationHandler.END
 
 async def cancel_bible(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -323,16 +323,21 @@ def telegram_webhook():
         logger.error(f"Ошибка обработки Telegram update: {e}")
         return jsonify({'error': str(e)}), 500
 
-global_loop = asyncio.new_event_loop()
-asyncio.set_event_loop(global_loop)
+##############################################
+# Основной блок запуска
+##############################################
 if __name__ == '__main__':
-    port = int(os.getenv("PORT", 8080))
+    print("Маршруты приложения:")
+    print(app.url_map)
+    port = int(os.environ.get('PORT', 8080))
     WEBHOOK_URL = os.getenv("WEBHOOK_URL")
     if not WEBHOOK_URL:
-        logger.error("Не задана переменная окружения WEBHOOK_URL!")
+        logger.error("Переменная окружения WEBHOOK_URL не задана!")
         exit(1)
+    global_loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(global_loop)
     global_loop.run_until_complete(application.initialize())
     global_loop.run_until_complete(bot.set_webhook(WEBHOOK_URL))
-    logger.info(f"Webhook установлен: {WEBHOOK_URL}")
-    logger.info(f"Сервер запущен на порту {port}")
+    logger.info(f"Webhook установлен на {WEBHOOK_URL}")
+    logger.info(f"✅ Сервер запущен на порту {port}")
     app.run(host='0.0.0.0', port=port, debug=False, threaded=True)
