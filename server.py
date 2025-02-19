@@ -233,7 +233,8 @@ def chat():
 # НОВЫЙ ЭНДПОИНТ: /get-price
 ###############################################
 @app.route('/get-price', methods=['POST'], strict_slashes=False)
-def get_price():
+@app.route('/get-price/', methods=['POST'], strict_slashes=False)
+def get_price_endpoint():
     try:
         data = request.json
         logger.info(f"Получен запрос на /get-price: {data}")
