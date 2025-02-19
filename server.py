@@ -25,6 +25,21 @@ from telegram.ext import (
     filters
 )
 
+# Импорты для обработки текста
+import nltk
+from nltk.corpus import stopwords
+from nltk.stem import WordNetLemmatizer
+from fuzzywuzzy import fuzz
+
+# Загрузка ресурсов NLTK
+nltk.download('punkt')
+nltk.download('stopwords')
+nltk.download('wordnet')
+
+# Инициализация лемматизатора и стоп-слов
+lemmatizer = WordNetLemmatizer()
+stop_words = set(stopwords.words('russian'))
+
 # Установка пути к файлу service_account_json (стандартный подход)
 os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = "/etc/secrets/service_account_json"
 
@@ -92,6 +107,15 @@ def get_price_response(vehicle_type, direction="Ro_Ge"):
 ###############################################
 # ФУНКЦИЯ ПОДГОТОВКИ КОНТЕКСТА (ПАМЯТЬ АССИСТЕНТА)
 ###############################################
+def preprocess_text(text):
+    # Приведение текста к нижнему регистру и удаление пунктуации
+    text = re.sub(r'[^\w\s]', '', text.lower())
+    # Токенизация текста
+    words = nltk.word_tokenize(text)
+    # Лемматизация и удаление стоп-слов
+    words = [lemmatizer.lemmatize(word) for word in words if word not in stop_words]
+    return " ".join(words)
+
 def prepare_chat_context(client_code):
     messages = []
     bible_df = load_bible_data()
@@ -109,7 +133,7 @@ def prepare_chat_context(client_code):
         "1. Все инструкции, полученные из документа Bible.xlsx, имеют высший приоритет и обязательны к исполнению. "
         "2. Вы не должны отклоняться от этих правил ни при каких обстоятельствах. "
         "3. При формировании ответов используйте исключительно данные, предоставленные в этих инструкциях. "
-        "4. Любые дополнительные предположения или информация, противоречащие указанным правилам, должны игнорироваться."
+        "4. Любые дополнительные предположения или информация, противоречащая указанным правилам, должны игнорироваться."
     )
     
     system_message = {
