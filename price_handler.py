@@ -1,174 +1,79 @@
-# price_handler.py
 import os
 import re
+import difflib
 import logging
+import asyncio
+import pprint
 import time
-from price import get_ferry_prices
-from google.oauth2.service_account import Credentials
-from googleapiclient.discovery import build
+from flask import Flask, request, jsonify
+import openai
 import requests
+from datetime import datetime
+from clientdata import register_or_update_client, verify_client_code, update_last_visit, update_activity_status
+from client_caec import add_message_to_client_file, find_client_file_id, get_sheets_service, CLIENT_FILES_DIR
+from bible import load_bible_data, save_bible_pair, get_rule
+from price_handler import check_ferry_price, parse_price, remove_timestamp, get_openai_response
+from flask_cors import CORS
+import openpyxl
 
+from telegram import Update, Bot
+from telegram.ext import (
+    ApplicationBuilder,
+    CommandHandler,
+    MessageHandler,
+    ConversationHandler,
+    ContextTypes,
+    filters
+)
+
+USE_PRICE_FILE = False
+
+# Используем переменную окружения или путь по умолчанию для учетных данных
+os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = os.getenv("GOOGLE_APPLICATION_CREDENTIALS", "./service_account.json")
+openai.api_key = os.getenv("OPENAI_API_KEY")
+
+app = Flask(__name__)
+CORS(app)
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    handlers=[logging.FileHandler("server.log"), logging.StreamHandler()]
+)
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.INFO)
+logger.info("Текущие переменные окружения:")
+pprint.pprint(dict(os.environ))
 
-# Замените на актуальный Spreadsheet ID для файла Price.xlsx
-PRICE_SPREADSHEET_ID = "1N4VpU1rBw3_MPx6GJRDiSQ03iHhS24noTq5-i6V01z8"
+pending_guiding = {}
 
-def get_sheets_service():
-    try:
-        credentials = Credentials.from_service_account_file(os.getenv("GOOGLE_APPLICATION_CREDENTIALS"))
-        return build('sheets', 'v4', credentials=credentials)
-    except Exception as e:
-        logger.error(f"Ошибка инициализации Google Sheets API: {e}")
-        raise
+PRICE_KEYWORDS = ["цена", "прайс", "сколько стоит", "во сколько обойдется"]
 
-def load_price_data():
-    """
-    Загружает данные из Google Sheets (Price.xlsx) для тарифов.
-    Ожидается, что таблица имеет следующие столбцы:
-      A: Type of the vehicle
-      B: Price_Ro_Ge (направление: Romania -> Georgia)
-      C: Price_Ge_Ro (направление: Georgia -> Romania)
-      D: Remark
-      E: Condition1
-      F: Condition2
-      G: Condition3
-    Возвращает словарь вида:
-      {
-         "VehicleType1": {
-             "price_Ro_Ge": "...",
-             "price_Ge_Ro": "...",
-             "remark": "...",
-             "conditions": [ "Condition1 текст", "Condition2 текст", "Condition3 текст" ]
-         },
-         ...
-      }
-    """
-    try:
-        service = get_sheets_service()
-        range_name = "Sheet1!A2:G"
-        result = service.spreadsheets().values().get(
-            spreadsheetId=PRICE_SPREADSHEET_ID,
-            range=range_name
-        ).execute()
-        values = result.get("values", [])
-        price_data = {}
-        for row in values:
-            if len(row) < 4:
-                continue
-            vehicle_type = row[0].strip()
-            price_Ro_Ge = row[1].strip() if len(row) > 1 else ""
-            price_Ge_Ro = row[2].strip() if len(row) > 2 else ""
-            remark = row[3].strip() if len(row) > 3 else ""
-            conditions = []
-            if len(row) > 4 and row[4].strip():
-                conditions.append(row[4].strip())
-            if len(row) > 5 and row[5].strip():
-                conditions.append(row[5].strip())
-            if len(row) > 6 and row[6].strip():
-                conditions.append(row[6].strip())
-            price_data[vehicle_type] = {
-                "price_Ro_Ge": price_Ro_Ge,
-                "price_Ge_Ro": price_Ge_Ro,
-                "remark": remark,
-                "conditions": conditions
-            }
-        logger.info(f"Данные из Price.xlsx загружены: {price_data}")
-        return price_data
-    except Exception as e:
-        logger.error(f"Ошибка загрузки данных из Price.xlsx: {e}")
-        raise
+def get_vehicle_type(client_text):
+    client_text_lower = client_text.lower()
+    if USE_PRICE_FILE:
+        from price_handler import load_price_data
+        data = load_price_data()
+    else:
+        from price import get_ferry_prices
+        data = get_ferry_prices()
+    vehicle_types = list(data.keys())
+    matches = difflib.get_close_matches(client_text_lower, [vt.lower() for vt in vehicle_types], n=1, cutoff=0.3)
+    if matches:
+        for vt in vehicle_types:
+            if vt.lower() == matches[0]:
+                logger.info(f"Определен тип транспортного средства: {vt}")
+                return vt.lower()
+    logger.info("Тип транспортного средства не определен из сообщения клиента.")
+    return None
 
-def send_telegram_notification(message):
-    """
-    Отправляет уведомление через Telegram, используя переменные окружения TELEGRAM_BOT_TOKEN и TELEGRAM_CHAT_ID.
-    """
-    try:
-        import requests
-        telegram_bot_token = os.getenv("TELEGRAM_BOT_TOKEN")
-        telegram_chat_id = os.getenv("TELEGRAM_CHAT_ID")
-        if telegram_bot_token and telegram_chat_id:
-            url = f"https://api.telegram.org/bot{telegram_bot_token}/sendMessage"
-            payload = {"chat_id": telegram_chat_id, "text": message, "parse_mode": "HTML"}
-            requests.post(url, json=payload)
-    except Exception as ex:
-        logger.error(f"Ошибка при отправке уведомления: {ex}")
-
-def remove_timestamp(text):
-    """
-    Удаляет из строки временной штамп в начале строки.
-    Пример: "10.02.25 09:33 - 2200 (EUR)" -> "2200 (EUR)"
-    """
-    return re.sub(r'^\d{2}\.\d{2}\.\d{2}\s+\d{2}:\d{2}\s*-\s*', '', text)
-
-def parse_price(price_str):
-    """
-    Извлекает числовое значение из строки цены.
-    Пример: "2200 (EUR)" -> 2200.0
-    """
-    try:
-        cleaned = re.sub(r'[^\d.]', '', price_str)
-        value = float(cleaned)
-        logger.info(f"Parsed price '{price_str}' -> {value}")
-        return value
-    except Exception as e:
-        logger.error(f"Ошибка парсинга цены из '{price_str}': {e}")
-        return None
-
-def check_ferry_price(vehicle_type, direction="Ro_Ge"):
-    """
-    Сравнивает тарифы для указанного типа транспортного средства и направления.
-    direction: "Ro_Ge" для направления Romania -> Georgia, "Ge_Ro" для направления Georgia -> Romania.
-    Логика:
-      1. Получаем актуальные тарифы с сайта через get_ferry_prices().
-      2. Загружаем данные из Price.xlsx через load_price_data().
-      3. Если для заданного типа транспортного средства данные отсутствуют в одном из источников, возвращаем соответствующее сообщение.
-      4. Сравниваем цены. Если цены совпадают, формируем ответ с подтверждённой ценой и добавляем Remark.
-         Если для данного типа транспортного средства указаны условия, добавляем приглашение для уточнения.
-         Если цены различаются, отправляем уведомление менеджеру и возвращаем сообщение о необходимости уточнения.
-    """
-    try:
-        website_prices = get_ferry_prices()
-        sheet_prices = load_price_data()
-        
-        if vehicle_type not in website_prices:
-            return f"Извините, актуальная цена для транспортного средства '{vehicle_type}' не найдена на сайте."
-        if vehicle_type not in sheet_prices:
-            return f"Извините, информация о тарифах для '{vehicle_type}' отсутствует в нашей базе."
-        
-        if direction == "Ro_Ge":
-            website_price = website_prices[vehicle_type].get("price_Ro_Ge", "")
-            sheet_price = sheet_prices[vehicle_type].get("price_Ro_Ge", "")
-        else:
-            website_price = website_prices[vehicle_type].get("price_Ge_Ro", "")
-            sheet_price = sheet_prices[vehicle_type].get("price_Ge_Ro", "")
-        
-        if website_price == sheet_price:
-            response_message = f"Цена перевозки для '{vehicle_type}' ({direction.replace('_', ' ')}) составляет {website_price}."
-            if sheet_prices[vehicle_type].get("remark"):
-                response_message += f" Примечание: {sheet_prices[vehicle_type]['remark']}"
-            conditions = sheet_prices[vehicle_type].get("conditions", [])
-            if conditions:
-                response_message += "\nДля более точного расчёта, пожалуйста, ответьте на следующие вопросы:"
-                for question in conditions:
-                    response_message += f"\n{question}"
-            return response_message
-        else:
-            message_to_manager = (f"ВНИМАНИЕ: Для транспортного средства '{vehicle_type}' цены различаются. "
-                                  f"Сайт: {website_price}, База: {sheet_price}. Требуется уточнение!")
-            send_telegram_notification(message_to_manager)
-            return (f"Цена для '{vehicle_type}' требует уточнения. Пожалуйста, свяжитесь с менеджером "
-                    "или дождитесь уточнённого ответа.")
-    except Exception as e:
-        logger.error(f"Ошибка при сравнении цен: {e}")
-        return "Произошла ошибка при получении цены. Пожалуйста, попробуйте позже."
+def get_price_response(vehicle_type, direction="Ro_Ge"):
+    return check_ferry_price(vehicle_type, direction)
 
 def get_openai_response(messages):
     start_time = time.time()
     attempt = 0
     while True:
         try:
-            import openai
             response = openai.ChatCompletion.create(
                 model="gpt-3.5-turbo",
                 messages=messages,
@@ -180,12 +85,246 @@ def get_openai_response(messages):
             logger.error(f"Попытка {attempt+1} ошибки в OpenAI: {e}")
             attempt += 1
             if time.time() - start_time > 180:
-                send_telegram_notification(get_rule())
                 return None
             time.sleep(2)
 
-if __name__ == "__main__":
-    vehicle = ""
-    direction = "Ro_Ge"
-    message = check_ferry_price(vehicle, direction)
-    print(message)
+def prepare_chat_context(client_code):
+    messages = []
+    bible_df = load_bible_data()
+    if bible_df is None:
+        raise Exception(get_rule())
+    logger.info(f"Bible.xlsx содержит {len(bible_df)} записей.")
+
+    # Собираем все внутренние инструкции (правила) из строк, где FAQ = "-" и Verification = "RULE"
+    rules_df = bible_df[(bible_df["FAQ"].str.strip() == "-") & (bible_df["Verification"].str.upper() == "RULE")]
+    rules_text = "\n".join(rules_df["Answers"].tolist())
+    
+    strict_instructions = (
+        "ВНИМАНИЕ: Ниже приведены обязательные правила, которым вы должны строго следовать. "
+        "1. Все инструкции, полученные из документа Bible.xlsx, имеют высший приоритет и обязательны к исполнению. "
+        "2. Вы не должны отклоняться от этих правил ни при каких обстоятельствах. "
+        "3. При формировании ответов используйте исключительно данные, предоставленные в этих инструкциях. "
+        "4. Любые дополнительные предположения или информация, противоречащие указанным правилам, должны игнорироваться."
+    )
+    
+    system_message = {
+        "role": "system",
+        "content": f"{strict_instructions}\n\n{rules_text}"
+    }
+    messages.append(system_message)
+    
+    # Вторая часть контекста: история переписки, хранящаяся в уникальном файле клиента (Client_CAECxxxxxxx.xlsx)
+    spreadsheet_id = find_client_file_id(client_code)
+    if spreadsheet_id:
+        sheets_service = get_sheets_service()
+        result = sheets_service.spreadsheets().values().get(
+            spreadsheetId=spreadsheet_id,
+            range="Sheet1!A:B"
+        ).execute()
+        values = result.get("values", [])
+        if len(values) >= 2:
+            conversation_rows = values[2:]
+            logger.info(f"Найдено {len(conversation_rows)} строк переписки для клиента {client_code}.")
+            for row in conversation_rows:
+                if len(row) >= 1 and row[0].strip():
+                    messages.append({"role": "user", "content": row[0].strip()})
+                if len(row) >= 2 and row[1].strip():
+                    messages.append({"role": "assistant", "content": row[1].strip()})
+    else:
+        logger.info(f"Файл клиента с кодом {client_code} не найден.")
+    return messages
+
+@app.route('/register-client', methods=['POST'])
+def register_client():
+    try:
+        data = request.json
+        logger.info(f"Получен запрос на регистрацию клиента: {data}")
+        result = register_or_update_client(data)
+        if result.get("isNewClient", True):
+            send_telegram_notification(
+                f"🆕 Новый пользователь зарегистрирован: {result['name']}, {result['email']}, {result['phone']}, Код: {result['uniqueCode']}"
+            )
+        else:
+            send_telegram_notification(
+                f"🔙 Пользователь вернулся: {result['name']}, {result['email']}, {result['phone']}, Код: {result['uniqueCode']}"
+            )
+        return jsonify(result), 200
+    except Exception as e:
+        logger.error(f"❌ Ошибка в /register-client: {e}")
+        return jsonify({'error': str(e)}), 400
+
+@app.route('/verify-code', methods=['POST'])
+def verify_code():
+    try:
+        data = request.json
+        logger.info(f"Получен запрос на верификацию кода: {data}")
+        code = data.get('code', '')
+        client_data = verify_client_code(code)
+        if client_data:
+            send_telegram_notification(
+                f"🔙 Пользователь вернулся: {client_data['Name']}, {client_data['Email']}, {client_data['Phone']}, Код: {code}"
+            )
+            return jsonify({'status': 'success', 'clientData': client_data}), 200
+        return jsonify({'status': 'error', 'message': 'Неверный код'}), 404
+    except Exception as e:
+        logger.error(f"❌ Ошибка в /verify-code: {e}")
+        return jsonify({'error': str(e)}), 400
+
+@app.route('/chat', methods=['POST'])
+def chat():
+    try:
+        data = request.json
+        logger.info(f"Получен запрос на чат: {data}")
+        user_message = data.get("message", "")
+        client_code = data.get("client_code", "")
+        if not user_message or not client_code:
+            logger.error("Ошибка: Сообщение и код клиента не могут быть пустыми")
+            return jsonify({'error': 'Сообщение и код клиента не могут быть пустыми'}), 400
+
+        update_last_visit(client_code)
+        update_activity_status()
+        
+        if client_code in pending_guiding:
+            pending = pending_guiding[client_code]
+            pending.setdefault("answers", []).append(user_message)
+            pending["current_index"] += 1
+            if pending["current_index"] < len(pending["guiding_questions"]):
+                response_message = pending["guiding_questions"][pending["current_index"]]
+            else:
+                base_price_str = pending.get("base_price", get_price_response(pending["vehicle_type"], direction="Ro_Ge"))
+                try:
+                    base_price = parse_price(base_price_str)
+                    multiplier = 1.0
+                    fee = 0
+                    driver_info = None
+                    for ans in pending["answers"]:
+                        if "без водителя" in ans.lower():
+                            driver_info = "without"
+                        elif "с водителем" in ans.lower():
+                            driver_info = "with"
+                        if "adr" in ans.lower():
+                            multiplier = 1.2
+                    if driver_info == "without":
+                        fee = 100
+                    final_cost = (base_price + fee) * multiplier
+                    final_price = f"Базовая цена: {base_price} евро. Итоговая стоимость с учетом ваших ответов: {final_cost} евро."
+                except Exception as ex:
+                    final_price = f"Базовая цена: {base_price_str}. Ваши ответы: {', '.join(pending['answers'])}."
+                response_message = f"Спасибо, ваши ответы приняты. {final_price}"
+                del pending_guiding[client_code]
+        elif any(keyword in user_message.lower() for keyword in PRICE_KEYWORDS):
+            vehicle_type = get_vehicle_type(user_message)
+            if not vehicle_type:
+                response_message = "Укажите, пожалуйста, тип транспортного средства (например, фура)."
+            else:
+                response_message = get_price_response(vehicle_type)
+        else:
+            messages = prepare_chat_context(client_code)
+            messages.append({"role": "user", "content": user_message})
+            openai_response = openai.ChatCompletion.create(
+                model="gpt-3.5-turbo",
+                messages=messages,
+                max_tokens=150
+            )
+            response_message = openai_response['choices'][0]['message']['content'].strip()
+        
+        add_message_to_client_file(client_code, user_message, is_assistant=False)
+        add_message_to_client_file(client_code, response_message, is_assistant=True)
+        
+        logger.info(f"Ответ от АСС: {response_message}")
+        return jsonify({'reply': response_message}), 200
+    except Exception as e:
+        logger.error(f"❌ Ошибка в /chat: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/', methods=['GET'])
+def home():
+    return jsonify({"status": "Server is running!"}), 200
+
+##############################################
+# Интеграция Telegram Bot для команды /bible
+##############################################
+from telegram.ext import ConversationHandler
+
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+if not TELEGRAM_BOT_TOKEN:
+    logger.error("Переменная окружения TELEGRAM_BOT_TOKEN не настроена!")
+    exit(1)
+
+BIBLE_ASK_ACTION, BIBLE_ASK_QUESTION, BIBLE_ASK_ANSWER = range(3)
+
+async def bible_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    await update.message.reply_text("Введите 'add' для добавления новой пары вопрос-ответ, или 'cancel' для отмены.")
+    return BIBLE_ASK_ACTION
+
+async def ask_action(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    action = update.message.text.strip().lower()
+    if action == "add":
+        context.user_data['action'] = 'add'
+        await update.message.reply_text("Введите новый вопрос:")
+        return BIBLE_ASK_QUESTION
+    elif action == "cancel":
+        return await cancel_bible(update, context)
+    else:
+        await update.message.reply_text("Неверное значение. Введите 'add' или 'cancel'.")
+        return BIBLE_ASK_ACTION
+
+async def ask_question(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    question = update.message.text.strip()
+    context.user_data['question'] = question
+    await update.message.reply_text("Введите ответ для этого вопроса:")
+    return BIBLE_ASK_ANSWER
+
+async def ask_answer(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    answer = update.message.text.strip()
+    question = context.user_data.get('question')
+    logger.info(f"Сохраняем пару: Вопрос='{question}', Ответ='{answer}'")
+    try:
+        save_bible_pair(question, answer)
+    except Exception as e:
+        logger.error(f"Ошибка сохранения пары в Bible.xlsx: {e}")
+    await update.message.reply_text("Пара вопрос-ответ сохранена. Статус: 'Check'.")
+    return ConversationHandler.END
+
+async def cancel_bible(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    await update.message.reply_text("Операция отменена.")
+    return ConversationHandler.END
+
+bible_conv_handler = ConversationHandler(
+    entry_points=[CommandHandler("bible", bible_start)],
+    states={
+        BIBLE_ASK_ACTION: [MessageHandler(filters.TEXT & ~filters.COMMAND, ask_action)],
+        BIBLE_ASK_QUESTION: [MessageHandler(filters.TEXT & ~filters.COMMAND, ask_question)],
+        BIBLE_ASK_ANSWER: [MessageHandler(filters.TEXT & ~filters.COMMAND, ask_answer)]
+    },
+    fallbacks=[CommandHandler("cancel", cancel_bible)]
+)
+
+application = ApplicationBuilder().token(TELEGRAM_BOT_TOKEN).build()
+bot = application.bot
+application.add_handler(bible_conv_handler)
+
+@app.route('/webhook', methods=['POST'])
+def telegram_webhook():
+    try:
+        data = request.get_json(force=True)
+        update = Update.de_json(data, bot)
+        global_loop.run_until_complete(application.process_update(update))
+        return 'OK', 200
+    except Exception as e:
+        logger.error(f"Ошибка обработки Telegram update: {e}")
+        return jsonify({'error': str(e)}), 500
+
+global_loop = asyncio.new_event_loop()
+asyncio.set_event_loop(global_loop)
+if __name__ == '__main__':
+    port = int(os.getenv("PORT", 8080))
+    WEBHOOK_URL = os.getenv("WEBHOOK_URL")
+    if not WEBHOOK_URL:
+        logger.error("Не задана переменная окружения WEBHOOK_URL!")
+        exit(1)
+    global_loop.run_until_complete(application.initialize())
+    global_loop.run_until_complete(bot.set_webhook(WEBHOOK_URL))
+    logger.info(f"Webhook установлен: {WEBHOOK_URL}")
+    logger.info(f"Сервер запущен на порту {port}")
+    app.run(host='0.0.0.0', port=port, debug=False, threaded=True)
