@@ -18,15 +18,13 @@ BIBLE_SPREADSHEET_ID = "1QB3Jv7cL5hNwDKx9rQF6FCrKHW7IHPAqrUg7FIvY7Dk"
 
 def get_credentials():
     env_val = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
-    if env_val is None:
+    if not env_val:
         raise Exception("Переменная окружения GOOGLE_APPLICATION_CREDENTIALS не установлена.")
     env_val = env_val.strip()
-    # Удаляем обрамляющие кавычки, если они присутствуют
     if env_val.startswith('"') and env_val.endswith('"'):
         env_val = env_val[1:-1].strip()
     if env_val.startswith("{"):
-        info = json.loads(env_val)
-        return Credentials.from_service_account_info(info)
+        return Credentials.from_service_account_info(json.loads(env_val))
     else:
         return Credentials.from_service_account_file(os.path.abspath(env_val))
 
