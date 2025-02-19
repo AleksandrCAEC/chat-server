@@ -98,20 +98,26 @@ def prepare_chat_context(client_code):
     if bible_df is None:
         raise Exception("Bible.xlsx не найден или недоступен.")
     logger.info(f"Bible.xlsx содержит {len(bible_df)} записей.")
-    bible_context = "Информация о компании (FAQ):\n"
-    for index, row in bible_df.iterrows():
-        faq = row.get("FAQ", "")
-        answer = row.get("Answers", "")
-        verification = str(row.get("Verification", "")).strip().upper()
-        if faq and answer and verification != "CHECK":
-            bible_context += f"Вопрос: {faq}\nОтвет: {answer}\n\n"
+    
+    # Собираем внутренние инструкции (правила) из строк, где FAQ = "-" и Verification = "RULE"
+    rules_df = bible_df[(bible_df["FAQ"].str.strip() == "-") & (bible_df["Verification"].str.upper() == "RULE")]
+    system_rule = "\n".join(rules_df["Answers"].tolist())
+    
+    # Строгие правила, которым АСС должен строго следовать:
+    strict_instructions = (
+        "ВНИМАНИЕ: Ниже приведены обязательные правила, которым вы должны строго следовать. "
+        "1. Все инструкции, полученные из документа Bible.xlsx, имеют высший приоритет и обязательны к исполнению. "
+        "2. Вы не должны отклоняться от этих правил ни при каких обстоятельствах. "
+        "3. При формировании ответов используйте исключительно данные, предоставленные в этих инструкциях. "
+        "4. Любые дополнительные предположения или информация, противоречащие указанным правилам, должны игнорироваться."
+    )
+    
     system_message = {
         "role": "system",
-        "content": f"Вы – умный ассистент компании CAEC. Используйте следующую информацию для ответов:\n{bible_context}"
+        "content": f"{strict_instructions}\n\n{system_rule}"
     }
     messages.append(system_message)
     
-    # Чтение истории переписки из уникального файла клиента (начиная со 3-й строки)
     spreadsheet_id = find_client_file_id(client_code)
     if spreadsheet_id:
         sheets_service = get_sheets_service()
@@ -178,18 +184,41 @@ def chat():
 
         update_last_visit(client_code)
         
-        # Логика обработки guiding questions (pending_guiding)...
-        # (При желании дописать)
-
-        # Если запрос содержит ключевые слова о цене
-        if is_price_query(user_message):
+        if client_code in pending_guiding:
+            pending = pending_guiding[client_code]
+            pending.setdefault("answers", []).append(user_message)
+            pending["current_index"] += 1
+            if pending["current_index"] < len(pending["guiding_questions"]):
+                response_message = pending["guiding_questions"][pending["current_index"]]
+            else:
+                base_price_str = pending.get("base_price", get_price_response(pending["vehicle_type"], direction="Ro_Ge"))
+                try:
+                    base_price = parse_price(base_price_str)
+                    multiplier = 1.0
+                    fee = 0
+                    driver_info = None
+                    for ans in pending["answers"]:
+                        if "без водителя" in ans.lower():
+                            driver_info = "without"
+                        elif "с водителем" in ans.lower():
+                            driver_info = "with"
+                        if "adr" in ans.lower():
+                            multiplier = 1.2
+                    if driver_info == "without":
+                        fee = 100
+                    final_cost = (base_price + fee) * multiplier
+                    final_price = f"Базовая цена: {base_price} евро. Итоговая стоимость с учетом ваших ответов: {final_cost} евро."
+                except Exception as ex:
+                    final_price = f"Базовая цена: {base_price_str}. Ваши ответы: {', '.join(pending['answers'])}."
+                response_message = f"Спасибо, ваши ответы приняты. {final_price}"
+                del pending_guiding[client_code]
+        elif is_price_query(user_message):
             vehicle_type = get_vehicle_type(user_message)
             if not vehicle_type:
                 response_message = "Укажите, пожалуйста, тип транспортного средства (например, фура)."
             else:
                 response_message = get_price_response(vehicle_type)
         else:
-            # Обычный вопрос – передаём в OpenAI, добавив контекст из bible.xlsx
             messages = prepare_chat_context(client_code)
             messages.append({"role": "user", "content": user_message})
             openai_response = openai.ChatCompletion.create(
@@ -224,11 +253,11 @@ if not TELEGRAM_BOT_TOKEN:
 
 BIBLE_ASK_ACTION, BIBLE_ASK_QUESTION, BIBLE_ASK_ANSWER = range(3)
 
-async def bible_start(update, context):
+async def bible_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     await update.message.reply_text("Введите 'add' для добавления новой пары вопрос-ответ, или 'cancel' для отмены.")
     return BIBLE_ASK_ACTION
 
-async def ask_action(update, context):
+async def ask_action(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     action = update.message.text.strip().lower()
     if action == "add":
         context.user_data['action'] = 'add'
@@ -240,13 +269,13 @@ async def ask_action(update, context):
         await update.message.reply_text("Неверное значение. Введите 'add' или 'cancel'.")
         return BIBLE_ASK_ACTION
 
-async def ask_question(update, context):
+async def ask_question(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     question = update.message.text.strip()
     context.user_data['question'] = question
     await update.message.reply_text("Введите ответ для этого вопроса:")
     return BIBLE_ASK_ANSWER
 
-async def ask_answer(update, context):
+async def ask_answer(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     answer = update.message.text.strip()
     question = context.user_data.get('question')
     logger.info(f"Сохраняем пару: Вопрос='{question}', Ответ='{answer}'")
@@ -257,7 +286,7 @@ async def ask_answer(update, context):
     await update.message.reply_text("Пара вопрос-ответ сохранена. Статус: 'Check'.")
     return ConversationHandler.END
 
-async def cancel_bible(update, context):
+async def cancel_bible(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     await update.message.reply_text("Операция отменена.")
     return ConversationHandler.END
 
