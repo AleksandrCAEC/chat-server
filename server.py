@@ -12,7 +12,7 @@ from datetime import datetime
 from clientdata import register_or_update_client, verify_client_code, update_last_visit, update_activity_status
 from client_caec import add_message_to_client_file, find_client_file_id, get_sheets_service, CLIENT_FILES_DIR
 from bible import load_bible_data, save_bible_pair, get_rule
-from price_handler import check_ferry_price, parse_price, remove_timestamp, get_openai_response
+from price_handler import check_ferry_price, parse_price, remove_timestamp, get_guiding_question, get_openai_response
 from flask_cors import CORS
 import openpyxl
 
@@ -99,6 +99,7 @@ def prepare_chat_context(client_code):
     rules_df = bible_df[(bible_df["FAQ"].str.strip() == "-") & (bible_df["Verification"].str.upper() == "RULE")]
     rules_text = "\n".join(rules_df["Answers"].tolist())
     
+    # Строгие правила, которым АСС должен строго следовать:
     strict_instructions = (
         "ВНИМАНИЕ: Ниже приведены обязательные правила, которым вы должны строго следовать. "
         "1. Все инструкции, полученные из документа Bible.xlsx, имеют высший приоритет и обязательны к исполнению. "
@@ -212,7 +213,7 @@ def chat():
                     final_price = f"Базовая цена: {base_price_str}. Ваши ответы: {', '.join(pending['answers'])}."
                 response_message = f"Спасибо, ваши ответы приняты. {final_price}"
                 del pending_guiding[client_code]
-        elif any(keyword in user_message.lower() for keyword in PRICE_KEYWORDS):
+        elif is_price_query(user_message):
             vehicle_type = get_vehicle_type(user_message)
             if not vehicle_type:
                 response_message = "Укажите, пожалуйста, тип транспортного средства (например, фура)."
