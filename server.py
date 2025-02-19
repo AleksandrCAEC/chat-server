@@ -15,6 +15,7 @@ from bible import load_bible_data, save_bible_pair, get_rule
 from price_handler import check_ferry_price, parse_price, remove_timestamp, get_guiding_question, get_openai_response
 from flask_cors import CORS
 import openpyxl
+import pymorphy2  # Для лемматизации русского текста
 
 from telegram import Update, Bot
 from telegram.ext import (
@@ -49,20 +50,24 @@ pending_guiding = {}
 PRICE_KEYWORDS = ["цена", "прайс", "сколько стоит", "во сколько обойдется"]
 
 def get_vehicle_type(client_text):
-    client_text_lower = client_text.lower()
-    if USE_PRICE_FILE:
-        from price_handler import load_price_data
-        data = load_price_data()
-    else:
-        from price import get_ferry_prices
-        data = get_ferry_prices()
-    vehicle_types = list(data.keys())
-    matches = difflib.get_close_matches(client_text_lower, [vt.lower() for vt in vehicle_types], n=1, cutoff=0.3)
+    # Инициализируем лемматизатор
+    morph = pymorphy2.MorphAnalyzer()
+    normalized_words = [morph.parse(word)[0].normal_form for word in client_text.split()]
+    
+    # Определяем тип транспортного средства через лемматизацию
+    known_types = {"truck": "truck", "фура": "фура"}
+    for word in normalized_words:
+        if word in known_types:
+            logger.info(f"Определен тип транспортного средства (лемматизация): {known_types[word]}")
+            return known_types[word]
+    
+    # Если лемматизация не сработала, используем fuzzy matching по исходному тексту
+    text_lower = client_text.lower()
+    matches = difflib.get_close_matches(text_lower, list(known_types.keys()), n=1, cutoff=0.3)
     if matches:
-        for vt in vehicle_types:
-            if vt.lower() == matches[0]:
-                logger.info(f"Определен тип транспортного средства: {vt}")
-                return vt.lower()
+        logger.info(f"Определен тип транспортного средства (fuzzy matching): {known_types[matches[0]]}")
+        return known_types[matches[0]]
+    
     logger.info("Тип транспортного средства не определен из сообщения клиента.")
     return None
 
@@ -95,17 +100,16 @@ def prepare_chat_context(client_code):
         raise Exception(get_rule())
     logger.info(f"Bible.xlsx содержит {len(bible_df)} записей.")
 
-    # Собираем все внутренние инструкции (обязательные правила)
+    # Собираем все внутренние инструкции (правила) из строк, где FAQ = "-" и Verification = "RULE"
     rules_df = bible_df[(bible_df["FAQ"].str.strip() == "-") & (bible_df["Verification"].str.upper() == "RULE")]
     rules_text = "\n".join(rules_df["Answers"].tolist())
     
-    # Строгие правила для АСС: они должны быть изучены перед началом диалога
     strict_instructions = (
         "ВНИМАНИЕ: Ниже приведены обязательные правила, которым вы должны строго следовать. "
         "1. Все инструкции, полученные из документа Bible.xlsx, имеют высший приоритет и обязательны к исполнению. "
         "2. Вы не должны отклоняться от этих правил ни при каких обстоятельствах. "
         "3. При формировании ответов используйте исключительно данные, предоставленные в этих инструкциях. "
-        "4. Любые дополнительные предположения, противоречащие указанным правилам, должны игнорироваться."
+        "4. Любые дополнительные предположения или информация, противоречащие указанным правилам, должны игнорироваться."
     )
     
     system_message = {
@@ -115,7 +119,6 @@ def prepare_chat_context(client_code):
     messages.append(system_message)
     
     # Вторая часть контекста: история переписки, хранящаяся в уникальном файле клиента (Client_CAECxxxxxxx.xlsx)
-    # Этот файл всегда создается при регистрации клиента и хранится в ./CAEC_API_Data/BIG_DATA/
     spreadsheet_id = find_client_file_id(client_code)
     if spreadsheet_id:
         sheets_service = get_sheets_service()
@@ -125,7 +128,7 @@ def prepare_chat_context(client_code):
         ).execute()
         values = result.get("values", [])
         if len(values) >= 2:
-            conversation_rows = values[2:]  # первые две строки содержат данные о клиенте
+            conversation_rows = values[2:]
             logger.info(f"Найдено {len(conversation_rows)} строк переписки для клиента {client_code}.")
             for row in conversation_rows:
                 if len(row) >= 1 and row[0].strip():
