@@ -14,18 +14,16 @@ from googleapiclient.discovery import build
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
-# Идентификатор Google Sheets таблицы Bible.xlsx
 BIBLE_SPREADSHEET_ID = "1QB3Jv7cL5hNwDKx9rQF6FCrKHW7IHPAqrUg7FIvY7Dk"
 
 def get_credentials():
-    """
-    Возвращает объект Credentials. Если переменная окружения GOOGLE_APPLICATION_CREDENTIALS
-    содержит JSON-текст, используется from_service_account_info(), иначе from_service_account_file().
-    """
     env_val = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
     if env_val is None:
         raise Exception("Переменная окружения GOOGLE_APPLICATION_CREDENTIALS не установлена.")
     env_val = env_val.strip()
+    # Удаляем обрамляющие кавычки, если они присутствуют
+    if env_val.startswith('"') and env_val.endswith('"'):
+        env_val = env_val[1:-1].strip()
     if env_val.startswith("{"):
         info = json.loads(env_val)
         return Credentials.from_service_account_info(info)
@@ -33,9 +31,6 @@ def get_credentials():
         return Credentials.from_service_account_file(os.path.abspath(env_val))
 
 def get_sheets_service():
-    """
-    Инициализирует и возвращает объект сервиса Google Sheets.
-    """
     try:
         credentials = get_credentials()
         service = build('sheets', 'v4', credentials=credentials)
@@ -45,10 +40,6 @@ def get_sheets_service():
         raise
 
 def load_bible_data():
-    """
-    Загружает данные из Google Sheets таблицы Bible.xlsx и возвращает их в виде DataFrame.
-    Ожидается, что данные находятся на листе "Bible" и в диапазоне A2:C.
-    """
     try:
         service = get_sheets_service()
         range_name = "Bible!A2:C"
@@ -68,16 +59,9 @@ def load_bible_data():
         return None
 
 def upload_or_update_file(file_name, file_stream):
-    """
-    Обновляет или создаёт файл на Google Drive (реализация уже имеется в вашем проекте).
-    """
     pass
 
 def ensure_local_bible_file(local_path):
-    """
-    Если локальный файл не существует, создает его с заголовками.
-    Этот вариант используется для резервного копирования или временных файлов.
-    """
     if not os.path.exists(local_path):
         try:
             directory = os.path.dirname(local_path)
@@ -93,10 +77,6 @@ def ensure_local_bible_file(local_path):
             raise
 
 def save_bible_pair(question, answer):
-    """
-    Добавляет новую строку в Google Sheets таблицу Bible.xlsx с вопросом, ответом и статусом "Check".
-    При возникновении ошибки записи создаётся временный локальный файл Temp_Bible.xlsx.
-    """
     try:
         service = get_sheets_service()
         new_row = [[question, answer, "Check"]]
@@ -124,10 +104,6 @@ def save_bible_pair(question, answer):
         raise
 
 def get_rule():
-    """
-    Возвращает объединённый текст всех внутренних инструкций (строки, где FAQ='-' и Verification='RULE').
-    Если таких строк нет, возвращает "<no_rules_found>".
-    """
     df = load_bible_data()
     if df is None:
         return "<no_rules_found>"
