@@ -10,7 +10,7 @@ from datetime import datetime
 from clientdata import register_or_update_client, verify_client_code, update_last_visit, update_activity_status
 from client_caec import add_message_to_client_file, find_client_file_id, get_sheets_service, CLIENT_FILES_DIR
 from bible import load_bible_data, save_bible_pair
-from price_handler import check_ferry_price, load_price_data, parse_price
+from price_handler import check_ferry_price, parse_price
 from flask_cors import CORS
 import openpyxl
 import json  # Для работы с JSON
@@ -111,7 +111,6 @@ def prepare_chat_context(client_code):
         "content": f"{strict_instructions}\n\n{system_rule}"
     }
     messages.append(system_message)
-    
     spreadsheet_id = find_client_file_id(client_code)
     if spreadsheet_id:
         sheets_service = get_sheets_service()
@@ -195,21 +194,7 @@ def chat():
                 response_message = ("Для определения цены, пожалуйста, уточните тип транспортного средства "
                                     "(например, грузовик или фура).")
             else:
-                price_data = load_price_data()
-                if vehicle_type not in price_data:
-                    response_message = f"Извините, информация о тарифах для '{vehicle_type}' отсутствует в нашей базе."
-                else:
-                    conditions = price_data[vehicle_type].get("conditions", [])
-                    if conditions:
-                        pending_guiding[client_code] = {
-                            "vehicle_type": vehicle_type,
-                            "conditions": conditions,
-                            "current_index": 0,
-                            "answers": []
-                        }
-                        response_message = conditions[0]
-                    else:
-                        response_message = get_price_response(vehicle_type, direction="Ro_Ge")
+                response_message = get_price_response(vehicle_type, direction="Ro_Ge")
         else:
             messages = prepare_chat_context(client_code)
             messages.append({"role": "user", "content": user_message})
