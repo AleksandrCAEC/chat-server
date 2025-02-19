@@ -1,3 +1,4 @@
+# price_handler.py
 import os
 import re
 import logging
@@ -18,6 +19,9 @@ def get_credentials():
     if env_val is None:
         raise Exception("Переменная окружения GOOGLE_APPLICATION_CREDENTIALS не установлена.")
     env_val = env_val.strip()
+    # Удаляем обрамляющие кавычки, если они присутствуют
+    if env_val.startswith('"') and env_val.endswith('"'):
+        env_val = env_val[1:-1].strip()
     if env_val.startswith("{"):
         info = json.loads(env_val)
         return Credentials.from_service_account_info(info)
