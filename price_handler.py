@@ -24,6 +24,19 @@ def parse_price(price_str):
         logger.error(f"{get_rule('price_parse_error')}: {e}")
         return None
 
+def get_guiding_question(condition_marker):
+    bible_df = load_bible_data()
+    if bible_df is None:
+        return None
+    for index, row in bible_df.iterrows():
+        ver = str(row.get("Verification", "")).strip().upper()
+        if ver == condition_marker.upper():
+            question = row.get("FAQ", "").strip()
+            logger.info(f"{get_rule('guiding_question_found')} {condition_marker}: {question}")
+            return question
+    logger.info(f"{get_rule('guiding_question_not_found')} {condition_marker}")
+    return None
+
 def check_ferry_price(vehicle_type, direction="Ro_Ge"):
     try:
         website_prices = get_ferry_prices()
