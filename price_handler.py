@@ -2,10 +2,11 @@ import os
 import re
 import logging
 import time
+import openai
+import requests
 from price import get_ferry_prices
 from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
-import requests
 from bible import load_bible_data, get_rule
 
 logger = logging.getLogger(__name__)
@@ -76,3 +77,22 @@ def check_ferry_price(vehicle_type, direction="Ro_Ge"):
     except Exception as e:
         logger.error(f"{get_rule('price_error')}: {e}")
         return get_rule("price_error_message")
+
+def get_openai_response(messages):
+    start_time = time.time()
+    attempt = 0
+    while True:
+        try:
+            response = openai.ChatCompletion.create(
+                model="gpt-3.5-turbo",
+                messages=messages,
+                max_tokens=150,
+                timeout=40
+            )
+            return response
+        except Exception as e:
+            logger.error(f"OpenAI error attempt {attempt+1}: {e}")
+            attempt += 1
+            if time.time() - start_time > 180:
+                return get_rule("openai_timeout_message")
+            time.sleep(2)
