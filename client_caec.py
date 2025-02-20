@@ -1,4 +1,3 @@
-# client_caec.py
 import os
 import pandas as pd
 from datetime import datetime
@@ -9,8 +8,7 @@ from openpyxl.styles import Alignment, numbers
 from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseUpload, MediaIoBaseDownload
-from config import CLIENT_DATA_PATH, CLIENT_FILES_DIR
-import json
+from config import CLIENT_DATA_PATH, CLIENT_FILES_DIR  # Импортируем константы из config
 
 logging.basicConfig(
     level=logging.INFO,
@@ -22,6 +20,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# Функция для отправки уведомлений через Telegram
 def send_notification(message):
     try:
         import requests
@@ -34,6 +33,7 @@ def send_notification(message):
     except Exception as ex:
         logger.error(f"Ошибка при отправке уведомления: {ex}")
 
+# Если директория для файлов клиента не существует, создаём её
 if not os.path.exists(CLIENT_FILES_DIR):
     try:
         os.makedirs(CLIENT_FILES_DIR, exist_ok=True)
@@ -42,23 +42,15 @@ if not os.path.exists(CLIENT_FILES_DIR):
         logger.error(f"Ошибка при создании директории {CLIENT_FILES_DIR}: {e}")
         send_notification(f"Ошибка при создании директории {CLIENT_FILES_DIR}: {e}")
 
+# Идентификатор папки на Google Drive (если используется)
 GOOGLE_DRIVE_FOLDER_ID = "11cQYLDGKlu2Rn_9g8R_4xNA59ikhvJpS"
-
-def get_credentials():
-    env_val = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
-    if not env_val:
-        raise Exception("Переменная окружения GOOGLE_APPLICATION_CREDENTIALS не установлена.")
-    env_val = env_val.strip()
-    if env_val.startswith('"') and env_val.endswith('"'):
-        env_val = env_val[1:-1].strip()
-    if env_val.startswith("{"):
-        return Credentials.from_service_account_info(json.loads(env_val))
-    else:
-        return Credentials.from_service_account_file(os.path.abspath(env_val))
 
 def get_drive_service():
     try:
-        credentials = get_credentials()
+        credentials = Credentials.from_service_account_file(
+            os.getenv("GOOGLE_APPLICATION_CREDENTIALS"),
+            scopes=["https://www.googleapis.com/auth/drive"]
+        )
         return build("drive", "v3", credentials=credentials)
     except Exception as e:
         logger.error(f"Ошибка инициализации Google Drive API: {e}")
@@ -67,7 +59,7 @@ def get_drive_service():
 
 def get_sheets_service():
     try:
-        credentials = get_credentials()
+        credentials = Credentials.from_service_account_file(os.getenv("GOOGLE_APPLICATION_CREDENTIALS"))
         return build('sheets', 'v4', credentials=credentials)
     except Exception as e:
         logger.error(f"Ошибка инициализации Google Sheets API: {e}")
@@ -75,6 +67,7 @@ def get_sheets_service():
         raise
 
 def get_first_sheet_id(spreadsheet_id):
+    """Получает sheetId первого листа в таблице."""
     try:
         sheets_service = get_sheets_service()
         spreadsheet = sheets_service.spreadsheets().get(
@@ -85,7 +78,7 @@ def get_first_sheet_id(spreadsheet_id):
         return sheet_id
     except Exception as e:
         logger.error(f"Ошибка получения sheetId для файла {spreadsheet_id}: {e}")
-        return 0
+        return 0  # возвращаем 0 по умолчанию
 
 def find_file_id(drive_service, file_name):
     try:
@@ -103,6 +96,10 @@ def find_file_id(drive_service, file_name):
         raise
 
 def find_client_file_id(client_code):
+    """
+    Ищет Google Sheets файл для клиента по имени, содержащий "Client_{client_code}".
+    Возвращает spreadsheetId, если найден, иначе None.
+    """
     file_name_fragment = f"Client_{client_code}"
     drive_service = get_drive_service()
     try:
@@ -120,6 +117,10 @@ def find_client_file_id(client_code):
         raise
 
 def create_client_file(client_code, client_data):
+    """
+    Создает новый Google Sheets файл для клиента с начальными данными.
+    Возвращает spreadsheetId нового файла.
+    """
     sheets_service = get_sheets_service()
     file_title = f"Client_{client_code}.xlsx"
     values = [
@@ -143,15 +144,20 @@ def create_client_file(client_code, client_data):
         ]
     }
     try:
-        result = get_sheets_service().spreadsheets().create(body=body, fields="spreadsheetId").execute()
+        result = sheets_service.spreadsheets().create(body=body, fields="spreadsheetId").execute()
         spreadsheet_id = result.get("spreadsheetId")
         logger.info(f"Создан файл клиента {file_title} с spreadsheetId: {spreadsheet_id}")
+        # Перемещаем файл в нужную папку через Drive API
         drive_service = get_drive_service()
         drive_service.files().update(
             fileId=spreadsheet_id,
             addParents=GOOGLE_DRIVE_FOLDER_ID,
             fields="id, parents"
         ).execute()
+        # Убираем установку ширины столбцов и настройки переноса текста
+        # set_column_width(spreadsheet_id, 0, 650)
+        # set_column_width(spreadsheet_id, 1, 650)
+        # set_text_wrap(spreadsheet_id, 0, 2)
         return spreadsheet_id
     except Exception as e:
         logger.error(f"Ошибка при создании файла клиента {file_title}: {e}")
@@ -188,6 +194,9 @@ def set_column_width(spreadsheet_id, column_index, width):
         send_notification(f"Ошибка при установке ширины столбца в файле {spreadsheet_id}: {e}")
 
 def set_text_wrap(spreadsheet_id, start_column_index, end_column_index):
+    """
+    Устанавливает перенос текста (wrap text) для столбцов от start_column_index до end_column_index (не включая end_column_index).
+    """
     try:
         sheets_service = get_sheets_service()
         sheet_id = get_first_sheet_id(spreadsheet_id)
@@ -220,6 +229,16 @@ def set_text_wrap(spreadsheet_id, start_column_index, end_column_index):
         send_notification(f"Ошибка при установке переноса текста в столбцах {start_column_index} - {end_column_index - 1}: {e}")
 
 def add_message_to_client_file(client_code, message, is_assistant=False):
+    """
+    Добавляет новое сообщение в Google Sheets файл клиента Client_{client_code}.xlsx.
+    
+    Если сообщение от клиента, создаётся новая строка с текстом в столбце A (вопрос),
+    а столбец B оставляется пустым.
+    
+    Если сообщение от ассистента, производится анализ всех строк (начиная с 3-й),
+    чтобы найти последнюю строку, в которой записан вопрос без ответа, и затем
+    обновляется ячейка столбца B именно в этой строке.
+    """
     try:
         sheets_service = get_sheets_service()
         spreadsheet_id = find_client_file_id(client_code)
@@ -230,9 +249,15 @@ def add_message_to_client_file(client_code, message, is_assistant=False):
                 raise Exception(f"Данные клиента {client_code} не найдены.")
             spreadsheet_id = create_client_file(client_code, client_data)
         
+        # Убираем установку ширины столбцов и настройки переноса текста
+        # set_column_width(spreadsheet_id, 0, 650)
+        # set_column_width(spreadsheet_id, 1, 650)
+        # set_text_wrap(spreadsheet_id, 0, 2)
+        
         current_time = datetime.now().strftime("%d.%m.%y %H:%M")
         
         if not is_assistant:
+            # Добавляем новую строку: в столбце A записываем вопрос, в столбце B оставляем пустым.
             new_row = [f"{current_time} - {message}", ""]
             while len(new_row) < 7:
                 new_row.append("")
@@ -246,6 +271,7 @@ def add_message_to_client_file(client_code, message, is_assistant=False):
             ).execute()
             logger.info(f"Запрос клиента добавлен в файл клиента {client_code}.")
         else:
+            # Считываем все значения из диапазона A:B
             result = sheets_service.spreadsheets().values().get(
                 spreadsheetId=spreadsheet_id,
                 range="Sheet1!A:B"
@@ -254,11 +280,12 @@ def add_message_to_client_file(client_code, message, is_assistant=False):
             if len(values) < 3:
                 logger.error("Нет записей переписки для обновления ответа ассистента.")
                 return
+            # Проходим по строкам, начиная с 3-й, чтобы найти последнюю строку, где в столбце A есть текст (вопрос) и столбец B пуст
             target_row = None
-            conversation_rows = values[2:]
+            conversation_rows = values[2:]  # начиная с 3-й строки
             for idx, row in enumerate(conversation_rows):
                 if row and row[0].strip() and (len(row) < 2 or not row[1].strip()):
-                    target_row = idx + 3
+                    target_row = idx + 3  # нумерация строк: первые две строки заняты
             if target_row is not None:
                 range_update = f"Sheet1!B{target_row}"
                 body = {"values": [[f"{current_time} - {message}"]]}
@@ -309,5 +336,7 @@ def handle_all_clients():
         logger.error(f"Ошибка при обработке всех клиентов: {e}")
         send_notification(f"Ошибка при обработке всех клиентов: {e}")
 
+# Запуск обработки всех клиентов отключён, чтобы обрабатывать только файлы, связанные с текущим посещением чата.
 if __name__ == "__main__":
+    # handle_all_clients()  # Отключено для повышения производительности при большом количестве клиентов.
     pass
