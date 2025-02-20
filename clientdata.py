@@ -1,12 +1,10 @@
-# clientdata.py
 import os
 from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
 import pandas as pd
 from datetime import datetime, timedelta
 import logging
-from config import CLIENT_DATA_PATH, CLIENT_FILES_DIR
-import json
+from config import CLIENT_DATA_PATH, CLIENT_FILES_DIR  # Импортируем константы из config.py
 
 logging.basicConfig(
     level=logging.INFO,
@@ -25,22 +23,9 @@ if not os.path.exists(data_dir):
 
 SPREADSHEET_ID = "1eGpB0hiRxXPpYN75-UKyXoar7yh-zne8r8ox-hXrS1I"
 
-def get_credentials():
-    env_val = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
-    if not env_val:
-        raise Exception("Переменная окружения GOOGLE_APPLICATION_CREDENTIALS не установлена.")
-    env_val = env_val.strip()
-    # Если значение обрамлено кавычками, удаляем их
-    if env_val.startswith('"') and env_val.endswith('"'):
-        env_val = env_val[1:-1].strip()
-    if env_val.startswith("{"):
-        return Credentials.from_service_account_info(json.loads(env_val))
-    else:
-        return Credentials.from_service_account_file(os.path.abspath(env_val))
-
 def get_sheets_service():
     try:
-        credentials = get_credentials()
+        credentials = Credentials.from_service_account_file(os.getenv("GOOGLE_APPLICATION_CREDENTIALS"))
         return build('sheets', 'v4', credentials=credentials)
     except Exception as e:
         logger.error(f"Ошибка инициализации Google Sheets API: {e}")
@@ -81,11 +66,17 @@ def generate_unique_code():
         raise
 
 def update_last_visit(client_code):
+    """
+    Обновляет дату/время последнего посещения (Last Visit) в файле ClientData.xlsx (Google Sheets)
+    для клиента с указанным кодом. Клиент ищется в колонке A (начиная со второй строки), а обновление
+    производится в колонке F.
+    """
     try:
         sheets_service = get_sheets_service()
         if not sheets_service:
             raise Exception("Google Sheets API не инициализирован.")
         last_visit = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        # Получаем данные из колонки A, начиная со второй строки
         range_name = "Sheet1!A2:A"
         result = sheets_service.spreadsheets().values().get(
             spreadsheetId=SPREADSHEET_ID,
@@ -96,11 +87,12 @@ def update_last_visit(client_code):
         client_code = str(client_code).strip()
         for idx, row in enumerate(values):
             if row and row[0].strip() == client_code:
-                row_number = idx + 2
+                row_number = idx + 2  # строка 1 – заголовок, затем начинается индексирование
                 break
         if row_number is None:
             logger.warning(f"Клиент с кодом {client_code} не найден для обновления Last Visit.")
         else:
+            # Обновляем ячейку в колонке F (Last Visit) соответствующей строки
             range_update = f"Sheet1!F{row_number}"
             body = {"values": [[last_visit]]}
             sheets_service.spreadsheets().values().update(
@@ -113,6 +105,11 @@ def update_last_visit(client_code):
         return True
     except Exception as e:
         logger.error(f"Ошибка обновления Last Visit для клиента {client_code}: {e}")
+        try:
+            from client_caec import send_notification
+            send_notification(f"Ошибка обновления Last Visit для клиента {client_code}: {e}")
+        except Exception as ex:
+            logger.error(f"Ошибка отправки уведомления об обновлении Last Visit: {ex}")
         return False
 
 def save_client_data(client_code, name, phone, email, created_date, last_visit, activity_status):
@@ -153,8 +150,17 @@ def save_client_data(client_code, name, phone, email, created_date, last_visit, 
         logger.error(f"Ошибка сохранения в локальный файл: {e}")
 
 def update_activity_status():
-    logger.info("Обновление статуса активности клиентов отключено.")
-    return
+    try:
+        df = load_client_data()
+        current_date = datetime.now()
+        one_year_ago = current_date - timedelta(days=365)
+        df["Client Code"] = df["Client Code"].astype(str)
+        df.loc[pd.to_datetime(df["Last Visit"]) < one_year_ago, "Activity Status"] = "Not Active"
+        df = df.sort_values(by=["Activity Status"], ascending=False)
+        df.astype(str).to_excel(CLIENT_DATA_PATH, index=False)
+        logger.info("Статус активности клиентов обновлен.")
+    except Exception as e:
+        logger.error(f"Ошибка при обновлении статуса активности: {e}")
 
 def register_or_update_client(data):
     try:
@@ -213,6 +219,7 @@ def register_or_update_client(data):
             handle_client(client_code)
         except Exception as e_import:
             logger.error(f"Ошибка импорта handle_client при регистрации нового клиента: {e_import}")
+        update_activity_status()
         return {
             "uniqueCode": client_code,
             "message": f"Добро пожаловать, {name}! Ваш код: {client_code}.",
@@ -236,7 +243,3 @@ def verify_client_code(code):
     except Exception as e:
         logger.error(f"Ошибка при верификации кода клиента: {e}")
         return None
-
-if __name__ == "__main__":
-    df = load_client_data()
-    logger.info(df)
