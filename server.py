@@ -26,6 +26,7 @@ from telegram.ext import (
     filters
 )
 
+# Файл price.xlsx временно отключён – ассистент получает данные непосредственно с сайта.
 USE_PRICE_FILE = False
 
 os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = "/etc/secrets/service_account_json"
@@ -49,12 +50,9 @@ PRICE_KEYWORDS = ["цена", "прайс"]
 
 def get_vehicle_type(client_text):
     client_text_lower = client_text.lower()
-    if USE_PRICE_FILE:
-        from price_handler import load_price_data  # Если требуется
-        data = load_price_data()
-    else:
-        from price import get_ferry_prices
-        data = get_ferry_prices()
+    # Всегда используем данные с сайта, поскольку USE_PRICE_FILE = False
+    from price import get_ferry_prices
+    data = get_ferry_prices()
     vehicle_types = list(data.keys())
     matches = difflib.get_close_matches(client_text_lower, [vt.lower() for vt in vehicle_types], n=1, cutoff=0.3)
     if matches:
@@ -85,7 +83,6 @@ def get_openai_response(messages):
             attempt += 1
             if time.time() - start_time > 180:
                 send_msg = get_rule("openai_timeout_message")
-                # send_telegram_notification(send_msg)
                 return None
             time.sleep(2)
 
@@ -126,10 +123,8 @@ def register_client():
         result = register_or_update_client(data)
         if result.get("isNewClient", True):
             send_msg = get_rule("new_client_message").format(**result)
-            # send_telegram_notification(send_msg)
         else:
             send_msg = get_rule("returning_client_message").format(**result)
-            # send_telegram_notification(send_msg)
         return jsonify(result), 200
     except Exception as e:
         logger.error(f"Error in /register-client: {e}")
@@ -144,7 +139,6 @@ def verify_code():
         client_data = verify_client_code(code)
         if client_data:
             send_msg = get_rule("verified_client_message").format(code=code, **client_data)
-            # send_telegram_notification(send_msg)
             return jsonify({'status': 'success', 'clientData': client_data}), 200
         return jsonify({'status': 'error', 'message': get_rule("invalid_code_message")}), 404
     except Exception as e:
