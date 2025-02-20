@@ -215,6 +215,25 @@ def chat():
         logger.error(f"Error in /chat: {e}")
         return jsonify({'error': str(e)}), 500
 
+# Новый эндпоинт для обработки запроса цены (/get-price)
+@app.route('/get-price', methods=['POST'])
+def get_price():
+    try:
+        data = request.json
+        vehicle_text = data.get("vehicle", "")
+        direction = data.get("direction", "Ro_Ge")
+        if not vehicle_text:
+            logger.error(get_rule("empty_vehicle_text"))
+            return jsonify({"error": get_rule("empty_vehicle_text")}), 400
+        vehicle_type = get_vehicle_type(vehicle_text)
+        if not vehicle_type:
+            return jsonify({"error": get_rule("vehicle_type_not_found")}), 404
+        price_response = get_price_response(vehicle_type, direction)
+        return jsonify({"price": price_response}), 200
+    except Exception as e:
+        logger.error(f"Error in /get-price: {e}")
+        return jsonify({"error": str(e)}), 500
+
 @app.route('/', methods=['GET'])
 def home():
     return jsonify({"status": get_rule("server_running")}), 200
