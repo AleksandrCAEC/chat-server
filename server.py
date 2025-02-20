@@ -15,7 +15,7 @@ from flask_cors import CORS
 import openpyxl
 import json
 
-# Импорты Telegram Bot
+# Импорты для Telegram Bot
 from telegram import Update, Bot
 from telegram.ext import (
     ApplicationBuilder,
@@ -68,9 +68,9 @@ def is_price_query(text):
 
 def get_vehicle_type(text):
     """
-    Преобразует входное описание ТС в ключ для поиска.
-    Если пользователь ввёл «грузовик», возвращаем "Truck".
-    Если «фура», возвращаем "Fura".
+    Если входное сообщение содержит 'грузовик'/'truck' -> "Truck".
+    Если 'фура'/'fura' -> "Fura".
+    Иначе None.
     """
     text_lower = text.lower()
     if "грузовик" in text_lower:
@@ -85,13 +85,14 @@ def get_vehicle_type(text):
 
 def get_price_response(vehicle_type, direction="Ro_Ge"):
     """
-    Вызывает check_ferry_price из price_handler для получения цены ТОЛЬКО с сайта.
+    Вызывает check_ferry_price (price_handler.py), 
+    которая использует только данные, загруженные с сайта (get_ferry_prices()).
     """
     try:
         return check_ferry_price(vehicle_type, direction)
     except Exception as e:
-        logger.error(f"Ошибка get_price_response: {e}")
-        return "Произошла ошибка при получении актуальной цены."
+        logger.error(f"Ошибка get_price_response для {vehicle_type}: {e}")
+        return "Произошла ошибка при получении цены."
 
 def prepare_chat_context(client_code):
     messages = []
@@ -100,7 +101,6 @@ def prepare_chat_context(client_code):
         raise Exception("Bible.xlsx не найден или недоступен.")
     logger.info(f"Bible.xlsx содержит {len(bible_df)} записей.")
     
-    # Собираем внутренние инструкции (FAQ='-' и Verification='RULE')
     rules_df = bible_df[
         (bible_df["FAQ"].str.strip() == "-") &
         (bible_df["Verification"].str.upper() == "RULE")
@@ -114,6 +114,7 @@ def prepare_chat_context(client_code):
         "3. При формировании ответов используйте только данные, предоставленные в этих инструкциях. "
         "4. Любые дополнительные предположения, противоречащие этим правилам, игнорируйте."
     )
+    
     system_message = {
         "role": "system",
         "content": f"{strict_instructions}\n\n{system_rule}"
@@ -203,7 +204,6 @@ def chat():
             else:
                 response_message = get_price_response(vehicle_type, direction="Ro_Ge")
         else:
-            # Обычный чат
             messages = prepare_chat_context(client_code)
             messages.append({"role": "user", "content": user_message})
             openai_response = openai.ChatCompletion.create(
@@ -222,9 +222,6 @@ def chat():
         logger.error(f"❌ /chat ошибка: {e}")
         return jsonify({'error': str(e)}), 500
 
-###############################################
-# ЭНДПОИНТ /get-price
-###############################################
 @app.route('/get-price', methods=['POST'], strict_slashes=False)
 @app.route('/get-price/', methods=['POST'], strict_slashes=False)
 def get_price_endpoint():
@@ -242,14 +239,12 @@ def get_price_endpoint():
         logger.error(f"Ошибка в /get-price: {e}")
         return jsonify({"error": str(e)}), 500
 
-###############################################
 # Telegram Bot /webhook
-###############################################
 from telegram.ext import ConversationHandler
 
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 if not TELEGRAM_BOT_TOKEN:
-    logger.error("Переменная окружения TELEGRAM_BOT_TOKEN не задана!")
+    logger.error("TELEGRAM_BOT_TOKEN не задан!")
     exit(1)
 
 BIBLE_ASK_ACTION, BIBLE_ASK_QUESTION, BIBLE_ASK_ANSWER = range(3)
@@ -279,12 +274,12 @@ async def ask_question(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
 async def ask_answer(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     answer = update.message.text.strip()
     question = context.user_data.get('question')
-    logger.info(f"Сохраняем пару: Вопрос: {question} | Ответ: {answer}")
+    logger.info(f"Сохраняем пару: Вопрос='{question}' | Ответ='{answer}'")
     try:
         save_bible_pair(question, answer)
     except Exception as e:
         logger.error(f"Ошибка сохранения пары в Bible.xlsx: {e}")
-    await update.message.reply_text("Пара вопрос-ответ сохранена. Статус: 'Check'.")
+    await update.message.reply_text("Пара вопрос-ответ сохранена (статус: 'Check').")
     return ConversationHandler.END
 
 async def cancel_bible(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -313,24 +308,21 @@ def telegram_webhook():
         global_loop.run_until_complete(application.process_update(update))
         return 'OK', 200
     except Exception as e:
-        logger.error(f"Ошибка обработки Telegram update: {e}")
+        logger.error(f"Ошибка Telegram update: {e}")
         return jsonify({'error': str(e)}), 500
 
-##############################################
-# Основной блок запуска
-##############################################
 if __name__ == '__main__':
     print("Маршруты приложения:")
     print(app.url_map)
-    port = int(os.environ.get('PORT', 8080))
+    port = int(os.getenv("PORT", 8080))
     WEBHOOK_URL = os.getenv("WEBHOOK_URL")
     if not WEBHOOK_URL:
-        logger.error("Переменная окружения WEBHOOK_URL не задана!")
+        logger.error("WEBHOOK_URL не задан!")
         exit(1)
     global_loop = asyncio.new_event_loop()
     asyncio.set_event_loop(global_loop)
     global_loop.run_until_complete(application.initialize())
     global_loop.run_until_complete(bot.set_webhook(WEBHOOK_URL))
-    logger.info(f"Webhook установлен на {WEBHOOK_URL}")
+    logger.info(f"Webhook установлен: {WEBHOOK_URL}")
     logger.info(f"✅ Сервер запущен на порту {port}")
     app.run(host='0.0.0.0', port=port, debug=False, threaded=True)
