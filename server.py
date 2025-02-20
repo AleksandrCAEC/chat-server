@@ -5,6 +5,7 @@ import logging
 import asyncio
 import pprint
 import time
+import pandas as pd
 from flask import Flask, request, jsonify
 import openai
 import requests
@@ -50,6 +51,16 @@ PRICE_KEYWORDS = ["цена", "прайс"]
 
 def get_vehicle_type(client_text):
     client_text_lower = client_text.lower()
+    # Применяем алиас-словарь для русских названий транспортных средств
+    aliases = {
+        "грузовик 17 м": "Standard truck with trailer (up to 17M)",
+        "грузовик 17м": "Standard truck with trailer (up to 17M)",
+        # Дополнительные соответствия можно добавить здесь
+    }
+    if client_text_lower in aliases:
+        mapped = aliases[client_text_lower]
+        logger.info(f"Alias mapping applied: '{client_text_lower}' -> '{mapped}'")
+        return mapped.lower()
     # Всегда используем данные с сайта, поскольку USE_PRICE_FILE = False
     from price import get_ferry_prices
     data = get_ferry_prices()
@@ -89,8 +100,10 @@ def get_openai_response(messages):
 def prepare_chat_context(client_code):
     messages = []
     bible_df = load_bible_data()
-    if bible_df is None:
-        raise Exception(get_rule("bible_not_available"))
+    # Если данные из Bible недоступны или пусты, используем пустой DataFrame, чтобы не прерывать работу
+    if bible_df is None or bible_df.empty:
+        logger.warning(get_rule("bible_not_available"))
+        bible_df = pd.DataFrame(columns=["FAQ", "Answers", "Verification", "rule"])
     system_rule = "\n".join(bible_df["rule"].dropna().tolist())
     system_message = {"role": "system", "content": system_rule}
     messages.append(system_message)
