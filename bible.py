@@ -10,6 +10,7 @@ from googleapiclient.discovery import build
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
+# Если не задан, оставляем значение по умолчанию
 BIBLE_SPREADSHEET_ID = "YOUR_BIBLE_SPREADSHEET_ID"
 
 def get_sheets_service():
@@ -24,9 +25,9 @@ def get_sheets_service():
         raise
 
 def load_bible_data():
-    # Если ID не задан корректно, пробуем загрузить локальный файл bible.xlsx
-    if BIBLE_SPREADSHEET_ID == "YOUR_BIBLE_SPREADSHEET_ID":
-        logger.warning("Bible spreadsheet ID is not set. Attempting to load local bible file.")
+    # Если ID не задан корректно или равно значению по умолчанию, используем локальный файл
+    if not BIBLE_SPREADSHEET_ID or BIBLE_SPREADSHEET_ID == "YOUR_BIBLE_SPREADSHEET_ID":
+        logger.warning("Bible spreadsheet ID is not set or is default. Attempting to load local bible file.")
         try:
             local_file = "bible.xlsx"
             if os.path.exists(local_file):
