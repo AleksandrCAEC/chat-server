@@ -220,7 +220,8 @@ def chat():
 def get_price():
     try:
         data = request.json
-        vehicle_text = data.get("vehicle", "")
+        # Поддержка ключей "vehicle" и "vehicle_description"
+        vehicle_text = data.get("vehicle", data.get("vehicle_description", ""))
         direction = data.get("direction", "Ro_Ge")
         if not vehicle_text:
             logger.error(get_rule("empty_vehicle_text"))
