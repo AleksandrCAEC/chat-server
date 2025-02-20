@@ -24,6 +24,21 @@ def get_sheets_service():
         raise
 
 def load_bible_data():
+    # Если ID не задан корректно, пробуем загрузить локальный файл bible.xlsx
+    if BIBLE_SPREADSHEET_ID == "YOUR_BIBLE_SPREADSHEET_ID":
+        logger.warning("Bible spreadsheet ID is not set. Attempting to load local bible file.")
+        try:
+            local_file = "bible.xlsx"
+            if os.path.exists(local_file):
+                df = pd.read_excel(local_file)
+                logger.info(f"Local bible file loaded. Records: {len(df)}")
+                return df
+            else:
+                logger.error("Local bible file not found. Returning empty DataFrame.")
+                return pd.DataFrame(columns=["FAQ", "Answers", "Verification", "rule"])
+        except Exception as e:
+            logger.error(f"Error loading local bible file: {e}")
+            return pd.DataFrame(columns=["FAQ", "Answers", "Verification", "rule"])
     try:
         service = get_sheets_service()
         range_name = "Bible!A2:D"
@@ -39,8 +54,20 @@ def load_bible_data():
         logger.info(f"Bible data loaded. Records: {len(df)}")
         return df
     except Exception as e:
-        logger.error(f"Error loading Bible data: {e}")
-        return None
+        logger.error(f"Error loading Bible data from Google Sheets: {e}")
+        # Пытаемся загрузить локальный файл как запасной вариант
+        try:
+            local_file = "bible.xlsx"
+            if os.path.exists(local_file):
+                df = pd.read_excel(local_file)
+                logger.info(f"Local bible file loaded as fallback. Records: {len(df)}")
+                return df
+            else:
+                logger.error("Local bible file not found. Returning empty DataFrame.")
+                return pd.DataFrame(columns=["FAQ", "Answers", "Verification", "rule"])
+        except Exception as e2:
+            logger.error(f"Error loading local bible file as fallback: {e2}")
+            return pd.DataFrame(columns=["FAQ", "Answers", "Verification", "rule"])
 
 def upload_or_update_file(file_name, file_stream):
     pass
