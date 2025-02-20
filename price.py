@@ -23,6 +23,7 @@ def get_ferry_prices():
 
     soup = BeautifulSoup(html_text, 'html.parser')
     
+    # Поиск таблицы тарифов на странице
     table = soup.find('table')
     if not table:
         logger.error("Tariff table not found.")
@@ -34,6 +35,7 @@ def get_ferry_prices():
         return {}
     
     prices = {}
+    # Пропускаем заголовок таблицы
     for row in rows[1:]:
         cols = row.find_all('td')
         if len(cols) < 4:
