@@ -31,8 +31,7 @@ def get_ferry_prices():
         raise Exception(f"Ошибка при запросе тарифов с сайта: {e}")
 
     soup = BeautifulSoup(response.text, 'html.parser')
-    # Пробуем найти таблицу по атрибуту id, если таковая присутствует; иначе берём первую найденную таблицу
-    table = soup.find('table', {"id": "tariffTable"}) or soup.find('table')
+    table = soup.find('table')
     if not table:
         logger.error("Таблица тарифов не найдена на странице.")
         raise Exception("Таблица тарифов не найдена на странице.")
@@ -47,7 +46,7 @@ def get_ferry_prices():
     for row in rows[1:]:
         cols = row.find_all('td')
         if len(cols) < 5:
-            continue  # Пропускаем строки с недостаточным числом ячеек
+            continue  # если строка не содержит достаточное число ячеек, пропускаем её
         vehicle_type = cols[0].get_text(strip=True)
         price_Ro_Ge = cols[1].get_text(strip=True)
         price_Ge_Ro = cols[2].get_text(strip=True)
