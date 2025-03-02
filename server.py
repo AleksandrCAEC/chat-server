@@ -71,24 +71,26 @@ def lemmatize_text(text):
 def get_vehicle_type(client_text):
     """
     Определяет тип транспортного средства на основе входящего текста.
-    Применяет лемматизацию для нормализации терминов и использует заданные алиасы.
-    Если правило нормализации из Bible.xlsx не интегрировано, то вся системная информация берется из столбца B (с Verification = "Rule").
+    Применяет лемматизацию для нормализации терминов и проверяет наличие ключевых слов в лемматизированном тексте.
+    Если, например, обнаруживается любая форма слова "фура", возвращается
+    "standard truck with trailer (up to 17m)". Если алиасы не сработали, производится поиск по данным с сайта.
     """
     normalized_text = lemmatize_text(client_text.lower())
     logger.info(f"Normalized text: {normalized_text}")
     
-    # Проверка заданных алиасов
+    # Фиксированный словарь алиасов
     aliases = {
         "грузовик 17 м": "standard truck with trailer (up to 17m)",
         "грузовик 17м": "standard truck with trailer (up to 17m)",
         "фура": "standard truck with trailer (up to 17m)"
     }
-    if client_text.lower() in aliases:
-        mapped = aliases[client_text.lower()]
-        logger.info(f"Alias mapping applied: '{client_text.lower()}' -> '{mapped}'")
-        return mapped.lower()
+    # Проверяем, содержится ли ключ из алиасов в лемматизированном тексте
+    for key, value in aliases.items():
+        if key in normalized_text:
+            logger.info(f"Alias mapping applied: found '{key}' in normalized text; mapping to '{value}'")
+            return value
     
-    # Если нет алиасов, используем данные с сайта
+    # Если алиасы не сработали, используем данные с сайта
     from price import get_ferry_prices
     data = get_ferry_prices()
     vehicle_types = list(data.keys())
@@ -138,7 +140,6 @@ def prepare_chat_context(client_code):
     system_message = {"role": "system", "content": system_rule_text}
     messages.append(system_message)
     
-    # Поиск истории переписки клиента
     spreadsheet_id = find_client_file_id(client_code)
     if spreadsheet_id:
         sheets_service = get_sheets_service()
