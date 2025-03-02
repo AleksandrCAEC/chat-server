@@ -1,8 +1,9 @@
 import inspect
+# Определяем функцию-обёртку, которая возвращает ровно 4 значения, как в старом inspect.getargspec
+def getargspec(func):
+    fas = inspect.getfullargspec(func)
+    return fas.args, fas.varargs, fas.varkw, fas.defaults
 if not hasattr(inspect, 'getargspec'):
-    def getargspec(func):
-        fas = inspect.getfullargspec(func)
-        return fas.args, fas.varargs, fas.varkw, fas.defaults
     inspect.getargspec = getargspec
 
 import os
@@ -23,6 +24,7 @@ from price_handler import check_ferry_price, parse_price, remove_timestamp, get_
 from flask_cors import CORS
 import openpyxl
 
+# Импортируем pymorphy2 для лемматизации
 import pymorphy2
 morph = pymorphy2.MorphAnalyzer()
 
@@ -59,11 +61,20 @@ pending_guiding = {}
 PRICE_KEYWORDS = ["цена", "прайс"]
 
 def lemmatize_text(text):
+    """
+    Приводит каждое слово входящего текста к его начальной (лемматизированной) форме.
+    """
     words = text.split()
     lemmatized_words = [morph.parse(word)[0].normal_form for word in words]
     return " ".join(lemmatized_words)
 
 def get_normalization_mapping():
+    """
+    Загружает правила нормализации из Bible.xlsx.
+    Ожидается, что строки с Verification == "Normalization" содержат:
+      - FAQ: варианты термина, разделённые запятыми (например, "фура, фуры, фуре, фурой")
+      - Answers: нормализованное название транспортного средства (например, "standard truck with trailer (up to 17m)")
+    """
     df = load_bible_data()
     mapping = {}
     if df is not None and not df.empty:
@@ -78,6 +89,12 @@ def get_normalization_mapping():
     return mapping
 
 def get_vehicle_type(client_text):
+    """
+    Определяет тип транспортного средства на основе входящего текста.
+    Применяет морфологическую обработку для нормализации терминов и использует правила нормализации из Bible.xlsx.
+    Если найдено совпадение по правилу нормализации, возвращается нормализованное значение.
+    Если правил нет – выполняется поиск по данным, полученным с сайта.
+    """
     normalized_text = lemmatize_text(client_text.lower())
     logger.info(f"Normalized text: {normalized_text}")
     
@@ -87,6 +104,7 @@ def get_vehicle_type(client_text):
             logger.info(f"Normalization rule applied: found '{variant}' in input; mapping to '{normalized_value}'")
             return normalized_value
     
+    # Если правила не сработали, используем данные с сайта
     from price import get_ferry_prices
     data = get_ferry_prices()
     vehicle_types = list(data.keys())
@@ -125,13 +143,16 @@ def get_openai_response(messages):
 def prepare_chat_context(client_code):
     messages = []
     bible_df = load_bible_data()
+    # Если данные из Bible недоступны или пусты, используем пустой DataFrame
     if bible_df is None or bible_df.empty:
         logger.warning(get_rule("bible_not_available"))
         import pandas as pd
         bible_df = pd.DataFrame(columns=["FAQ", "Answers", "Verification", "rule"])
+    # Фильтруем строки, где Verification == "Rule" (внутренние обязательные инструкции для агента)
     rules_df = bible_df[bible_df["Verification"].str.strip().str.upper() == "RULE"]
     system_rules = rules_df["Answers"].dropna().tolist()
     system_rule_text = "\n".join(system_rules)
+    # Это внутреннее правило для агента, которое не передается клиенту
     system_message = {"role": "system", "content": system_rule_text}
     messages.append(system_message)
     
