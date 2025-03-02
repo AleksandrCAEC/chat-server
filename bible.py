@@ -11,7 +11,7 @@ logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
 # Если не задан, оставляем значение по умолчанию.
-BIBLE_SPREADSHEET_ID = "1QB3Jv7cL5hNwDKx9rQF6FCrKHW7IHPAqrUg7FIvY7Dk"
+BIBLE_SPREADSHEET_ID = "YOUR_BIBLE_SPREADSHEET_ID"
 
 def get_sheets_service():
     try:
