@@ -5,7 +5,6 @@ import logging
 import asyncio
 import pprint
 import time
-import pandas as pd
 from flask import Flask, request, jsonify
 import openai
 import requests
@@ -55,6 +54,7 @@ def get_vehicle_type(client_text):
     aliases = {
         "грузовик 17 м": "Standard truck with trailer (up to 17M)",
         "грузовик 17м": "Standard truck with trailer (up to 17M)",
+        "фура": "Truck (up to 10M)"
         # Дополнительные соответствия можно добавить здесь
     }
     if client_text_lower in aliases:
@@ -103,6 +103,7 @@ def prepare_chat_context(client_code):
     # Если данные из Bible недоступны или пусты, используем пустой DataFrame, чтобы не прерывать работу
     if bible_df is None or bible_df.empty:
         logger.warning(get_rule("bible_not_available"))
+        import pandas as pd
         bible_df = pd.DataFrame(columns=["FAQ", "Answers", "Verification", "rule"])
     system_rule = "\n".join(bible_df["rule"].dropna().tolist())
     system_message = {"role": "system", "content": system_rule}
@@ -172,6 +173,7 @@ def chat():
         update_last_visit(client_code)
         update_activity_status()
         
+        # Если клиент уже находится в процессе уточнения параметров, обрабатываем его ответы (здесь оставляем без изменений)
         if client_code in pending_guiding:
             pending = pending_guiding[client_code]
             pending.setdefault("answers", []).append(user_message)
@@ -201,11 +203,21 @@ def chat():
                 response_message = f"{get_rule('thank_you_message')} {final_price}"
                 del pending_guiding[client_code]
         elif any(keyword in user_message.lower() for keyword in PRICE_KEYWORDS):
+            # Определяем направление доставки на основе порядка упоминания слов "поти" и "констанц" в сообщении
+            msg_lower = user_message.lower()
+            if "поти" in msg_lower and "констанц" in msg_lower:
+                if msg_lower.index("поти") < msg_lower.index("констанц"):
+                    direction = "Ge_Ro"  # Из Поти в Констанцу
+                else:
+                    direction = "Ro_Ge"  # Из Констанцы в Поти
+            else:
+                direction = "Ro_Ge"  # Значение по умолчанию
+
             vehicle_type = get_vehicle_type(user_message)
             if not vehicle_type:
                 response_message = get_rule("vehicle_type_not_found")
             else:
-                base_price_str = get_price_response(vehicle_type)
+                base_price_str = get_price_response(vehicle_type, direction)
                 if base_price_str:
                     response_message = base_price_str
                 else:
