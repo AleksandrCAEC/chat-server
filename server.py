@@ -24,14 +24,9 @@ from price_handler import check_ferry_price, parse_price, remove_timestamp, get_
 from flask_cors import CORS
 import openpyxl
 
-# Импорт pymorphy2, но не инициализируем глобально – используем ленивую инициализацию
+# Импортируем pymorphy2 для лемматизации
 import pymorphy2
-_morph = None
-def get_morph():
-    global _morph
-    if _morph is None:
-        _morph = pymorphy2.MorphAnalyzer()
-    return _morph
+morph = pymorphy2.MorphAnalyzer()
 
 from telegram import Update, Bot
 from telegram.ext import (
@@ -67,49 +62,33 @@ PRICE_KEYWORDS = ["цена", "прайс"]
 
 def lemmatize_text(text):
     """
-    Приводит каждое слово входящего текста к его начальной (лемматизированной) форме с использованием ленивой инициализации pymorphy2.
+    Приводит каждое слово входящего текста к его начальной (лемматизированной) форме.
     """
-    morph = get_morph()
     words = text.split()
     lemmatized_words = [morph.parse(word)[0].normal_form for word in words]
     return " ".join(lemmatized_words)
 
-def get_normalization_mapping():
-    """
-    Загружает правила нормализации из Bible.xlsx.
-    Ожидается, что строки с Verification == "Normalization" содержат:
-      - FAQ: варианты термина, разделённые запятыми (например, "фура, фуры, фуре, фурой")
-      - Answers: нормализованное название транспортного средства (например, "standard truck with trailer (up to 17m)")
-    """
-    df = load_bible_data()
-    mapping = {}
-    if df is not None and not df.empty:
-        norm_df = df[df["Verification"].str.strip().str.upper() == "NORMALIZATION"]
-        for idx, row in norm_df.iterrows():
-            faq = row["FAQ"]
-            normalized_value = row["Answers"]
-            if faq and normalized_value:
-                variants = [v.strip().lower() for v in faq.split(",")]
-                for variant in variants:
-                    mapping[variant] = normalized_value.lower()
-    return mapping
-
 def get_vehicle_type(client_text):
     """
     Определяет тип транспортного средства на основе входящего текста.
-    Применяет лемматизацию для нормализации терминов и использует правила нормализации из Bible.xlsx.
-    Если найдено совпадение по правилу нормализации, возвращается нормализованное значение.
-    Если правил нет – выполняется поиск по данным, полученным с сайта.
+    Применяет лемматизацию для нормализации терминов и использует заданные алиасы.
+    Если правило нормализации из Bible.xlsx не интегрировано, то вся системная информация берется из столбца B (с Verification = "Rule").
     """
     normalized_text = lemmatize_text(client_text.lower())
     logger.info(f"Normalized text: {normalized_text}")
     
-    mapping = get_normalization_mapping()
-    for variant, normalized_value in mapping.items():
-        if variant in normalized_text:
-            logger.info(f"Normalization rule applied: found '{variant}' in input; mapping to '{normalized_value}'")
-            return normalized_value
+    # Проверка заданных алиасов
+    aliases = {
+        "грузовик 17 м": "standard truck with trailer (up to 17m)",
+        "грузовик 17м": "standard truck with trailer (up to 17m)",
+        "фура": "standard truck with trailer (up to 17m)"
+    }
+    if client_text.lower() in aliases:
+        mapped = aliases[client_text.lower()]
+        logger.info(f"Alias mapping applied: '{client_text.lower()}' -> '{mapped}'")
+        return mapped.lower()
     
+    # Если нет алиасов, используем данные с сайта
     from price import get_ferry_prices
     data = get_ferry_prices()
     vehicle_types = list(data.keys())
@@ -152,12 +131,14 @@ def prepare_chat_context(client_code):
         logger.warning(get_rule("bible_not_available"))
         import pandas as pd
         bible_df = pd.DataFrame(columns=["FAQ", "Answers", "Verification", "rule"])
+    # Фильтруем строки, где Verification == "Rule" – обязательные инструкции для агента (не раскрываются клиенту)
     rules_df = bible_df[bible_df["Verification"].str.strip().str.upper() == "RULE"]
     system_rules = rules_df["Answers"].dropna().tolist()
     system_rule_text = "\n".join(system_rules)
     system_message = {"role": "system", "content": system_rule_text}
     messages.append(system_message)
     
+    # Поиск истории переписки клиента
     spreadsheet_id = find_client_file_id(client_code)
     if spreadsheet_id:
         sheets_service = get_sheets_service()
