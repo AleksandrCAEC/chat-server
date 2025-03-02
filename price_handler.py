@@ -66,6 +66,11 @@ def check_ferry_price(vehicle_type, direction="Ro_Ge"):
         website_price_str = remove_timestamp(website_price_str).strip()
         logger.info(f"Price for {vehicle_type}: '{website_price_str}'")
         
+        # Если найдено более одного совпадения вида "<число> (EUR)", берем последнее – актуальную цену
+        prices_found = re.findall(r'\d+\s*\(EUR\)', website_price_str)
+        if prices_found:
+            website_price_str = prices_found[-1]
+        
         if not re.search(r'\d', website_price_str) or website_price_str.upper() in ["PRICE_QUERY", "BASE_PRICE"]:
             logger.info(f"{get_rule('invalid_price_returned')} for {vehicle_type}")
             return website_price_str
