@@ -1,6 +1,10 @@
 import inspect
+# Определяем функцию-обёртку, которая возвращает ровно 4 значения, как в старом inspect.getargspec
+def getargspec(func):
+    fas = inspect.getfullargspec(func)
+    return fas.args, fas.varargs, fas.varkw, fas.defaults
 if not hasattr(inspect, 'getargspec'):
-    inspect.getargspec = inspect.getfullargspec
+    inspect.getargspec = getargspec
 
 import os
 import re
@@ -152,7 +156,6 @@ def prepare_chat_context(client_code):
     system_message = {"role": "system", "content": system_rule_text}
     messages.append(system_message)
     
-    # Поиск истории переписки клиента.
     spreadsheet_id = find_client_file_id(client_code)
     if spreadsheet_id:
         sheets_service = get_sheets_service()
