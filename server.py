@@ -54,39 +54,49 @@ PRICE_KEYWORDS = ["цена", "прайс"]
 
 def lemmatize_text(text):
     """
-    Функция нормализует входящий текст, приводя каждое слово к его начальной (лемматизированной) форме.
+    Приводит каждое слово входящего текста к его начальной (лемматизированной) форме.
     """
     words = text.split()
     lemmatized_words = [morph.parse(word)[0].normal_form for word in words]
     return " ".join(lemmatized_words)
 
+def get_normalization_mapping():
+    """
+    Загружает правила нормализации из Bible.xlsx.
+    Ожидается, что строки с Verification == "Normalization" содержат:
+      - FAQ: варианты термина, разделённые запятыми (например, "фура, фуры, фуре, фурой")
+      - Answers: нормализованное название транспортного средства (например, "standard truck with trailer (up to 17m)")
+    """
+    df = load_bible_data()
+    mapping = {}
+    if df is not None and not df.empty:
+        norm_df = df[df["Verification"].str.strip().str.upper() == "NORMALIZATION"]
+        for idx, row in norm_df.iterrows():
+            faq = row["FAQ"]
+            normalized_value = row["Answers"]
+            if faq and normalized_value:
+                variants = [v.strip().lower() for v in faq.split(",")]
+                for variant in variants:
+                    mapping[variant] = normalized_value.lower()
+    return mapping
+
 def get_vehicle_type(client_text):
     """
     Определяет тип транспортного средства на основе входящего текста.
-    Использует морфологическую обработку для нормализации терминов.
-    Если в нормализованном тексте обнаружено слово "фура" или "еврофура", 
-    возвращается 'standard truck with trailer (up to 17m)' в соответствии с правилом из Bible.xlsx.
+    Применяет морфологическую обработку для нормализации терминов и использует правила нормализации из Bible.xlsx.
+    Если найдено совпадение по правилу нормализации, возвращается нормализованное значение.
+    Если правил нет – выполняется поиск по данным, полученным с сайта.
     """
-    # Приводим исходный текст к нижнему регистру и лемматизируем его
     normalized_text = lemmatize_text(client_text.lower())
     logger.info(f"Normalized text: {normalized_text}")
     
-    # Применяем правило из Bible.xlsx: все формы слова "фура" или "еврофура" нормализуются
-    if "фура" in normalized_text or "еврофура" in normalized_text:
-        logger.info("Detected lemma 'фура' or 'еврофура' in input. Mapping to 'standard truck with trailer (up to 17m)'.")
-        return "standard truck with trailer (up to 17m)"
+    mapping = get_normalization_mapping()
+    for variant, normalized_value in mapping.items():
+        if variant in normalized_text:
+            logger.info(f"Normalization rule applied: found '{variant}' in input; mapping to '{normalized_value}'")
+            return normalized_value
     
-    # Проверяем алиасы для конкретных вариантов
-    aliases = {
-        "грузовик 17 м": "standard truck with trailer (up to 17m)",
-        "грузовик 17м": "standard truck with trailer (up to 17m)"
-    }
-    if client_text.lower() in aliases:
-        mapped = aliases[client_text.lower()]
-        logger.info(f"Alias mapping applied: '{client_text.lower()}' -> '{mapped}'")
-        return mapped
-    
-    # Используем данные с сайта
+    # Если правила не сработали, используем данные с сайта
     from price import get_ferry_prices
     data = get_ferry_prices()
     vehicle_types = list(data.keys())
@@ -94,7 +104,7 @@ def get_vehicle_type(client_text):
     if matches:
         for vt in vehicle_types:
             if vt.lower() == matches[0]:
-                logger.info(f"Vehicle type identified: {vt}")
+                logger.info(f"Vehicle type identified from site data: {vt}")
                 return vt.lower()
     logger.info(get_rule("vehicle_type_not_identified"))
     return None
@@ -130,15 +140,13 @@ def prepare_chat_context(client_code):
         logger.warning(get_rule("bible_not_available"))
         import pandas as pd
         bible_df = pd.DataFrame(columns=["FAQ", "Answers", "Verification", "rule"])
-    # Фильтруем строки, где Verification == "Rule"
+    # Фильтруем строки, где Verification == "Rule" (внутренние обязательные инструкции для агента)
     rules_df = bible_df[bible_df["Verification"].str.strip().str.upper() == "RULE"]
     system_rules = rules_df["Answers"].dropna().tolist()
     system_rule_text = "\n".join(system_rules)
-    # Это внутреннее правило для агента, которое не передается клиенту
     system_message = {"role": "system", "content": system_rule_text}
     messages.append(system_message)
     
-    # Поиск истории переписки клиента
     spreadsheet_id = find_client_file_id(client_code)
     if spreadsheet_id:
         sheets_service = get_sheets_service()
@@ -232,15 +240,14 @@ def chat():
                 response_message = f"{get_rule('thank_you_message')} {final_price}"
                 del pending_guiding[client_code]
         elif any(keyword in user_message.lower() for keyword in PRICE_KEYWORDS):
-            # Определяем направление доставки на основе порядка упоминания слов "поти" и "констанц" в сообщении
             msg_lower = user_message.lower()
             if "поти" in msg_lower and "констанц" in msg_lower:
                 if msg_lower.index("поти") < msg_lower.index("констанц"):
-                    direction = "Ge_Ro"  # Из Поти в Констанцу
+                    direction = "Ge_Ro"
                 else:
-                    direction = "Ro_Ge"  # Из Констанцы в Поти
+                    direction = "Ro_Ge"
             else:
-                direction = "Ro_Ge"  # Значение по умолчанию
+                direction = "Ro_Ge"
 
             vehicle_type = get_vehicle_type(user_message)
             if not vehicle_type:
@@ -269,12 +276,10 @@ def chat():
         logger.error(f"Error in /chat: {e}")
         return jsonify({'error': str(e)}), 500
 
-# Новый эндпоинт для обработки запроса цены (/get-price)
 @app.route('/get-price', methods=['POST'])
 def get_price():
     try:
         data = request.json
-        # Поддержка ключей "vehicle" и "vehicle_description"
         vehicle_text = data.get("vehicle", data.get("vehicle_description", ""))
         direction = data.get("direction", "Ro_Ge")
         if not vehicle_text:
