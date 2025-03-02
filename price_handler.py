@@ -43,10 +43,13 @@ def check_ferry_price(vehicle_type, direction="Ro_Ge"):
         website_prices = get_ferry_prices()
         logger.info(f"{get_rule('website_prices_received')}: {website_prices}")
         
-        # Выполняем поиск по типу транспортного средства без учета регистра
+        # Нормализуем входящее значение и ключи из сайта: удаляем содержимое в скобках, приводим к нижнему регистру
         key_match = None
+        normalized_input = vehicle_type.strip().lower()
         for key in website_prices:
-            if key.lower() == vehicle_type:
+            normalized_key = re.sub(r'\s*\(.*\)', '', key).strip().lower()
+            # Проверяем равенство или частичное совпадение
+            if normalized_input == normalized_key or normalized_input in normalized_key or normalized_key in normalized_input:
                 key_match = key
                 break
         
