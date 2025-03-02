@@ -100,15 +100,22 @@ def get_openai_response(messages):
 def prepare_chat_context(client_code):
     messages = []
     bible_df = load_bible_data()
-    # Если данные из Bible недоступны или пусты, используем пустой DataFrame, чтобы не прерывать работу
+    # Если данные из Bible недоступны или пусты, используем пустой DataFrame
     if bible_df is None or bible_df.empty:
         logger.warning(get_rule("bible_not_available"))
         import pandas as pd
         bible_df = pd.DataFrame(columns=["FAQ", "Answers", "Verification", "rule"])
-    system_rule = "\n".join(bible_df["rule"].dropna().tolist())
-    system_message = {"role": "system", "content": system_rule}
+    # Фильтруем строки, где Verification == "Rule"
+    rules_df = bible_df[bible_df["Verification"].str.strip().str.upper() == "RULE"]
+    # Используем столбец Answers для формирования внутреннего системного правила
+    system_rules = rules_df["Answers"].dropna().tolist()
+    system_rule_text = "\n".join(system_rules)
+    # Это внутреннее правило – ассистент должен его соблюдать, но не раскрывать клиенту
+    system_message = {"role": "system", "content": system_rule_text}
     messages.append(system_message)
     
+    # Поиск истории переписки клиента. Функция find_client_file_id должна вернуть ID файла клиента,
+    # который хранится в "./CAEC_API_Data/BIG_DATA/Data_CAEC_client/" и связан с файлом ClientData.xlsx.
     spreadsheet_id = find_client_file_id(client_code)
     if spreadsheet_id:
         sheets_service = get_sheets_service()
@@ -173,7 +180,6 @@ def chat():
         update_last_visit(client_code)
         update_activity_status()
         
-        # Если клиент уже находится в процессе уточнения параметров, обрабатываем его ответы (здесь оставляем без изменений)
         if client_code in pending_guiding:
             pending = pending_guiding[client_code]
             pending.setdefault("answers", []).append(user_message)
