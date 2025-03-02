@@ -1,8 +1,9 @@
 import inspect
+# Monkey-patch: определяем getargspec, возвращающую ровно 4 значения.
+def getargspec(func):
+    fas = inspect.getfullargspec(func)
+    return fas.args, fas.varargs, fas.varkw, fas.defaults
 if not hasattr(inspect, 'getargspec'):
-    def getargspec(func):
-        fas = inspect.getfullargspec(func)
-        return fas.args, fas.varargs, fas.varkw, fas.defaults
     inspect.getargspec = getargspec
 
 import os
@@ -23,8 +24,14 @@ from price_handler import check_ferry_price, parse_price, remove_timestamp, get_
 from flask_cors import CORS
 import openpyxl
 
+# Импорт pymorphy2, но не инициализируем глобально – используем ленивую инициализацию
 import pymorphy2
-morph = pymorphy2.MorphAnalyzer()
+_morph = None
+def get_morph():
+    global _morph
+    if _morph is None:
+        _morph = pymorphy2.MorphAnalyzer()
+    return _morph
 
 from telegram import Update, Bot
 from telegram.ext import (
@@ -59,11 +66,21 @@ pending_guiding = {}
 PRICE_KEYWORDS = ["цена", "прайс"]
 
 def lemmatize_text(text):
+    """
+    Приводит каждое слово входящего текста к его начальной (лемматизированной) форме с использованием ленивой инициализации pymorphy2.
+    """
+    morph = get_morph()
     words = text.split()
     lemmatized_words = [morph.parse(word)[0].normal_form for word in words]
     return " ".join(lemmatized_words)
 
 def get_normalization_mapping():
+    """
+    Загружает правила нормализации из Bible.xlsx.
+    Ожидается, что строки с Verification == "Normalization" содержат:
+      - FAQ: варианты термина, разделённые запятыми (например, "фура, фуры, фуре, фурой")
+      - Answers: нормализованное название транспортного средства (например, "standard truck with trailer (up to 17m)")
+    """
     df = load_bible_data()
     mapping = {}
     if df is not None and not df.empty:
@@ -78,6 +95,12 @@ def get_normalization_mapping():
     return mapping
 
 def get_vehicle_type(client_text):
+    """
+    Определяет тип транспортного средства на основе входящего текста.
+    Применяет лемматизацию для нормализации терминов и использует правила нормализации из Bible.xlsx.
+    Если найдено совпадение по правилу нормализации, возвращается нормализованное значение.
+    Если правил нет – выполняется поиск по данным, полученным с сайта.
+    """
     normalized_text = lemmatize_text(client_text.lower())
     logger.info(f"Normalized text: {normalized_text}")
     
