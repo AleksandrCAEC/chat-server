@@ -68,29 +68,45 @@ def lemmatize_text(text):
     lemmatized_words = [morph.parse(word)[0].normal_form for word in words]
     return " ".join(lemmatized_words)
 
+def get_alias_mapping():
+    """
+    Загружает правила нормализации (алиасы) из Bible.xlsx.
+    Ожидается, что строки с Verification равным "Rule" содержат:
+      - FAQ: варианты термина, разделённые запятыми (например, "фура, фуры, фуре, фурой")
+      - Answers: нормализованное название транспортного средства (например, "standard truck with trailer (up to 17m)")
+    """
+    df = load_bible_data()
+    mapping = {}
+    if df is not None and not df.empty:
+        rule_df = df[df["Verification"].str.strip().str.upper() == "RULE"]
+        for idx, row in rule_df.iterrows():
+            faq = row.get("FAQ", "")
+            normalized_value = row.get("Answers", "")
+            # Используем только те строки, где FAQ содержит несколько вариантов (предполагается, что это алиасы)
+            if faq and normalized_value and ("," in faq):
+                variants = [v.strip().lower() for v in faq.split(",")]
+                for variant in variants:
+                    mapping[variant] = normalized_value.lower()
+    if not mapping:
+        logger.warning("Alias mapping is empty. Please ensure Bible.xlsx contains alias rules in rows with Verification 'Rule'.")
+    return mapping
+
 def get_vehicle_type(client_text):
     """
     Определяет тип транспортного средства на основе входящего текста.
-    Применяет лемматизацию для нормализации терминов и проверяет наличие ключевых слов в лемматизированном тексте.
-    Если, например, обнаруживается любая форма слова "фура", возвращается
-    "standard truck with trailer (up to 17m)". Если алиасы не сработали, производится поиск по данным с сайта.
+    Применяет лемматизацию для нормализации терминов и использует правила нормализации (алиасы)
+    из файла Bible.xlsx (строки с Verification равным "Rule", где FAQ содержит варианты терминов).
+    Если правило сработало, возвращается нормализованное значение; иначе выполняется поиск по данным с сайта.
     """
     normalized_text = lemmatize_text(client_text.lower())
     logger.info(f"Normalized text: {normalized_text}")
     
-    # Фиксированный словарь алиасов
-    aliases = {
-        "грузовик 17 м": "standard truck with trailer (up to 17m)",
-        "грузовик 17м": "standard truck with trailer (up to 17m)",
-        "фура": "standard truck with trailer (up to 17m)"
-    }
-    # Проверяем, содержится ли ключ из алиасов в лемматизированном тексте
-    for key, value in aliases.items():
-        if key in normalized_text:
-            logger.info(f"Alias mapping applied: found '{key}' in normalized text; mapping to '{value}'")
-            return value
+    alias_mapping = get_alias_mapping()
+    for variant, normalized_value in alias_mapping.items():
+        if variant in normalized_text:
+            logger.info(f"Alias mapping applied from Bible.xlsx: found '{variant}' in input; mapping to '{normalized_value}'")
+            return normalized_value
     
-    # Если алиасы не сработали, используем данные с сайта
     from price import get_ferry_prices
     data = get_ferry_prices()
     vehicle_types = list(data.keys())
