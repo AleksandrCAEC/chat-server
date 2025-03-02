@@ -70,7 +70,13 @@ def check_ferry_price(vehicle_type, direction="Ro_Ge"):
             logger.info(f"{get_rule('invalid_price_returned')} for {vehicle_type}")
             return website_price_str
         
-        response_message = get_rule("price_response_template").format(
+        # Получаем шаблон для формирования ответа
+        template = get_rule("price_response_template")
+        # Если шаблон не задан (т.е. возвращается заглушка), используем fallback-шаблон
+        if template.startswith("<") and template.endswith(">"):
+            template = "Стоимость доставки {vehicle_type} ({direction}): {price}"
+        
+        response_message = template.format(
             vehicle_type=vehicle_type,
             direction=direction.replace('_', ' '),
             price=website_price_str
