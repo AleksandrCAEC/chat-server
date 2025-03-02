@@ -16,6 +16,10 @@ from price_handler import check_ferry_price, parse_price, remove_timestamp, get_
 from flask_cors import CORS
 import openpyxl
 
+# Импортируем pymorphy2 для лемматизации
+import pymorphy2
+morph = pymorphy2.MorphAnalyzer()
+
 from telegram import Update, Bot
 from telegram.ext import (
     ApplicationBuilder,
@@ -48,24 +52,45 @@ pending_guiding = {}
 
 PRICE_KEYWORDS = ["цена", "прайс"]
 
+def lemmatize_text(text):
+    """
+    Функция нормализует входящий текст, приводя каждое слово к его начальной (лемматизированной) форме.
+    """
+    words = text.split()
+    lemmatized_words = [morph.parse(word)[0].normal_form for word in words]
+    return " ".join(lemmatized_words)
+
 def get_vehicle_type(client_text):
-    client_text_lower = client_text.lower()
-    # Применяем алиас-словарь для русских названий транспортных средств
+    """
+    Определяет тип транспортного средства на основе входящего текста.
+    Использует морфологическую обработку для нормализации терминов.
+    Если в нормализованном тексте обнаружено слово "фура" или "еврофура", 
+    возвращается 'standard truck with trailer (up to 17m)' в соответствии с правилом из Bible.xlsx.
+    """
+    # Приводим исходный текст к нижнему регистру и лемматизируем его
+    normalized_text = lemmatize_text(client_text.lower())
+    logger.info(f"Normalized text: {normalized_text}")
+    
+    # Применяем правило из Bible.xlsx: все формы слова "фура" или "еврофура" нормализуются
+    if "фура" in normalized_text or "еврофура" in normalized_text:
+        logger.info("Detected lemma 'фура' or 'еврофура' in input. Mapping to 'standard truck with trailer (up to 17m)'.")
+        return "standard truck with trailer (up to 17m)"
+    
+    # Проверяем алиасы для конкретных вариантов
     aliases = {
-        "грузовик 17 м": "Standard truck with trailer (up to 17M)",
-        "грузовик 17м": "Standard truck with trailer (up to 17M)",
-        "фура": "Truck (up to 10M)"
-        # Дополнительные соответствия можно добавить здесь
+        "грузовик 17 м": "standard truck with trailer (up to 17m)",
+        "грузовик 17м": "standard truck with trailer (up to 17m)"
     }
-    if client_text_lower in aliases:
-        mapped = aliases[client_text_lower]
-        logger.info(f"Alias mapping applied: '{client_text_lower}' -> '{mapped}'")
-        return mapped.lower()
-    # Всегда используем данные с сайта, поскольку USE_PRICE_FILE = False
+    if client_text.lower() in aliases:
+        mapped = aliases[client_text.lower()]
+        logger.info(f"Alias mapping applied: '{client_text.lower()}' -> '{mapped}'")
+        return mapped
+    
+    # Используем данные с сайта
     from price import get_ferry_prices
     data = get_ferry_prices()
     vehicle_types = list(data.keys())
-    matches = difflib.get_close_matches(client_text_lower, [vt.lower() for vt in vehicle_types], n=1, cutoff=0.3)
+    matches = difflib.get_close_matches(client_text.lower(), [vt.lower() for vt in vehicle_types], n=1, cutoff=0.3)
     if matches:
         for vt in vehicle_types:
             if vt.lower() == matches[0]:
@@ -107,15 +132,13 @@ def prepare_chat_context(client_code):
         bible_df = pd.DataFrame(columns=["FAQ", "Answers", "Verification", "rule"])
     # Фильтруем строки, где Verification == "Rule"
     rules_df = bible_df[bible_df["Verification"].str.strip().str.upper() == "RULE"]
-    # Используем столбец Answers для формирования внутреннего системного правила
     system_rules = rules_df["Answers"].dropna().tolist()
     system_rule_text = "\n".join(system_rules)
-    # Это внутреннее правило – ассистент должен его соблюдать, но не раскрывать клиенту
+    # Это внутреннее правило для агента, которое не передается клиенту
     system_message = {"role": "system", "content": system_rule_text}
     messages.append(system_message)
     
-    # Поиск истории переписки клиента. Функция find_client_file_id должна вернуть ID файла клиента,
-    # который хранится в "./CAEC_API_Data/BIG_DATA/Data_CAEC_client/" и связан с файлом ClientData.xlsx.
+    # Поиск истории переписки клиента
     spreadsheet_id = find_client_file_id(client_code)
     if spreadsheet_id:
         sheets_service = get_sheets_service()
