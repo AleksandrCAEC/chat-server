@@ -71,32 +71,37 @@ def lemmatize_text(text):
 def get_alias_mapping():
     """
     Загружает правила нормализации (алиасы) из Bible.xlsx.
-    Ожидается, что строки с Verification равным "Rule" содержат:
-      - FAQ: варианты термина, разделённые запятыми (например, "фура, фуры, фуре, фурой")
-      - Answers: нормализованное название транспортного средства (например, "standard truck with trailer (up to 17m)")
+    Для строк с Verification равным "Rule" информация берется исключительно из столбца B (Answers).
+    Ожидается, что значение в Answers имеет формат:
+      alias1, alias2, alias3 = normalized_value
+    Например:
+      фура, фуры, фуре, фурой = standard truck with trailer (up to 17m)
+    Если строка не содержит символ '=' – такая запись игнорируется.
     """
     df = load_bible_data()
     mapping = {}
     if df is not None and not df.empty:
         rule_df = df[df["Verification"].str.strip().str.upper() == "RULE"]
         for idx, row in rule_df.iterrows():
-            faq = row.get("FAQ", "")
-            normalized_value = row.get("Answers", "")
-            # Используем только те строки, где FAQ содержит несколько вариантов (предполагается, что это алиасы)
-            if faq and normalized_value and ("," in faq):
-                variants = [v.strip().lower() for v in faq.split(",")]
-                for variant in variants:
-                    mapping[variant] = normalized_value.lower()
+            answer_text = row.get("Answers", "")
+            if answer_text and "=" in answer_text:
+                parts = answer_text.split("=")
+                if len(parts) >= 2:
+                    aliases_part = parts[0].strip().lower()
+                    normalized_value = parts[1].strip().lower()
+                    variants = [v.strip() for v in aliases_part.split(",")]
+                    for variant in variants:
+                        mapping[variant] = normalized_value
     if not mapping:
-        logger.warning("Alias mapping is empty. Please ensure Bible.xlsx contains alias rules in rows with Verification 'Rule'.")
+        logger.warning("Alias mapping is empty. Please ensure Bible.xlsx contains alias rules in rows with Verification 'Rule' using the format 'alias1, alias2 = normalized_value'.")
     return mapping
 
 def get_vehicle_type(client_text):
     """
     Определяет тип транспортного средства на основе входящего текста.
     Применяет лемматизацию для нормализации терминов и использует правила нормализации (алиасы)
-    из файла Bible.xlsx (строки с Verification равным "Rule", где FAQ содержит варианты терминов).
-    Если правило сработало, возвращается нормализованное значение; иначе выполняется поиск по данным с сайта.
+    из файла Bible.xlsx (строки с Verification равным "Rule"). Если найдено совпадение, возвращается
+    нормализованное значение; иначе производится поиск по данным с сайта.
     """
     normalized_text = lemmatize_text(client_text.lower())
     logger.info(f"Normalized text: {normalized_text}")
