@@ -43,15 +43,22 @@ def check_ferry_price(vehicle_type, direction="Ro_Ge"):
         website_prices = get_ferry_prices()
         logger.info(f"{get_rule('website_prices_received')}: {website_prices}")
         
-        if vehicle_type not in website_prices:
+        # Выполняем поиск по типу транспортного средства без учета регистра
+        key_match = None
+        for key in website_prices:
+            if key.lower() == vehicle_type:
+                key_match = key
+                break
+        
+        if key_match is None:
             msg = get_rule("price_not_found").format(vehicle_type=vehicle_type)
             logger.error(msg)
             return msg
         
         if direction == "Ro_Ge":
-            website_price_str = website_prices[vehicle_type].get("price_Ro_Ge", "")
+            website_price_str = website_prices[key_match].get("price_Ro_Ge", "")
         else:
-            website_price_str = website_prices[vehicle_type].get("price_Ge_Ro", "")
+            website_price_str = website_prices[key_match].get("price_Ge_Ro", "")
         
         website_price_str = remove_timestamp(website_price_str).strip()
         logger.info(f"Price for {vehicle_type}: '{website_price_str}'")
@@ -65,10 +72,10 @@ def check_ferry_price(vehicle_type, direction="Ro_Ge"):
             direction=direction.replace('_', ' '),
             price=website_price_str
         )
-        remark = website_prices[vehicle_type].get("remark", "")
+        remark = website_prices[key_match].get("remark", "")
         if remark:
             response_message += " " + remark
-        conditions = website_prices[vehicle_type].get("conditions", [])
+        conditions = website_prices[key_match].get("conditions", [])
         if conditions:
             response_message += "\n" + get_rule("guiding_questions_prompt")
             for marker in conditions:
