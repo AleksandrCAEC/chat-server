@@ -10,8 +10,10 @@ from googleapiclient.discovery import build
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
-# Если не задан, оставляем значение по умолчанию.
+# Если используется Google Sheets, здесь задается его ID;
+# если ID не задан (или имеет значение по умолчанию), используется локальный файл.
 BIBLE_SPREADSHEET_ID = "YOUR_BIBLE_SPREADSHEET_ID"
+LOCAL_BIBLE_PATH = "./CAEC_API_Data/BIG_DATA/Bible.xlsx"
 
 def get_sheets_service():
     try:
@@ -27,18 +29,17 @@ def get_sheets_service():
 def load_bible_data():
     # Если ID не задан корректно или равен значению по умолчанию, используем локальный файл
     if not BIBLE_SPREADSHEET_ID or BIBLE_SPREADSHEET_ID.strip() == "YOUR_BIBLE_SPREADSHEET_ID":
-        logger.warning("Bible spreadsheet ID is not set or is default. Attempting to load local bible file.")
+        logger.warning("Bible spreadsheet ID is not set or is default. Attempting to load local Bible file.")
         try:
-            local_file = "bible.xlsx"
-            if os.path.exists(local_file):
-                df = pd.read_excel(local_file)
-                logger.info(f"Local bible file loaded. Records: {len(df)}")
+            if os.path.exists(LOCAL_BIBLE_PATH):
+                df = pd.read_excel(LOCAL_BIBLE_PATH, sheet_name="Bible")
+                logger.info(f"Local Bible file loaded. Records: {len(df)}")
                 return df
             else:
-                logger.error("Local bible file not found. Returning empty DataFrame.")
+                logger.error(f"Local Bible file not found at {LOCAL_BIBLE_PATH}. Returning empty DataFrame.")
                 return pd.DataFrame(columns=["FAQ", "Answers", "Verification", "rule"])
         except Exception as e:
-            logger.error(f"Error loading local bible file: {e}")
+            logger.error(f"Error loading local Bible file: {e}")
             return pd.DataFrame(columns=["FAQ", "Answers", "Verification", "rule"])
     try:
         service = get_sheets_service()
@@ -52,22 +53,21 @@ def load_bible_data():
             df = pd.DataFrame(values, columns=["FAQ", "Answers", "Verification", "rule"])
         else:
             df = pd.DataFrame(columns=["FAQ", "Answers", "Verification", "rule"])
-        logger.info(f"Bible data loaded. Records: {len(df)}")
+        logger.info(f"Bible data loaded from Google Sheets. Records: {len(df)}")
         return df
     except Exception as e:
         logger.error(f"Error loading Bible data from Google Sheets: {e}")
-        # Пытаемся загрузить локальный файл как запасной вариант
+        # Попытка загрузки локального файла как резервного варианта
         try:
-            local_file = "bible.xlsx"
-            if os.path.exists(local_file):
-                df = pd.read_excel(local_file)
-                logger.info(f"Local bible file loaded as fallback. Records: {len(df)}")
+            if os.path.exists(LOCAL_BIBLE_PATH):
+                df = pd.read_excel(LOCAL_BIBLE_PATH, sheet_name="Bible")
+                logger.info(f"Local Bible file loaded as fallback. Records: {len(df)}")
                 return df
             else:
-                logger.error("Local bible file not found. Returning empty DataFrame.")
+                logger.error(f"Local Bible file not found at {LOCAL_BIBLE_PATH}. Returning empty DataFrame.")
                 return pd.DataFrame(columns=["FAQ", "Answers", "Verification", "rule"])
         except Exception as e2:
-            logger.error(f"Error loading local bible file as fallback: {e2}")
+            logger.error(f"Error loading local Bible file as fallback: {e2}")
             return pd.DataFrame(columns=["FAQ", "Answers", "Verification", "rule"])
 
 def upload_or_update_file(file_name, file_stream):
@@ -116,8 +116,8 @@ def save_bible_pair(question, answer):
         raise
 
 def get_rule(rule_key):
-    # Функция получает правило из bible.xlsx (столбец rule).
-    # Здесь возвращается заглушка; реальная реализация должна считывать нужное правило.
+    # Заглушка для получения правил из Bible.xlsx.
+    # В реальной реализации эта функция может искать нужную строку по rule_key.
     return f"<{rule_key}>"
 
 if __name__ == "__main__":
