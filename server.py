@@ -1,3 +1,7 @@
+import inspect
+if not hasattr(inspect, 'getargspec'):
+    inspect.getargspec = inspect.getfullargspec
+
 import os
 import re
 import difflib
@@ -144,9 +148,11 @@ def prepare_chat_context(client_code):
     rules_df = bible_df[bible_df["Verification"].str.strip().str.upper() == "RULE"]
     system_rules = rules_df["Answers"].dropna().tolist()
     system_rule_text = "\n".join(system_rules)
+    # Это внутреннее правило для агента, которое не передается клиенту
     system_message = {"role": "system", "content": system_rule_text}
     messages.append(system_message)
     
+    # Поиск истории переписки клиента.
     spreadsheet_id = find_client_file_id(client_code)
     if spreadsheet_id:
         sheets_service = get_sheets_service()
